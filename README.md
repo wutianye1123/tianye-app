@@ -2,6 +2,8 @@
 
 一个基于 Electron + HTML5 的游戏合集，包含多款网页小游戏。
 
+[English](README_EN.md)
+
 ## 包含游戏
 
 | 游戏 | 类型 |
