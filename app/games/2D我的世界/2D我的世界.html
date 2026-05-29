@@ -1,0 +1,2681 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D 我的世界</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+        }
+
+        #gameContainer {
+            position: relative;
+        }
+
+        #gameCanvas {
+            border: 4px solid #4a4a4a;
+            background: #87CEEB;
+            display: block;
+        }
+
+        #ui {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 4px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 8px;
+            border-radius: 8px;
+        }
+
+        .slot {
+            width: 50px;
+            height: 50px;
+            background: rgba(139, 139, 139, 0.8);
+            border: 3px solid #555;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .slot.selected {
+            border-color: #fff;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+        }
+
+        .slot-number {
+            position: absolute;
+            bottom: 2px;
+            right: 4px;
+            color: white;
+            font-size: 12px;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        .item-count {
+            position: absolute;
+            bottom: 2px;
+            left: 4px;
+            color: white;
+            font-size: 12px;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        .block-preview {
+            width: 40px;
+            height: 40px;
+            border: 2px solid rgba(0, 0, 0, 0.3);
+            image-rendering: pixelated;
+        }
+
+        #stats {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 14px;
+            line-height: 1.8;
+        }
+
+        #instructions {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            line-height: 1.6;
+            max-width: 250px;
+        }
+
+        .health-bar, .hunger-bar {
+            width: 200px;
+            height: 20px;
+            background: #333;
+            border: 2px solid #555;
+            margin-top: 5px;
+        }
+
+        .health-fill {
+            height: 100%;
+            background: linear-gradient(to right, #ff0000, #ff4444);
+            transition: width 0.3s;
+        }
+
+        .hunger-fill {
+            height: 100%;
+            background: linear-gradient(to right, #cc6600, #ff9933);
+            transition: width 0.3s;
+        }
+
+        #craftingMenu {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(198, 198, 198, 0.95);
+            padding: 20px;
+            border-radius: 10px;
+            border: 4px solid #333;
+            z-index: 100;
+        }
+
+        #craftingMenu.show {
+            display: block;
+        }
+
+        #tradeMenu {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(198, 198, 198, 0.95);
+            padding: 20px;
+            border-radius: 10px;
+            border: 4px solid #333;
+            z-index: 100;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        #tradeMenu.show {
+            display: block;
+        }
+
+        #tradeMenu::-webkit-scrollbar {
+            width: 10px;
+        }
+
+        #tradeMenu::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 5px;
+        }
+
+        #tradeMenu::-webkit-scrollbar-thumb {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 5px;
+        }
+
+        #tradeMenu::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 0, 0, 0.5);
+        }
+
+        #soundToggle {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            border: 2px solid #555;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-family: 'Courier New', monospace;
+        }
+
+        #soundToggle:hover {
+            background: rgba(0, 0, 0, 0.9);
+            border-color: #888;
+        }
+
+        .crafting-title {
+            color: #333;
+            font-size: 18px;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .recipe {
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.5);
+            margin: 5px 0;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .recipe:hover {
+            background: rgba(255, 255, 255, 0.8);
+        }
+
+        .recipe-items {
+            display: flex;
+            gap: 5px;
+            flex: 1;
+        }
+
+        .recipe-arrow {
+            margin: 0 10px;
+            color: #333;
+            font-size: 20px;
+        }
+
+        .recipe-result {
+            color: #333;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+
+        <div id="stats">
+            <div>生命值:</div>
+            <div class="health-bar">
+                <div class="health-fill" id="healthBar" style="width: 100%"></div>
+            </div>
+            <div style="margin-top: 10px;">饥饿度:</div>
+            <div class="hunger-bar">
+                <div class="hunger-fill" id="hungerBar" style="width: 100%"></div>
+            </div>
+        </div>
+
+        <div id="instructions">
+            <strong>控制说明:</strong><br>
+            WASD/方向键: 移动<br>
+            空格: 跳跃<br>
+            左键按住: 破坏方块/攻击生物<br>
+            左键点击村民: 交易<br>
+            右键: 放置方块/吃食物<br>
+            E: 打开/关闭合成/交易菜单<br>
+            ESC: 关闭菜单<br>
+            1-9: 选择物品<br>
+            滚轮: 切换物品<br>
+            M: 开关声音<br>
+            O: 保存存档<br>
+            L: 读取存档
+        </div>
+
+        <button id="soundToggle">🔊 声音: 开</button>
+
+        <div id="ui"></div>
+
+        <div id="craftingMenu">
+            <div class="crafting-title">合成 (点击制作)</div>
+            <div id="recipeList"></div>
+        </div>
+
+        <div id="tradeMenu">
+            <div class="crafting-title">村民交易</div>
+            <div id="tradeList"></div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== 游戏配置 ====================
+        const CONFIG = {
+            BLOCK_SIZE: 32,
+            WORLD_WIDTH: 200,
+            WORLD_HEIGHT: 64,
+            GRAVITY: 0.5,
+            JUMP_FORCE: 10,
+            MOVE_SPEED: 5,
+            GROUND_LEVEL: 40,
+            PICKUP_RANGE: 80,
+            MAX_HEALTH: 20,
+            MAX_HUNGER: 20
+        };
+
+        // ==================== 方块定义 ====================
+        const BLOCKS = {
+            AIR: 0,
+            GRASS: 1,
+            DIRT: 2,
+            STONE: 3,
+            WOOD: 4,
+            LEAVES: 5,
+            BEDROCK: 6,
+            COAL_ORE: 7,
+            IRON_ORE: 8,
+            PLANKS: 9,
+            COBBLESTONE: 10,
+            SAND: 11,
+            STICK: 12,
+            PORK: 13,
+            BEEF: 14,
+            CHICKEN_MEAT: 15,
+            ROTTEN_FLESH: 16
+        };
+
+        // 方块属性
+        const BLOCK_PROPS = {
+            [BLOCKS.AIR]: { name: '空气', color: 'transparent', hardness: 0, drop: null },
+            [BLOCKS.GRASS]: { name: '草方块', color: '#7CFC00', hardness: 0.6, drop: BLOCKS.DIRT },
+            [BLOCKS.DIRT]: { name: '泥土', color: '#8B4513', hardness: 0.5, drop: BLOCKS.DIRT },
+            [BLOCKS.STONE]: { name: '石头', color: '#808080', hardness: 1.5, drop: BLOCKS.COBBLESTONE },
+            [BLOCKS.WOOD]: { name: '原木', color: '#DEB887', hardness: 2, drop: BLOCKS.WOOD },
+            [BLOCKS.LEAVES]: { name: '树叶', color: '#228B22', hardness: 0.2, drop: null },
+            [BLOCKS.BEDROCK]: { name: '基岩', color: '#2F4F4F', hardness: Infinity, drop: null },
+            [BLOCKS.COAL_ORE]: { name: '煤矿', color: '#696969', hardness: 3, drop: 'coal' },
+            [BLOCKS.IRON_ORE]: { name: '铁矿', color: '#CD853F', hardness: 3, drop: 'iron_ore' },
+            [BLOCKS.PLANKS]: { name: '木板', color: '#DEB887', hardness: 2, drop: BLOCKS.PLANKS },
+            [BLOCKS.COBBLESTONE]: { name: '圆石', color: '#808080', hardness: 2, drop: BLOCKS.COBBLESTONE },
+            [BLOCKS.SAND]: { name: '沙子', color: '#F4A460', hardness: 0.5, drop: BLOCKS.SAND },
+            [BLOCKS.STICK]: { name: '木棍', color: '#8B4513', hardness: 0.5, drop: BLOCKS.STICK },
+            [BLOCKS.PORK]: { name: '猪肉', color: '#FFB6C1', hardness: 0, drop: BLOCKS.PORK, food: 6 },
+            [BLOCKS.BEEF]: { name: '牛肉', color: '#8B4513', hardness: 0, drop: BLOCKS.BEEF, food: 8 },
+            [BLOCKS.CHICKEN_MEAT]: { name: '鸡肉', color: '#FFD700', hardness: 0, drop: BLOCKS.CHICKEN_MEAT, food: 4 },
+            [BLOCKS.ROTTEN_FLESH]: { name: '腐肉', color: '#696969', hardness: 0, drop: BLOCKS.ROTTEN_FLESH, food: 2 }
+        };
+
+        // ==================== 工具定义 ====================
+        const TOOLS = {
+            HAND: 'hand',
+            WOOD_PICKAXE: 'wood_pickaxe',
+            STONE_PICKAXE: 'stone_pickaxe',
+            IRON_PICKAXE: 'iron_pickaxe',
+            WOOD_AXE: 'wood_axe',
+            STONE_AXE: 'stone_axe',
+            IRON_AXE: 'iron_axe',
+            WOOD_SWORD: 'wood_sword',
+            STONE_SWORD: 'stone_sword',
+            IRON_SWORD: 'iron_sword'
+        };
+
+        const TOOL_PROPS = {
+            [TOOLS.HAND]: { name: '手', efficiency: 1, icon: '✋', color: '#FFDAB9', damage: 1 },
+            [TOOLS.WOOD_PICKAXE]: { name: '木镐', efficiency: 2, icon: '⛏️', color: '#DEB887', damage: 2 },
+            [TOOLS.STONE_PICKAXE]: { name: '石镐', efficiency: 3, icon: '⛏️', color: '#808080', damage: 3 },
+            [TOOLS.IRON_PICKAXE]: { name: '铁镐', efficiency: 5, icon: '⛏️', color: '#C0C0C0', damage: 4 },
+            [TOOLS.WOOD_AXE]: { name: '木斧', efficiency: 2, icon: '🪓', color: '#DEB887', damage: 3 },
+            [TOOLS.STONE_AXE]: { name: '石斧', efficiency: 3, icon: '🪓', color: '#808080', damage: 4 },
+            [TOOLS.IRON_AXE]: { name: '铁斧', efficiency: 5, icon: '🪓', color: '#C0C0C0', damage: 5 },
+            [TOOLS.WOOD_SWORD]: { name: '木剑', efficiency: 1, icon: '⚔️', color: '#DEB887', damage: 5 },
+            [TOOLS.STONE_SWORD]: { name: '石剑', efficiency: 1, icon: '⚔️', color: '#808080', damage: 7 },
+            [TOOLS.IRON_SWORD]: { name: '铁剑', efficiency: 1, icon: '⚔️', color: '#C0C0C0', damage: 10 }
+        };
+
+        // 工具对特定方块类型的效率加成
+        const TOOL_BONUS = {
+            [TOOLS.WOOD_PICKAXE]: { [BLOCKS.STONE]: 3, [BLOCKS.COAL_ORE]: 3, [BLOCKS.IRON_ORE]: 3 },
+            [TOOLS.STONE_PICKAXE]: { [BLOCKS.STONE]: 5, [BLOCKS.COAL_ORE]: 5, [BLOCKS.IRON_ORE]: 5 },
+            [TOOLS.IRON_PICKAXE]: { [BLOCKS.STONE]: 10, [BLOCKS.COAL_ORE]: 10, [BLOCKS.IRON_ORE]: 10 },
+            [TOOLS.WOOD_AXE]: { [BLOCKS.WOOD]: 3 },
+            [TOOLS.STONE_AXE]: { [BLOCKS.WOOD]: 5 },
+            [TOOLS.IRON_AXE]: { [BLOCKS.WOOD]: 10 }
+        };
+
+        // ==================== 合成配方 ====================
+        const RECIPES = [
+            {
+                ingredients: [[BLOCKS.WOOD, 1]],
+                result: { item: BLOCKS.PLANKS, count: 4 },
+                name: '原木 -> 木板'
+            },
+            {
+                ingredients: [[BLOCKS.PLANKS, 2]],
+                result: { item: BLOCKS.STICK, count: 4 },
+                name: '木板 -> 木棍'
+            },
+            {
+                ingredients: [[BLOCKS.PLANKS, 3], [BLOCKS.STICK, 2]],
+                result: { item: TOOLS.WOOD_PICKAXE, count: 1, type: 'tool' },
+                name: '木镐'
+            },
+            {
+                ingredients: [[BLOCKS.PLANKS, 3], [BLOCKS.STICK, 2]],
+                result: { item: TOOLS.WOOD_AXE, count: 1, type: 'tool' },
+                name: '木斧'
+            },
+            {
+                ingredients: [[BLOCKS.COBBLESTONE, 3], [BLOCKS.STICK, 2]],
+                result: { item: TOOLS.STONE_PICKAXE, count: 1, type: 'tool' },
+                name: '石镐'
+            },
+            {
+                ingredients: [[BLOCKS.COBBLESTONE, 3], [BLOCKS.STICK, 2]],
+                result: { item: TOOLS.STONE_AXE, count: 1, type: 'tool' },
+                name: '石斧'
+            },
+            {
+                ingredients: [[BLOCKS.PLANKS, 2], [BLOCKS.STICK, 1]],
+                result: { item: TOOLS.WOOD_SWORD, count: 1, type: 'tool' },
+                name: '木剑'
+            },
+            {
+                ingredients: [[BLOCKS.COBBLESTONE, 2], [BLOCKS.STICK, 1]],
+                result: { item: TOOLS.STONE_SWORD, count: 1, type: 'tool' },
+                name: '石剑'
+            }
+        ];
+
+        // ==================== 交易配置 ====================
+        const TRADES = [
+            {
+                ingredient: { item: BLOCKS.DIRT, count: 10 },
+                result: { item: BLOCKS.PLANKS, count: 1 },
+                name: '10泥土 -> 1木板'
+            },
+            {
+                ingredient: { item: BLOCKS.COBBLESTONE, count: 5 },
+                result: { item: BLOCKS.STICK, count: 4 },
+                name: '5圆石 -> 4木棍'
+            },
+            {
+                ingredient: { item: BLOCKS.WOOD, count: 2 },
+                result: { item: BLOCKS.PLANKS, count: 8 },
+                name: '2原木 -> 8木板'
+            },
+            {
+                ingredient: { item: BLOCKS.SAND, count: 3 },
+                result: { item: BLOCKS.PLANKS, count: 1 },
+                name: '3沙子 -> 1木板'
+            },
+            {
+                ingredient: { item: BLOCKS.LEAVES, count: 5 },
+                result: { item: BLOCKS.STICK, count: 2 },
+                name: '5树叶 -> 2木棍'
+            },
+            {
+                ingredient: { item: BLOCKS.PORK, count: 3 },
+                result: { item: BLOCKS.PLANKS, count: 4 },
+                name: '3猪肉 -> 4木板'
+            },
+            {
+                ingredient: { item: BLOCKS.BEEF, count: 2 },
+                result: { item: BLOCKS.PLANKS, count: 4 },
+                name: '2牛肉 -> 4木板'
+            },
+            {
+                ingredient: { item: BLOCKS.CHICKEN_MEAT, count: 4 },
+                result: { item: BLOCKS.PLANKS, count: 4 },
+                name: '4鸡肉 -> 4木板'
+            }
+        ];
+
+        // ==================== 生物定义 ====================
+        const ENTITY_TYPES = {
+            PIG: 'pig',
+            COW: 'cow',
+            CHICKEN: 'chicken',
+            ZOMBIE: 'zombie',
+            SKELETON: 'skeleton',
+            VILLAGER: 'villager'
+        };
+
+        const ENTITY_PROPS = {
+            [ENTITY_TYPES.PIG]: {
+                name: '猪',
+                width: 24,
+                height: 20,
+                color: '#FFB6C1',
+                health: 10,
+                damage: 0,
+                speed: 1.5,
+                hostile: false,
+                drops: [[BLOCKS.PORK, 1, 3]], // 掉落猪肉 1-3个
+                xp: 3
+            },
+            [ENTITY_TYPES.COW]: {
+                name: '牛',
+                width: 28,
+                height: 24,
+                color: '#8B4513',
+                health: 15,
+                damage: 0,
+                speed: 1.2,
+                hostile: false,
+                drops: [[BLOCKS.BEEF, 1, 3]], // 掉落牛肉 1-3个
+                xp: 5
+            },
+            [ENTITY_TYPES.CHICKEN]: {
+                name: '鸡',
+                width: 16,
+                height: 16,
+                color: '#FFD700',
+                health: 5,
+                damage: 0,
+                speed: 2,
+                hostile: false,
+                drops: [[BLOCKS.CHICKEN_MEAT, 1, 2]], // 掉落鸡肉 1-2个
+                xp: 2
+            },
+            [ENTITY_TYPES.ZOMBIE]: {
+                name: '僵尸',
+                width: 22,
+                height: 38,
+                color: '#3CB371',
+                health: 20,
+                damage: 3,
+                speed: 2,
+                hostile: true,
+                drops: [[BLOCKS.ROTTEN_FLESH, 0, 2]], // 掉落腐肉 0-2个
+                xp: 10
+            },
+            [ENTITY_TYPES.SKELETON]: {
+                name: '骷髅',
+                width: 20,
+                height: 36,
+                color: '#F5F5DC',
+                health: 15,
+                damage: 2,
+                speed: 2.5,
+                hostile: true,
+                drops: [[BLOCKS.ROTTEN_FLESH, 0, 2]], // 掉落腐肉 0-2个
+                xp: 8
+            },
+            [ENTITY_TYPES.VILLAGER]: {
+                name: '村民',
+                width: 20,
+                height: 36,
+                color: '#8B4513',
+                health: 20,
+                damage: 0,
+                speed: 1,
+                hostile: false,
+                drops: [], // 村民不掉落物品
+                xp: 0
+            }
+        };
+
+        // ==================== 游戏状态 ====================
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = 1200;
+        canvas.height = 700;
+
+        // 世界数据
+        let world = [];
+
+        // 物品掉落列表
+        let droppedItems = [];
+
+        // 生物列表
+        let entities = [];
+
+        // 生物刷新系统
+        let spawnTimer = 0;
+        const SPAWN_INTERVAL = 300; // 每5秒尝试刷新一次 (60fps * 5)
+        const MAX_PASSIVE_ENTITIES = 20; // 最大被动生物数量
+        const MAX_HOSTILE_ENTITIES = 15; // 最大敌对生物数量
+
+        // 玩家
+        const player = {
+            x: CONFIG.WORLD_WIDTH * CONFIG.BLOCK_SIZE / 2,
+            y: 0,
+            width: 20,
+            height: 40,
+            vx: 0,
+            vy: 0,
+            onGround: false,
+            selectedSlot: 0,
+            health: CONFIG.MAX_HEALTH,
+            hunger: CONFIG.MAX_HUNGER,
+            isBreaking: false,
+            breakingProgress: 0,
+            breakingBlockX: -1,
+            breakingBlockY: -1
+        };
+
+        // 物品栏 (每个槽位存储 {item, count})
+        const inventory = Array(36).fill(null).map(() => ({ item: null, count: 0 }));
+
+        // 初始物品
+        inventory[0] = { item: TOOLS.HAND, count: 1 };
+
+        // 相机
+        const camera = {
+            x: 0,
+            y: 0
+        };
+
+        // 输入状态
+        const keys = {};
+        let mouseX = 0;
+        let mouseY = 0;
+        let mouseDown = false;
+        let mouseButton = 0;
+        let craftingMenuOpen = false;
+        let tradeMenuOpen = false;
+
+        // ==================== 音频系统 ====================
+        class SoundSystem {
+            constructor() {
+                this.audioContext = null;
+                this.enabled = true;
+                this.masterVolume = 0.3;
+            }
+
+            init() {
+                if (!this.audioContext) {
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+
+            // 播放音调
+            playTone(frequency, duration, type = 'square', volume = 0.3) {
+                if (!this.enabled || !this.audioContext) return;
+
+                try {
+                    const oscillator = this.audioContext.createOscillator();
+                    const gainNode = this.audioContext.createGain();
+
+                    oscillator.connect(gainNode);
+                    gainNode.connect(this.audioContext.destination);
+
+                    oscillator.frequency.value = frequency;
+                    oscillator.type = type;
+
+                    gainNode.gain.setValueAtTime(volume * this.masterVolume, this.audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(
+                        0.01,
+                        this.audioContext.currentTime + duration
+                    );
+
+                    oscillator.start(this.audioContext.currentTime);
+                    oscillator.stop(this.audioContext.currentTime + duration);
+                } catch (e) {
+                    console.error('音频播放错误:', e);
+                }
+            }
+
+            // 挖掘声音（短促的噪音）
+            playDig(blockType) {
+                if (!this.enabled) return;
+                this.init();
+
+                let pitch = 200;
+                if (blockType === BLOCKS.STONE || blockType === BLOCKS.COBBLESTONE) {
+                    pitch = 150;
+                } else if (blockType === BLOCKS.WOOD) {
+                    pitch = 250;
+                } else if (blockType === BLOCKS.DIRT || blockType === BLOCKS.GRASS) {
+                    pitch = 180;
+                }
+
+                this.playTone(pitch, 0.05, 'square', 0.2);
+            }
+
+            // 放置方块声音
+            playPlace(blockType) {
+                if (!this.enabled) return;
+                this.init();
+
+                let pitch = 400;
+                if (blockType === BLOCKS.STONE || blockType === BLOCKS.COBBLESTONE) {
+                    pitch = 300;
+                } else if (blockType === BLOCKS.WOOD) {
+                    pitch = 500;
+                } else if (blockType === BLOCKS.DIRT || blockType === BLOCKS.GRASS) {
+                    pitch = 350;
+                }
+
+                this.playTone(pitch, 0.1, 'square', 0.25);
+            }
+
+            // 拾取物品声音（清脆的高音）
+            playPickup() {
+                if (!this.enabled) return;
+                this.init();
+
+                // 播放两个连续的音调
+                this.playTone(800, 0.1, 'sine', 0.2);
+                setTimeout(() => {
+                    this.playTone(1000, 0.1, 'sine', 0.15);
+                }, 50);
+            }
+
+            // 跳跃声音
+            playJump() {
+                if (!this.enabled) return;
+                this.init();
+
+                // 上升的音调
+                try {
+                    const oscillator = this.audioContext.createOscillator();
+                    const gainNode = this.audioContext.createGain();
+
+                    oscillator.connect(gainNode);
+                    gainNode.connect(this.audioContext.destination);
+
+                    oscillator.frequency.setValueAtTime(200, this.audioContext.currentTime);
+                    oscillator.frequency.exponentialRampToValueAtTime(
+                        400,
+                        this.audioContext.currentTime + 0.15
+                    );
+                    oscillator.type = 'sine';
+
+                    gainNode.gain.setValueAtTime(0.2 * this.masterVolume, this.audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(
+                        0.01,
+                        this.audioContext.currentTime + 0.15
+                    );
+
+                    oscillator.start(this.audioContext.currentTime);
+                    oscillator.stop(this.audioContext.currentTime + 0.15);
+                } catch (e) {
+                    console.error('音频播放错误:', e);
+                }
+            }
+
+            // 受伤声音
+            playHurt() {
+                if (!this.enabled) return;
+                this.init();
+
+                this.playTone(150, 0.2, 'sawtooth', 0.3);
+            }
+
+            // 合成成功声音
+            playCraft() {
+                if (!this.enabled) return;
+                this.init();
+
+                // 播放三个上升的音调
+                this.playTone(500, 0.1, 'sine', 0.2);
+                setTimeout(() => {
+                    this.playTone(700, 0.1, 'sine', 0.2);
+                }, 80);
+                setTimeout(() => {
+                    this.playTone(900, 0.15, 'sine', 0.2);
+                }, 160);
+            }
+
+            // 方块破坏完成声音
+            playBreak() {
+                if (!this.enabled) return;
+                this.init();
+
+                this.playTone(100, 0.15, 'square', 0.3);
+            }
+
+            toggle() {
+                this.enabled = !this.enabled;
+                return this.enabled;
+            }
+
+            setVolume(volume) {
+                this.masterVolume = Math.max(0, Math.min(1, volume));
+            }
+        }
+
+        const soundSystem = new SoundSystem();
+
+        // ==================== Perlin噪声实现 ====================
+        // 简化的噪声函数用于生成自然地形
+        class SimpleNoise {
+            constructor() {
+                this.permutation = [];
+                for (let i = 0; i < 256; i++) {
+                    this.permutation[i] = i;
+                }
+                // 洗牌
+                for (let i = 255; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [this.permutation[i], this.permutation[j]] = [this.permutation[j], this.permutation[i]];
+                }
+                // 复制一份用于循环
+                this.permutation = [...this.permutation, ...this.permutation];
+            }
+
+            fade(t) {
+                return t * t * t * (t * (t * 6 - 15) + 10);
+            }
+
+            lerp(a, b, t) {
+                return a + t * (b - a);
+            }
+
+            grad(hash, x) {
+                return (hash & 1) === 0 ? x : -x;
+            }
+
+            noise(x) {
+                const X = Math.floor(x) & 255;
+                x -= Math.floor(x);
+                const u = this.fade(x);
+                return this.lerp(
+                    this.grad(this.permutation[X], x),
+                    this.grad(this.permutation[X + 1], x - 1),
+                    u
+                );
+            }
+
+            // 多层噪声叠加
+            octaveNoise(x, octaves, persistence) {
+                let total = 0;
+                let frequency = 0.02;
+                let amplitude = 1;
+                let maxValue = 0;
+
+                for (let i = 0; i < octaves; i++) {
+                    total += this.noise(x * frequency) * amplitude;
+                    maxValue += amplitude;
+                    amplitude *= persistence;
+                    frequency *= 2;
+                }
+
+                return total / maxValue;
+            }
+        }
+
+        const terrainNoise = new SimpleNoise();
+        const caveNoise = new SimpleNoise();
+
+        // ==================== 生物类 ====================
+        class Entity {
+            constructor(type, x, y, villageCenter = null) {
+                const props = ENTITY_PROPS[type];
+                this.type = type;
+                this.x = x;
+                this.y = y;
+                this.width = props.width;
+                this.height = props.height;
+                this.health = props.health;
+                this.maxHealth = props.health;
+                this.damage = props.damage;
+                this.speed = props.speed;
+                this.hostile = props.hostile;
+                this.vx = 0;
+                this.vy = 0;
+                this.onGround = false;
+                this.attackCooldown = 0;
+                this.moveTimer = 0;
+                this.moveDirection = 0;
+                this.hurtTimer = 0;
+                this.villageCenter = villageCenter; // 村民的村庄中心
+            }
+
+            update() {
+                const props = ENTITY_PROPS[this.type];
+
+                // 攻击冷却
+                if (this.attackCooldown > 0) {
+                    this.attackCooldown--;
+                }
+
+                // 受伤闪烁
+                if (this.hurtTimer > 0) {
+                    this.hurtTimer--;
+                }
+
+                // AI行为
+                this.updateAI();
+
+                // 应用重力
+                this.vy += CONFIG.GRAVITY;
+                if (this.vy > 15) this.vy = 15;
+
+                // 移动并检测碰撞
+                this.x += this.vx;
+                this.checkHorizontalCollision();
+
+                this.y += this.vy;
+                this.onGround = false;
+                this.checkVerticalCollision();
+
+                // 边界检查
+                if (this.x < 0) this.x = 0;
+                if (this.x > CONFIG.WORLD_WIDTH * CONFIG.BLOCK_SIZE - this.width) {
+                    this.x = CONFIG.WORLD_WIDTH * CONFIG.BLOCK_SIZE - this.width;
+                }
+
+                // 与玩家碰撞
+                this.checkPlayerCollision();
+            }
+
+            updateAI() {
+                const props = ENTITY_PROPS[this.type];
+
+                if (this.type === ENTITY_TYPES.VILLAGER) {
+                    // 村民AI：在村庄中心附近游荡
+                    this.moveTimer--;
+                    if (this.moveTimer <= 0) {
+                        this.moveTimer = Math.floor(Math.random() * 180) + 60;
+                        this.moveDirection = Math.random() > 0.5 ? 1 : -1;
+                    }
+
+                    // 检查是否远离村庄中心
+                    if (this.villageCenter) {
+                        const distToVillage = this.x - this.villageCenter.x;
+                        if (Math.abs(distToVillage) > 150) {
+                            // 超出范围，返回村庄
+                            this.moveDirection = distToVillage > 0 ? -1 : 1;
+                        }
+                    }
+
+                    if (this.moveTimer > 30) {
+                        this.vx = this.moveDirection * this.speed * 0.2;
+                    } else {
+                        this.vx *= 0.9;
+                    }
+
+                    // 不会逃跑，只是缓慢移动
+                } else if (this.hostile) {
+                    // 敌对生物：追逐玩家
+                    const dx = player.x - this.x;
+                    const dy = player.y - this.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist < 300) { // 检测范围
+                        // 向玩家移动
+                        if (dx > 10) {
+                            this.vx = this.speed;
+                        } else if (dx < -10) {
+                            this.vx = -this.speed;
+                        } else {
+                            this.vx = 0;
+                        }
+
+                        // 跳跃
+                        if (this.onGround && dy < -this.height && Math.abs(dx) < 100) {
+                            this.vy = -CONFIG.JUMP_FORCE * 0.8;
+                        }
+                    } else {
+                        // 超出范围，停止移动
+                        this.vx *= 0.9;
+                    }
+                } else {
+                    // 被动生物：随机游荡
+                    this.moveTimer--;
+                    if (this.moveTimer <= 0) {
+                        this.moveTimer = Math.floor(Math.random() * 120) + 60;
+                        this.moveDirection = Math.random() > 0.5 ? 1 : -1;
+                    }
+
+                    if (this.moveTimer > 30) {
+                        this.vx = this.moveDirection * this.speed * 0.3;
+                    } else {
+                        this.vx *= 0.9;
+                    }
+
+                    // 受到玩家惊吓会逃跑
+                    const dx = player.x - this.x;
+                    const dy = player.y - this.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < 80) {
+                        this.vx = dx > 0 ? -this.speed * 1.5 : this.speed * 1.5;
+                    }
+                }
+            }
+
+            checkHorizontalCollision() {
+                const left = Math.floor(this.x / CONFIG.BLOCK_SIZE);
+                const right = Math.floor((this.x + this.width) / CONFIG.BLOCK_SIZE);
+                const top = Math.floor(this.y / CONFIG.BLOCK_SIZE);
+                const bottom = Math.floor((this.y + this.height - 1) / CONFIG.BLOCK_SIZE);
+
+                for (let y = top; y <= bottom; y++) {
+                    for (let x = left; x <= right; x++) {
+                        if (y >= 0 && y < CONFIG.WORLD_HEIGHT && x >= 0 && x < CONFIG.WORLD_WIDTH) {
+                            if (world[y][x] !== BLOCKS.AIR) {
+                                if (this.vx > 0) {
+                                    this.x = x * CONFIG.BLOCK_SIZE - this.width - 1;
+                                } else if (this.vx < 0) {
+                                    this.x = (x + 1) * CONFIG.BLOCK_SIZE;
+                                }
+                                this.vx = 0;
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+
+            checkVerticalCollision() {
+                const left = Math.floor(this.x / CONFIG.BLOCK_SIZE);
+                const right = Math.floor((this.x + this.width - 1) / CONFIG.BLOCK_SIZE);
+                const top = Math.floor(this.y / CONFIG.BLOCK_SIZE);
+                const bottom = Math.floor((this.y + this.height) / CONFIG.BLOCK_SIZE);
+
+                for (let y = top; y <= bottom; y++) {
+                    for (let x = left; x <= right; x++) {
+                        if (y >= 0 && y < CONFIG.WORLD_HEIGHT && x >= 0 && x < CONFIG.WORLD_WIDTH) {
+                            if (world[y][x] !== BLOCKS.AIR) {
+                                if (this.vy > 0) {
+                                    this.y = y * CONFIG.BLOCK_SIZE - this.height;
+                                    this.onGround = true;
+                                } else if (this.vy < 0) {
+                                    this.y = (y + 1) * CONFIG.BLOCK_SIZE;
+                                }
+                                this.vy = 0;
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+
+            checkPlayerCollision() {
+                const props = ENTITY_PROPS[this.type];
+
+                if (!this.hostile || this.attackCooldown > 0) return;
+
+                // 检查是否与玩家碰撞
+                if (this.x < player.x + player.width &&
+                    this.x + this.width > player.x &&
+                    this.y < player.y + player.height &&
+                    this.y + this.height > player.y) {
+
+                    // 攻击玩家
+                    player.health -= this.damage;
+                    soundSystem.playHurt();
+                    updateStats();
+                    this.attackCooldown = 60; // 1秒冷却
+                    this.hurtTimer = 10;
+
+                    // 击退玩家
+                    const dx = player.x - this.x;
+                    player.vx = dx > 0 ? 5 : -5;
+                    player.vy = -3;
+                }
+            }
+
+            takeDamage(amount) {
+                this.health -= amount;
+                this.hurtTimer = 10;
+                soundSystem.playHurt();
+
+                // 击退
+                const dx = this.x - player.x;
+                this.vx = dx > 0 ? 5 : -5;
+                this.vy = -3;
+
+                if (this.health <= 0) {
+                    this.die();
+                }
+            }
+
+            die() {
+                const props = ENTITY_PROPS[this.type];
+
+                // 掉落物品
+                for (const [item, min, max] of props.drops) {
+                    const count = Math.floor(Math.random() * (max - min + 1)) + min;
+                    if (count > 0) {
+                        spawnDroppedItem(
+                            this.x + this.width / 2,
+                            this.y + this.height / 2,
+                            item,
+                            count
+                        );
+                    }
+                }
+
+                // 从列表中移除
+                const index = entities.indexOf(this);
+                if (index > -1) {
+                    entities.splice(index, 1);
+                }
+
+                soundSystem.playBreak();
+            }
+
+            draw(ctx, camera) {
+                const props = ENTITY_PROPS[this.type];
+                const screenX = this.x - camera.x;
+                const screenY = this.y - camera.y;
+
+                // 受伤闪烁效果
+                if (this.hurtTimer > 0 && this.hurtTimer % 4 < 2) {
+                    ctx.globalAlpha = 0.5;
+                }
+
+                if (this.type === ENTITY_TYPES.VILLAGER) {
+                    // 村民特殊绘制
+                    // 白色身体
+                    ctx.fillStyle = '#F5F5DC';
+                    ctx.fillRect(screenX, screenY, this.width, this.height);
+
+                    // 棕色衣服
+                    ctx.fillStyle = '#8B4513';
+                    ctx.fillRect(screenX, screenY + 20, this.width, 16);
+
+                    // 棕色帽子
+                    ctx.fillStyle = '#A0522D';
+                    ctx.fillRect(screenX - 2, screenY - 4, this.width + 4, 8);
+
+                    // 鼻子
+                    ctx.fillStyle = '#DEB887';
+                    ctx.fillRect(screenX + 8, screenY + 10, 4, 4);
+                } else {
+                    // 身体
+                    ctx.fillStyle = props.color;
+                    ctx.fillRect(screenX, screenY, this.width, this.height);
+
+                    // 眼睛
+                    ctx.fillStyle = '#000';
+                    if (this.hostile) {
+                        // 敌对生物：红色眼睛
+                        ctx.fillStyle = '#FF0000';
+                    }
+
+                    const eyeSize = this.type === ENTITY_TYPES.CHICKEN ? 2 : 3;
+                    ctx.fillRect(screenX + 5, screenY + 5, eyeSize, eyeSize);
+                    ctx.fillRect(screenX + this.width - 8, screenY + 5, eyeSize, eyeSize);
+                }
+
+                // 生命条（受伤时显示）
+                if (this.health < this.maxHealth) {
+                    const barWidth = this.width;
+                    const barHeight = 3;
+                    const healthPercent = this.health / this.maxHealth;
+
+                    ctx.fillStyle = '#FF0000';
+                    ctx.fillRect(screenX, screenY - 8, barWidth, barHeight);
+
+                    ctx.fillStyle = '#00FF00';
+                    ctx.fillRect(screenX, screenY - 8, barWidth * healthPercent, barHeight);
+                }
+
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        // ==================== 存档系统 ====================
+        function saveGame() {
+            try {
+                const saveData = {
+                    world: world,
+                    player: {
+                        x: player.x,
+                        y: player.y,
+                        health: player.health,
+                        hunger: player.hunger,
+                        selectedSlot: player.selectedSlot
+                    },
+                    inventory: inventory,
+                    entities: entities.map(entity => ({
+                        type: entity.type,
+                        x: entity.x,
+                        y: entity.y,
+                        health: entity.health,
+                        maxHealth: entity.maxHealth
+                    })),
+                    droppedItems: droppedItems
+                };
+
+                localStorage.setItem('minecraft2d_save', JSON.stringify(saveData));
+                showNotification('✅ 存档已保存！', 'success');
+            } catch (e) {
+                console.error('保存失败:', e);
+                showNotification('❌ 保存失败！', 'error');
+            }
+        }
+
+        function loadGame() {
+            try {
+                const saveString = localStorage.getItem('minecraft2d_save');
+                if (!saveString) {
+                    showNotification('⚠️ 没有找到存档！', 'warning');
+                    return;
+                }
+
+                const saveData = JSON.parse(saveString);
+
+                // 恢复世界
+                world = saveData.world;
+
+                // 恢复玩家
+                player.x = saveData.player.x;
+                player.y = saveData.player.y;
+                player.health = saveData.player.health;
+                player.hunger = saveData.player.hunger;
+                player.selectedSlot = saveData.player.selectedSlot;
+
+                // 恢复物品栏
+                for (let i = 0; i < inventory.length; i++) {
+                    inventory[i] = saveData.inventory[i] || { item: null, count: 0 };
+                }
+
+                // 恢复生物
+                entities = [];
+                if (saveData.entities) {
+                    for (const entityData of saveData.entities) {
+                        const entity = new Entity(entityData.type, entityData.x, entityData.y);
+                        entity.health = entityData.health;
+                        entity.maxHealth = entityData.maxHealth;
+                        entities.push(entity);
+                    }
+                }
+
+                // 恢复掉落物品
+                droppedItems = saveData.droppedItems || [];
+
+                // 更新UI
+                updateUI();
+                updateStats();
+
+                showNotification('✅ 存档已读取！', 'success');
+            } catch (e) {
+                console.error('读取失败:', e);
+                showNotification('❌ 读取失败！', 'error');
+            }
+        }
+
+        function showNotification(message, type = 'info') {
+            // 创建通知元素
+            const notification = document.createElement('div');
+            notification.textContent = message;
+            notification.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                padding: 20px 40px;
+                background: rgba(0, 0, 0, 0.9);
+                color: white;
+                border-radius: 10px;
+                font-size: 24px;
+                font-weight: bold;
+                z-index: 1000;
+                animation: fadeInOut 2s ease-in-out;
+            `;
+
+            if (type === 'success') {
+                notification.style.border = '3px solid #00ff00';
+            } else if (type === 'error') {
+                notification.style.border = '3px solid #ff0000';
+            } else if (type === 'warning') {
+                notification.style.border = '3px solid #ffaa00';
+            }
+
+            document.body.appendChild(notification);
+
+            // 添加动画样式
+            if (!document.getElementById('notificationStyle')) {
+                const style = document.createElement('style');
+                style.id = 'notificationStyle';
+                style.textContent = `
+                    @keyframes fadeInOut {
+                        0% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+                        20% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+                        80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+                        100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+
+            // 2秒后移除通知
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 2000);
+        }
+
+        // ==================== 世界生成 ====================
+        function initWorld() {
+            for (let y = 0; y < CONFIG.WORLD_HEIGHT; y++) {
+                world[y] = [];
+                for (let x = 0; x < CONFIG.WORLD_WIDTH; x++) {
+                    world[y][x] = BLOCKS.AIR;
+                }
+            }
+
+            // 生成地形
+            for (let x = 0; x < CONFIG.WORLD_WIDTH; x++) {
+                // 使用多层噪声生成更自然的地形
+                const baseHeight = CONFIG.GROUND_LEVEL;
+                const terrainHeight = terrainNoise.octaveNoise(x, 4, 0.5) * 12;
+                const height = Math.floor(baseHeight + terrainHeight);
+
+                // 草地层
+                world[height][x] = BLOCKS.GRASS;
+
+                // 泥土层
+                for (let y = height + 1; y < height + 4; y++) {
+                    world[y][x] = BLOCKS.DIRT;
+                }
+
+                // 石头层和矿石
+                for (let y = height + 4; y < CONFIG.WORLD_HEIGHT - 1; y++) {
+                    const oreChance = Math.random();
+                    if (oreChance < 0.02 && y > height + 8) {
+                        world[y][x] = BLOCKS.COAL_ORE;
+                    } else if (oreChance < 0.01 && y > height + 15) {
+                        world[y][x] = BLOCKS.IRON_ORE;
+                    } else {
+                        world[y][x] = BLOCKS.STONE;
+                    }
+                }
+
+                // 基岩层
+                world[CONFIG.WORLD_HEIGHT - 1][x] = BLOCKS.BEDROCK;
+            }
+
+            // 生成洞穴
+            generateCaves();
+
+            // 平滑地形
+            smoothTerrain();
+
+            // 生成树木
+            for (let x = 10; x < CONFIG.WORLD_WIDTH - 10; x += Math.floor(Math.random() * 20) + 15) {
+                const groundY = findGroundLevel(x);
+                if (groundY > 0 && groundY < CONFIG.WORLD_HEIGHT - 10) {
+                    generateTree(x, groundY);
+                }
+            }
+
+            // 生成村庄
+            generateVillages();
+
+            // 设置玩家初始位置
+            const startX = Math.floor(CONFIG.WORLD_WIDTH / 2);
+            player.y = (findGroundLevel(startX) - 3) * CONFIG.BLOCK_SIZE;
+
+            // 生成生物
+            spawnEntities();
+        }
+
+        function spawnEntities() {
+            // 生成被动生物（猪、牛、鸡）
+            for (let i = 0; i < 15; i++) {
+                const x = Math.floor(Math.random() * (CONFIG.WORLD_WIDTH - 40)) + 20;
+                const groundY = findGroundLevel(x);
+                if (groundY > 0 && groundY < CONFIG.WORLD_HEIGHT - 10) {
+                    const rand = Math.random();
+                    let type;
+                    if (rand < 0.4) {
+                        type = ENTITY_TYPES.PIG;
+                    } else if (rand < 0.7) {
+                        type = ENTITY_TYPES.COW;
+                    } else {
+                        type = ENTITY_TYPES.CHICKEN;
+                    }
+                    entities.push(new Entity(type, x * CONFIG.BLOCK_SIZE, (groundY - 2) * CONFIG.BLOCK_SIZE));
+                }
+            }
+
+            // 生成敌对生物（僵尸、骷髅）- 在地下或黑暗处
+            for (let i = 0; i < 8; i++) {
+                const x = Math.floor(Math.random() * (CONFIG.WORLD_WIDTH - 40)) + 20;
+                const groundY = findGroundLevel(x);
+                if (groundY > 0 && groundY < CONFIG.WORLD_HEIGHT - 10) {
+                    const type = Math.random() > 0.5 ? ENTITY_TYPES.ZOMBIE : ENTITY_TYPES.SKELETON;
+                    // 敌对生物生成在地面上
+                    entities.push(new Entity(type, x * CONFIG.BLOCK_SIZE, (groundY - 3) * CONFIG.BLOCK_SIZE));
+                }
+            }
+        }
+
+        // ==================== 生物刷新系统 ====================
+        function updateEntitySpawning() {
+            spawnTimer++;
+
+            if (spawnTimer < SPAWN_INTERVAL) return;
+            spawnTimer = 0;
+
+            // 统计当前生物数量
+            let passiveCount = 0;
+            let hostileCount = 0;
+            for (const entity of entities) {
+                const props = ENTITY_PROPS[entity.type];
+                if (props.hostile) {
+                    hostileCount++;
+                } else {
+                    passiveCount++;
+                }
+            }
+
+            // 刷新被动生物
+            if (passiveCount < MAX_PASSIVE_ENTITIES) {
+                // 在玩家附近但不太近的地方生成
+                const playerBlockX = Math.floor(player.x / CONFIG.BLOCK_SIZE);
+                const minDistance = 20; // 最小距离（方块）
+                const maxDistance = 80; // 最大距离（方块）
+
+                for (let attempt = 0; attempt < 3; attempt++) {
+                    const direction = Math.random() > 0.5 ? 1 : -1;
+                    const distance = minDistance + Math.floor(Math.random() * (maxDistance - minDistance));
+                    const x = playerBlockX + direction * distance;
+
+                    if (x >= 10 && x < CONFIG.WORLD_WIDTH - 10) {
+                        const groundY = findGroundLevel(x);
+                        if (groundY > 0 && groundY < CONFIG.WORLD_HEIGHT - 10) {
+                            const rand = Math.random();
+                            let type;
+                            if (rand < 0.4) {
+                                type = ENTITY_TYPES.PIG;
+                            } else if (rand < 0.7) {
+                                type = ENTITY_TYPES.COW;
+                            } else {
+                                type = ENTITY_TYPES.CHICKEN;
+                            }
+
+                            entities.push(new Entity(type, x * CONFIG.BLOCK_SIZE, (groundY - 2) * CONFIG.BLOCK_SIZE));
+                            passiveCount++;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 刷新敌对生物（在夜晚或黑暗处更频繁）
+            if (hostileCount < MAX_HOSTILE_ENTITIES) {
+                const playerBlockX = Math.floor(player.x / CONFIG.BLOCK_SIZE);
+                const minDistance = 30; // 敌对生物生成距离更远
+                const maxDistance = 100;
+
+                for (let attempt = 0; attempt < 2; attempt++) {
+                    const direction = Math.random() > 0.5 ? 1 : -1;
+                    const distance = minDistance + Math.floor(Math.random() * (maxDistance - minDistance));
+                    const x = playerBlockX + direction * distance;
+
+                    if (x >= 10 && x < CONFIG.WORLD_WIDTH - 10) {
+                        const groundY = findGroundLevel(x);
+                        if (groundY > 0 && groundY < CONFIG.WORLD_HEIGHT - 10) {
+                            const type = Math.random() > 0.5 ? ENTITY_TYPES.ZOMBIE : ENTITY_TYPES.SKELETON;
+                            entities.push(new Entity(type, x * CONFIG.BLOCK_SIZE, (groundY - 3) * CONFIG.BLOCK_SIZE));
+                            hostileCount++;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        function generateCaves() {
+            // 使用噪声生成更自然的洞穴
+            const caveScale = 0.05;
+            const caveThreshold = 0.4;
+
+            for (let y = 10; y < CONFIG.WORLD_HEIGHT - 5; y++) {
+                for (let x = 1; x < CONFIG.WORLD_WIDTH - 1; x++) {
+                    // 只在地下生成洞穴
+                    if (world[y][x] === BLOCKS.STONE || world[y][x] === BLOCKS.COAL_ORE || world[y][x] === BLOCKS.IRON_ORE) {
+                        // 使用3D噪声值（这里简化为2D）
+                        const noiseValue = (caveNoise.octaveNoise(x, 2, 0.5) +
+                                          caveNoise.octaveNoise(y * 100, 2, 0.5)) / 2;
+
+                        if (noiseValue > caveThreshold) {
+                            // 创建洞穴
+                            const radius = Math.floor(Math.random() * 2) + 1;
+                            for (let dy = -radius; dy <= radius; dy++) {
+                                for (let dx = -radius; dx <= radius; dx++) {
+                                    const nx = x + dx;
+                                    const ny = y + dy;
+                                    if (nx >= 1 && nx < CONFIG.WORLD_WIDTH - 1 &&
+                                        ny >= 5 && ny < CONFIG.WORLD_HEIGHT - 2) {
+                                        if (world[ny][nx] !== BLOCKS.BEDROCK) {
+                                            world[ny][nx] = BLOCKS.AIR;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        function smoothTerrain() {
+            // 平滑地形边缘，减少突兀的变化
+            const tempWorld = world.map(row => [...row]);
+
+            for (let x = 1; x < CONFIG.WORLD_WIDTH - 1; x++) {
+                for (let y = 1; y < CONFIG.WORLD_HEIGHT - 1; y++) {
+                    // 只平滑地下部分
+                    if (y > CONFIG.GROUND_LEVEL - 5) {
+                        const block = tempWorld[y][x];
+                        if (block !== BLOCKS.AIR && block !== BLOCKS.BEDROCK) {
+                            // 统计周围方块
+                            let airCount = 0;
+                            for (let dy = -1; dy <= 1; dy++) {
+                                for (let dx = -1; dx <= 1; dx++) {
+                                    if (tempWorld[y + dy][x + dx] === BLOCKS.AIR) {
+                                        airCount++;
+                                    }
+                                }
+                            }
+                            // 如果周围空气太多，可能需要移除这个方块（形成更平滑的洞穴）
+                            if (airCount >= 5 && block !== BLOCKS.GRASS) {
+                                world[y][x] = BLOCKS.AIR;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        function findGroundLevel(x) {
+            for (let y = 0; y < CONFIG.WORLD_HEIGHT; y++) {
+                if (world[y][x] !== BLOCKS.AIR) {
+                    return y;
+                }
+            }
+            return CONFIG.GROUND_LEVEL;
+        }
+
+        function generateTree(x, groundY) {
+            const treeHeight = Math.floor(Math.random() * 3) + 4;
+
+            // 树干
+            for (let y = groundY - 1; y >= groundY - treeHeight; y--) {
+                if (y >= 0) {
+                    world[y][x] = BLOCKS.WOOD;
+                }
+            }
+
+            // 树叶
+            const leafStart = groundY - treeHeight;
+            for (let dy = -2; dy <= 0; dy++) {
+                for (let dx = -2; dx <= 2; dx++) {
+                    const lx = x + dx;
+                    const ly = leafStart + dy;
+                    if (lx >= 0 && lx < CONFIG.WORLD_WIDTH && ly >= 0) {
+                        if (world[ly][lx] === BLOCKS.AIR) {
+                            world[ly][lx] = BLOCKS.LEAVES;
+                        }
+                    }
+                }
+            }
+        }
+
+        // ==================== 村庄生成系统 ====================
+        function generateVillages() {
+            // 生成2-3个村庄
+            const numVillages = Math.floor(Math.random() * 2) + 2;
+            const villagePositions = [];
+
+            for (let v = 0; v < numVillages; v++) {
+                // 随机选择村庄位置（不要太靠近边缘和其他村庄）
+                let villageX;
+                let attempts = 0;
+                do {
+                    villageX = Math.floor(Math.random() * (CONFIG.WORLD_WIDTH - 100)) + 50;
+                    attempts++;
+                } while (attempts < 50 && villagePositions.some(pos => Math.abs(pos.x - villageX) < 80));
+
+                if (attempts >= 50) continue; // 找不到合适位置
+
+                const groundY = findGroundLevel(villageX);
+                if (groundY <= 0 || groundY >= CONFIG.WORLD_HEIGHT - 10) continue;
+
+                const villageCenter = { x: villageX, y: groundY };
+                villagePositions.push(villageCenter);
+
+                // 平整村庄区域的地形
+                flattenTerrainForVillage(villageX, groundY);
+
+                // 生成村庄建筑
+                generateVillageBuildings(villageX, groundY);
+
+                // 生成村民
+                generateVillagers(villageX, groundY, villageCenter);
+            }
+        }
+
+        function flattenTerrainForVillage(centerX, groundY) {
+            const radius = 40; // 村庄半径
+
+            for (let x = centerX - radius; x <= centerX + radius; x++) {
+                if (x < 10 || x >= CONFIG.WORLD_WIDTH - 10) continue;
+
+                const currentGroundY = findGroundLevel(x);
+
+                // 平整到同一高度（最多改变3格）
+                const targetY = Math.min(groundY, currentGroundY);
+                const diff = Math.abs(currentGroundY - targetY);
+
+                if (diff <= 3) {
+                    // 移除方块到目标高度
+                    for (let y = targetY; y < currentGroundY && y < CONFIG.WORLD_HEIGHT; y++) {
+                        if (world[y][x] !== BLOCKS.BEDROCK) {
+                            world[y][x] = BLOCKS.AIR;
+                        }
+                    }
+
+                    // 填充到目标高度
+                    if (currentGroundY < targetY) {
+                        for (let y = currentGroundY; y < targetY; y++) {
+                            if (y >= 0 && y < CONFIG.WORLD_HEIGHT) {
+                                world[y][x] = BLOCKS.DIRT;
+                            }
+                        }
+                        world[targetY][x] = BLOCKS.GRASS;
+                    }
+                }
+            }
+        }
+
+        function generateVillageBuildings(centerX, groundY) {
+            // 在村庄周围生成建筑物
+            const numBuildings = Math.floor(Math.random() * 3) + 4; // 4-6个建筑
+
+            for (let i = 0; i < numBuildings; i++) {
+                const angle = (i / numBuildings) * Math.PI * 2;
+                const distance = 15 + Math.floor(Math.random() * 15);
+                const buildingX = Math.floor(centerX + Math.cos(angle) * distance);
+                const buildingY = groundY;
+
+                if (buildingX < 10 || buildingX >= CONFIG.WORLD_WIDTH - 10) continue;
+
+                const buildingType = Math.random();
+                if (buildingType < 0.5) {
+                    generateHouse(buildingX, buildingY);
+                } else if (buildingType < 0.8) {
+                    generateSmallHouse(buildingX, buildingY);
+                } else {
+                    generateFarm(buildingX, buildingY);
+                }
+            }
+        }
+
+        function generateHouse(x, groundY) {
+            const width = 9;
+            const height = 7;
+            const depth = 9;
+
+            const startX = x - Math.floor(width / 2);
+
+            // 建造墙壁（木板）
+            for (let dx = 0; dx < width; dx++) {
+                for (let dy = 1; dy <= height; dy++) {
+                    const wx = startX + dx;
+                    const wy = groundY - dy;
+
+                    if (wx >= 0 && wx < CONFIG.WORLD_WIDTH && wy >= 0) {
+                        // 墙壁
+                        if (dx === 0 || dx === width - 1 || dy === height) {
+                            world[wy][wx] = BLOCKS.PLANKS;
+                        }
+                        // 门口
+                        else if (dy <= 3 && dx === Math.floor(width / 2)) {
+                            world[wy][wx] = BLOCKS.AIR;
+                        }
+                        // 窗户
+                        else if (dy >= 3 && dy <= 4 && (dx === 2 || dx === width - 3)) {
+                            world[wy][wx] = BLOCKS.AIR;
+                        }
+                        // 内部空气
+                        else {
+                            world[wy][wx] = BLOCKS.AIR;
+                        }
+                    }
+                }
+            }
+
+            // 屋顶
+            for (let dx = -1; dx <= width; dx++) {
+                for (let dy = 0; dy <= 3; dy++) {
+                    const rx = startX + dx;
+                    const ry = groundY - height - dy;
+
+                    if (rx >= 0 && rx < CONFIG.WORLD_WIDTH && ry >= 0) {
+                        if (dy >= Math.abs(dx - Math.floor(width / 2))) {
+                            world[ry][rx] = BLOCKS.PLANKS;
+                        }
+                    }
+                }
+            }
+        }
+
+        function generateSmallHouse(x, groundY) {
+            const width = 5;
+            const height = 5;
+
+            const startX = x - Math.floor(width / 2);
+
+            for (let dx = 0; dx < width; dx++) {
+                for (let dy = 1; dy <= height; dy++) {
+                    const wx = startX + dx;
+                    const wy = groundY - dy;
+
+                    if (wx >= 0 && wx < CONFIG.WORLD_WIDTH && wy >= 0) {
+                        if (dx === 0 || dx === width - 1 || dy === height) {
+                            world[wy][wx] = BLOCKS.PLANKS;
+                        } else if (dy <= 2 && dx === Math.floor(width / 2)) {
+                            world[wy][wx] = BLOCKS.AIR;
+                        } else {
+                            world[wy][wx] = BLOCKS.AIR;
+                        }
+                    }
+                }
+            }
+        }
+
+        function generateFarm(x, groundY) {
+            const width = 7;
+            const depth = 7;
+
+            const startX = x - Math.floor(width / 2);
+
+            // 围栏
+            for (let dx = 0; dx < width; dx++) {
+                if (startX + dx >= 0 && startX + dx < CONFIG.WORLD_WIDTH) {
+                    world[groundY][startX + dx] = BLOCKS.PLANKS;
+                    world[groundY - 1][startX + dx] = BLOCKS.AIR;
+                }
+            }
+
+            // 种植（用木板代表农作物）
+            for (let dx = 1; dx < width - 1; dx++) {
+                const cropX = startX + dx;
+                if (cropX >= 0 && cropX < CONFIG.WORLD_WIDTH) {
+                    if (Math.random() > 0.3) {
+                        world[groundY - 1][cropX] = BLOCKS.PLANKS;
+                    }
+                }
+            }
+        }
+
+        function generateVillagers(centerX, groundY, villageCenter) {
+            // 在村庄中生成3-5个村民
+            const numVillagers = Math.floor(Math.random() * 3) + 3;
+
+            for (let i = 0; i < numVillagers; i++) {
+                const offsetX = Math.floor(Math.random() * 30) - 15;
+                const villagerX = (centerX + offsetX) * CONFIG.BLOCK_SIZE;
+                const villagerY = (groundY - 2) * CONFIG.BLOCK_SIZE;
+
+                entities.push(new Entity(ENTITY_TYPES.VILLAGER, villagerX, villagerY, villageCenter));
+            }
+        }
+
+        // ==================== 物品掉落系统 ====================
+        function spawnDroppedItem(x, y, item, count = 1) {
+            if (item === null || item === BLOCKS.AIR) return;
+
+            droppedItems.push({
+                x: x,
+                y: y,
+                vx: (Math.random() - 0.5) * 3,
+                vy: -3,
+                item: item,
+                count: count,
+                lifetime: 600 // 10秒 (60fps)
+            });
+        }
+
+        function updateDroppedItems() {
+            for (let i = droppedItems.length - 1; i >= 0; i--) {
+                const item = droppedItems[i];
+
+                // 物理更新
+                item.vy += CONFIG.GRAVITY * 0.5;
+                item.x += item.vx;
+                item.y += item.vy;
+
+                // 碰撞检测
+                const blockX = Math.floor(item.x / CONFIG.BLOCK_SIZE);
+                const blockY = Math.floor(item.y / CONFIG.BLOCK_SIZE);
+
+                if (blockX >= 0 && blockX < CONFIG.WORLD_WIDTH && blockY >= 0 && blockY < CONFIG.WORLD_HEIGHT) {
+                    if (world[blockY][blockX] !== BLOCKS.AIR) {
+                        item.y = blockY * CONFIG.BLOCK_SIZE - 8;
+                        item.vy = 0;
+                        item.vx *= 0.8;
+                    }
+                }
+
+                // 检查玩家拾取
+                const dx = player.x + player.width / 2 - item.x;
+                const dy = player.y + player.height / 2 - item.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist < CONFIG.PICKUP_RANGE) {
+                    // 吸向玩家
+                    item.x += dx * 0.1;
+                    item.y += dy * 0.1;
+
+                    if (dist < 20) {
+                        // 拾取物品
+                        addToInventory(item.item, item.count);
+                        soundSystem.playPickup();
+                        droppedItems.splice(i, 1);
+                        continue;
+                    }
+                }
+
+                // 生命周期
+                item.lifetime--;
+                if (item.lifetime <= 0) {
+                    droppedItems.splice(i, 1);
+                }
+            }
+        }
+
+        // ==================== 物品栏系统 ====================
+        function addToInventory(item, count) {
+            // 首先尝试堆叠到已有的槽位
+            for (let i = 0; i < inventory.length; i++) {
+                if (inventory[i].item === item && inventory[i].count > 0) {
+                    inventory[i].count += count;
+                    updateUI();
+                    return true;
+                }
+            }
+
+            // 寻找空槽位
+            for (let i = 0; i < inventory.length; i++) {
+                if (inventory[i].item === null || inventory[i].count === 0) {
+                    inventory[i].item = item;
+                    inventory[i].count = count;
+                    updateUI();
+                    return true;
+                }
+            }
+
+            return false; // 物品栏已满
+        }
+
+        function removeFromInventory(item, count) {
+            let remaining = count;
+
+            for (let i = 0; i < inventory.length && remaining > 0; i++) {
+                if (inventory[i].item === item && inventory[i].count > 0) {
+                    const take = Math.min(inventory[i].count, remaining);
+                    inventory[i].count -= take;
+                    remaining -= take;
+
+                    if (inventory[i].count === 0) {
+                        inventory[i].item = null;
+                    }
+                }
+            }
+
+            updateUI();
+            return remaining === 0;
+        }
+
+        function countInInventory(item) {
+            let count = 0;
+            for (const slot of inventory) {
+                if (slot.item === item) {
+                    count += slot.count;
+                }
+            }
+            return count;
+        }
+
+        function getSelectedItem() {
+            return inventory[player.selectedSlot];
+        }
+
+        // ==================== 挖掘系统 ====================
+        function getBlockHardness(block, tool) {
+            const props = BLOCK_PROPS[block];
+            if (!props || props.hardness === 0 || props.hardness === Infinity) {
+                return props ? props.hardness : 1;
+            }
+
+            const toolProps = TOOL_PROPS[tool];
+            let efficiency = toolProps ? toolProps.efficiency : 1;
+
+            // 应用工具加成
+            if (tool && TOOL_BONUS[tool] && TOOL_BONUS[tool][block]) {
+                efficiency *= TOOL_BONUS[tool][block];
+            }
+
+            return props.hardness / efficiency;
+        }
+
+        function updateBreaking(deltaTime) {
+            if (!mouseDown || mouseButton !== 0) {
+                player.isBreaking = false;
+                player.breakingProgress = 0;
+                return;
+            }
+
+            const blockX = Math.floor((mouseX + camera.x) / CONFIG.BLOCK_SIZE);
+            const blockY = Math.floor((mouseY + camera.y) / CONFIG.BLOCK_SIZE);
+
+            // 检查范围
+            const playerCenterX = player.x + player.width / 2;
+            const playerCenterY = player.y + player.height / 2;
+            const blockCenterX = blockX * CONFIG.BLOCK_SIZE + CONFIG.BLOCK_SIZE / 2;
+            const blockCenterY = blockY * CONFIG.BLOCK_SIZE + CONFIG.BLOCK_SIZE / 2;
+            const dist = Math.sqrt(
+                Math.pow(playerCenterX - blockCenterX, 2) +
+                Math.pow(playerCenterY - blockCenterY, 2)
+            );
+
+            if (dist > CONFIG.BLOCK_SIZE * 5) {
+                player.isBreaking = false;
+                player.breakingProgress = 0;
+                return;
+            }
+
+            if (blockX < 0 || blockX >= CONFIG.WORLD_WIDTH ||
+                blockY < 0 || blockY >= CONFIG.WORLD_HEIGHT) {
+                return;
+            }
+
+            const block = world[blockY][blockX];
+            if (block === BLOCKS.AIR) return;
+
+            // 切换到新方块
+            if (player.breakingBlockX !== blockX || player.breakingBlockY !== blockY) {
+                player.breakingBlockX = blockX;
+                player.breakingBlockY = blockY;
+                player.breakingProgress = 0;
+            }
+
+            const selectedItem = getSelectedItem();
+            const tool = selectedItem && selectedItem.item && TOOL_PROPS[selectedItem.item] ? selectedItem.item : TOOLS.HAND;
+
+            player.isBreaking = true;
+
+            const hardness = getBlockHardness(block, tool);
+            player.breakingProgress += deltaTime / (hardness * 20);
+
+            // 播放挖掘声音（每隔一段时间）
+            if (Math.floor(player.breakingProgress * 10) > Math.floor((player.breakingProgress - deltaTime / (hardness * 20)) * 10)) {
+                soundSystem.playDig(block);
+            }
+
+            if (player.breakingProgress >= 1) {
+                // 方块被破坏
+                soundSystem.playBreak();
+
+                const props = BLOCK_PROPS[block];
+                if (props && props.drop) {
+                    spawnDroppedItem(
+                        blockX * CONFIG.BLOCK_SIZE + CONFIG.BLOCK_SIZE / 2,
+                        blockY * CONFIG.BLOCK_SIZE + CONFIG.BLOCK_SIZE / 2,
+                        props.drop
+                    );
+                } else if (props && props.drop === null && block !== BLOCKS.LEAVES) {
+                    // 有些方块不掉落
+                } else {
+                    spawnDroppedItem(
+                        blockX * CONFIG.BLOCK_SIZE + CONFIG.BLOCK_SIZE / 2,
+                        blockY * CONFIG.BLOCK_SIZE + CONFIG.BLOCK_SIZE / 2,
+                        block
+                    );
+                }
+
+                world[blockY][blockX] = BLOCKS.AIR;
+                player.breakingProgress = 0;
+                player.isBreaking = false;
+            }
+        }
+
+        // ==================== 物理系统 ====================
+        function updatePlayer() {
+            if (craftingMenuOpen || tradeMenuOpen) return;
+
+            // 水平移动
+            if (keys['ArrowLeft'] || keys['KeyA']) {
+                player.vx = -CONFIG.MOVE_SPEED;
+            } else if (keys['ArrowRight'] || keys['KeyD']) {
+                player.vx = CONFIG.MOVE_SPEED;
+            } else {
+                player.vx = 0;
+            }
+
+            // 跳跃
+            if ((keys['ArrowUp'] || keys['KeyW'] || keys['Space']) && player.onGround) {
+                player.vy = -CONFIG.JUMP_FORCE;
+                player.onGround = false;
+                soundSystem.playJump();
+            }
+
+            // 应用重力
+            player.vy += CONFIG.GRAVITY;
+
+            if (player.vy > 15) player.vy = 15;
+
+            // 移动并检测碰撞
+            player.x += player.vx;
+            checkHorizontalCollision();
+
+            player.y += player.vy;
+            player.onGround = false;
+            checkVerticalCollision();
+
+            // 边界检查
+            if (player.x < 0) player.x = 0;
+            if (player.x > CONFIG.WORLD_WIDTH * CONFIG.BLOCK_SIZE - player.width) {
+                player.x = CONFIG.WORLD_WIDTH * CONFIG.BLOCK_SIZE - player.width;
+            }
+
+            // 掉落伤害
+            if (player.y > CONFIG.WORLD_HEIGHT * CONFIG.BLOCK_SIZE) {
+                player.y = 0;
+                player.health -= 5;
+                soundSystem.playHurt();
+                updateStats();
+            }
+        }
+
+        function checkHorizontalCollision() {
+            const left = Math.floor(player.x / CONFIG.BLOCK_SIZE);
+            const right = Math.floor((player.x + player.width) / CONFIG.BLOCK_SIZE);
+            const top = Math.floor(player.y / CONFIG.BLOCK_SIZE);
+            const bottom = Math.floor((player.y + player.height - 1) / CONFIG.BLOCK_SIZE);
+
+            for (let y = top; y <= bottom; y++) {
+                for (let x = left; x <= right; x++) {
+                    if (y >= 0 && y < CONFIG.WORLD_HEIGHT && x >= 0 && x < CONFIG.WORLD_WIDTH) {
+                        if (world[y][x] !== BLOCKS.AIR) {
+                            if (player.vx > 0) {
+                                player.x = x * CONFIG.BLOCK_SIZE - player.width - 1;
+                            } else if (player.vx < 0) {
+                                player.x = (x + 1) * CONFIG.BLOCK_SIZE;
+                            }
+                            player.vx = 0;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        function checkVerticalCollision() {
+            const left = Math.floor(player.x / CONFIG.BLOCK_SIZE);
+            const right = Math.floor((player.x + player.width - 1) / CONFIG.BLOCK_SIZE);
+            const top = Math.floor(player.y / CONFIG.BLOCK_SIZE);
+            const bottom = Math.floor((player.y + player.height) / CONFIG.BLOCK_SIZE);
+
+            for (let y = top; y <= bottom; y++) {
+                for (let x = left; x <= right; x++) {
+                    if (y >= 0 && y < CONFIG.WORLD_HEIGHT && x >= 0 && x < CONFIG.WORLD_WIDTH) {
+                        if (world[y][x] !== BLOCKS.AIR) {
+                            if (player.vy > 0) {
+                                player.y = y * CONFIG.BLOCK_SIZE - player.height;
+                                player.onGround = true;
+                            } else if (player.vy < 0) {
+                                player.y = (y + 1) * CONFIG.BLOCK_SIZE;
+                            }
+                            player.vy = 0;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        // ==================== 相机系统 ====================
+        function updateCamera() {
+            const targetX = player.x - canvas.width / 2 + player.width / 2;
+            const targetY = player.y - canvas.height / 2 + player.height / 2;
+
+            camera.x += (targetX - camera.x) * 0.1;
+            camera.y += (targetY - camera.y) * 0.1;
+
+            camera.x = Math.max(0, Math.min(camera.x, CONFIG.WORLD_WIDTH * CONFIG.BLOCK_SIZE - canvas.width));
+            camera.y = Math.max(0, Math.min(camera.y, CONFIG.WORLD_HEIGHT * CONFIG.BLOCK_SIZE - canvas.height));
+        }
+
+        // ==================== 渲染系统 ====================
+        function render() {
+            // 清空画布
+            ctx.fillStyle = '#87CEEB';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 计算可见区域
+            const startX = Math.floor(camera.x / CONFIG.BLOCK_SIZE);
+            const endX = Math.ceil((camera.x + canvas.width) / CONFIG.BLOCK_SIZE);
+            const startY = Math.floor(camera.y / CONFIG.BLOCK_SIZE);
+            const endY = Math.ceil((camera.y + canvas.height) / CONFIG.BLOCK_SIZE);
+
+            // 绘制方块
+            for (let y = startY; y < endY; y++) {
+                for (let x = startX; x < endX; x++) {
+                    if (y >= 0 && y < CONFIG.WORLD_HEIGHT && x >= 0 && x < CONFIG.WORLD_WIDTH) {
+                        const block = world[y][x];
+                        if (block !== BLOCKS.AIR) {
+                            drawBlock(x, y, block);
+                        }
+                    }
+                }
+            }
+
+            // 绘制掉落物品
+            for (const item of droppedItems) {
+                const screenX = item.x - camera.x;
+                const screenY = item.y - camera.y;
+
+                ctx.fillStyle = '#4a4a4a';
+                ctx.fillRect(screenX - 8, screenY - 8, 16, 16);
+
+                if (BLOCK_PROPS[item.item]) {
+                    ctx.fillStyle = BLOCK_PROPS[item.item].color;
+                    ctx.fillRect(screenX - 6, screenY - 6, 12, 12);
+                } else if (TOOL_PROPS[item.item]) {
+                    ctx.fillStyle = TOOL_PROPS[item.item].color;
+                    ctx.fillRect(screenX - 6, screenY - 6, 12, 12);
+                }
+            }
+
+            // 绘制生物
+            for (const entity of entities) {
+                entity.draw(ctx, camera);
+            }
+
+            // 绘制玩家
+            drawPlayer();
+
+            // 绘制方块高亮和破坏进度
+            drawBlockHighlight();
+        }
+
+        function drawBlock(x, y, blockType) {
+            const screenX = x * CONFIG.BLOCK_SIZE - camera.x;
+            const screenY = y * CONFIG.BLOCK_SIZE - camera.y;
+
+            const props = BLOCK_PROPS[blockType];
+            if (!props) return;
+
+            ctx.fillStyle = props.color;
+            ctx.fillRect(screenX, screenY, CONFIG.BLOCK_SIZE, CONFIG.BLOCK_SIZE);
+
+            // 绘制方块边框
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+            ctx.strokeRect(screenX, screenY, CONFIG.BLOCK_SIZE, CONFIG.BLOCK_SIZE);
+
+            // 草方块特殊处理
+            if (blockType === BLOCKS.GRASS) {
+                ctx.fillStyle = '#228B22';
+                ctx.fillRect(screenX, screenY, CONFIG.BLOCK_SIZE, 4);
+            }
+
+            // 矿石特殊处理
+            if (blockType === BLOCKS.COAL_ORE) {
+                ctx.fillStyle = '#1a1a1a';
+                ctx.beginPath();
+                ctx.arc(screenX + 16, screenY + 16, 6, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            if (blockType === BLOCKS.IRON_ORE) {
+                ctx.fillStyle = '#FFD700';
+                ctx.beginPath();
+                ctx.arc(screenX + 16, screenY + 16, 6, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function drawPlayer() {
+            const playerScreenX = player.x - camera.x;
+            const playerScreenY = player.y - camera.y;
+
+            // 身体
+            ctx.fillStyle = '#00BFFF';
+            ctx.fillRect(playerScreenX, playerScreenY + 12, player.width, player.height - 12);
+
+            // 头
+            ctx.fillStyle = '#FFDAB9';
+            ctx.fillRect(playerScreenX, playerScreenY, player.width, 12);
+
+            // 眼睛
+            ctx.fillStyle = '#000';
+            ctx.fillRect(playerScreenX + 4, playerScreenY + 4, 3, 3);
+            ctx.fillRect(playerScreenX + 13, playerScreenY + 4, 3, 3);
+
+            // 绘制手持物品
+            const selectedItem = getSelectedItem();
+            if (selectedItem && selectedItem.item) {
+                ctx.font = '16px Arial';
+                ctx.fillText(
+                    TOOL_PROPS[selectedItem.item] ? TOOL_PROPS[selectedItem.item].icon : '■',
+                    playerScreenX + 22,
+                    playerScreenY + 30
+                );
+            }
+        }
+
+        function drawBlockHighlight() {
+            const targetBlockX = Math.floor((mouseX + camera.x) / CONFIG.BLOCK_SIZE);
+            const targetBlockY = Math.floor((mouseY + camera.y) / CONFIG.BLOCK_SIZE);
+
+            if (targetBlockX >= 0 && targetBlockX < CONFIG.WORLD_WIDTH &&
+                targetBlockY >= 0 && targetBlockY < CONFIG.WORLD_HEIGHT) {
+                const screenX = targetBlockX * CONFIG.BLOCK_SIZE - camera.x;
+                const screenY = targetBlockY * CONFIG.BLOCK_SIZE - camera.y;
+
+                // 绘制选中框
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(screenX, screenY, CONFIG.BLOCK_SIZE, CONFIG.BLOCK_SIZE);
+                ctx.lineWidth = 1;
+
+                // 绘制破坏进度
+                if (player.isBreaking && player.breakingBlockX === targetBlockX && player.breakingBlockY === targetBlockY) {
+                    ctx.fillStyle = `rgba(0, 0, 0, ${player.breakingProgress * 0.5})`;
+                    ctx.fillRect(screenX, screenY, CONFIG.BLOCK_SIZE, CONFIG.BLOCK_SIZE);
+
+                    // 进度边框
+                    const progressWidth = CONFIG.BLOCK_SIZE * player.breakingProgress;
+                    ctx.strokeStyle = '#ff0000';
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(screenX, screenY, progressWidth, CONFIG.BLOCK_SIZE);
+                    ctx.lineWidth = 1;
+                }
+            }
+        }
+
+        // ==================== UI系统 ====================
+        function updateUI() {
+            const ui = document.getElementById('ui');
+            ui.innerHTML = '';
+
+            for (let i = 0; i < 9; i++) {
+                const slot = document.createElement('div');
+                slot.className = 'slot' + (i === player.selectedSlot ? ' selected' : '');
+
+                const slotData = inventory[i];
+                if (slotData && slotData.item && slotData.count > 0) {
+                    const preview = document.createElement('div');
+                    preview.className = 'block-preview';
+
+                    if (TOOL_PROPS[slotData.item]) {
+                        preview.style.backgroundColor = TOOL_PROPS[slotData.item].color;
+                        preview.textContent = TOOL_PROPS[slotData.item].icon;
+                        preview.style.display = 'flex';
+                        preview.style.justifyContent = 'center';
+                        preview.style.alignItems = 'center';
+                        preview.style.fontSize = '24px';
+                    } else if (BLOCK_PROPS[slotData.item]) {
+                        preview.style.backgroundColor = BLOCK_PROPS[slotData.item].color;
+                    }
+
+                    slot.appendChild(preview);
+
+                    const count = document.createElement('span');
+                    count.className = 'item-count';
+                    count.textContent = slotData.count;
+                    slot.appendChild(count);
+                }
+
+                const number = document.createElement('span');
+                number.className = 'slot-number';
+                number.textContent = i + 1;
+                slot.appendChild(number);
+
+                slot.addEventListener('click', () => {
+                    player.selectedSlot = i;
+                    updateUISelection();
+                });
+
+                ui.appendChild(slot);
+            }
+        }
+
+        function updateUISelection() {
+            const slots = document.querySelectorAll('.slot');
+            slots.forEach((slot, index) => {
+                if (index === player.selectedSlot) {
+                    slot.classList.add('selected');
+                } else {
+                    slot.classList.remove('selected');
+                }
+            });
+        }
+
+        function updateStats() {
+            document.getElementById('healthBar').style.width = (player.health / CONFIG.MAX_HEALTH * 100) + '%';
+            document.getElementById('hungerBar').style.width = (player.hunger / CONFIG.MAX_HUNGER * 100) + '%';
+        }
+
+        // ==================== 合成系统 ====================
+        function toggleCraftingMenu() {
+            craftingMenuOpen = !craftingMenuOpen;
+            const menu = document.getElementById('craftingMenu');
+            menu.classList.toggle('show', craftingMenuOpen);
+
+            // 关闭交易菜单
+            if (craftingMenuOpen && tradeMenuOpen) {
+                tradeMenuOpen = false;
+                document.getElementById('tradeMenu').classList.remove('show');
+            }
+
+            if (craftingMenuOpen) {
+                renderCraftingRecipes();
+            }
+        }
+
+        function renderCraftingRecipes() {
+            const list = document.getElementById('recipeList');
+            list.innerHTML = '';
+
+            for (const recipe of RECIPES) {
+                const div = document.createElement('div');
+                div.className = 'recipe';
+
+                const canCraft = recipe.ingredients.every(([item, count]) => countInInventory(item) >= count);
+
+                if (!canCraft) {
+                    div.style.opacity = '0.5';
+                }
+
+                const itemsDiv = document.createElement('div');
+                itemsDiv.className = 'recipe-items';
+
+                for (const [item, count] of recipe.ingredients) {
+                    const itemSpan = document.createElement('span');
+                    itemSpan.textContent = (TOOL_PROPS[item] ? TOOL_PROPS[item].name : BLOCK_PROPS[item] ? BLOCK_PROPS[item].name : item) + ' x' + count;
+                    itemsDiv.appendChild(itemSpan);
+                }
+
+                const arrow = document.createElement('span');
+                arrow.className = 'recipe-arrow';
+                arrow.textContent = '→';
+
+                const result = document.createElement('span');
+                result.className = 'recipe-result';
+                result.textContent = (recipe.result.type === 'tool' ? TOOL_PROPS[recipe.result.item].name : BLOCK_PROPS[recipe.result.item].name) + ' x' + recipe.result.count;
+
+                div.appendChild(itemsDiv);
+                div.appendChild(arrow);
+                div.appendChild(result);
+
+                if (canCraft) {
+                    div.addEventListener('click', () => craftItem(recipe));
+                }
+
+                list.appendChild(div);
+            }
+        }
+
+        function craftItem(recipe) {
+            // 检查材料
+            for (const [item, count] of recipe.ingredients) {
+                if (countInInventory(item) < count) {
+                    return;
+                }
+            }
+
+            // 消耗材料
+            for (const [item, count] of recipe.ingredients) {
+                removeFromInventory(item, count);
+            }
+
+            // 添加结果
+            addToInventory(recipe.result.item, recipe.result.count);
+
+            // 播放合成成功声音
+            soundSystem.playCraft();
+
+            // 刷新配方列表
+            renderCraftingRecipes();
+        }
+
+        // ==================== 交易系统 ====================
+        function toggleTradeMenu() {
+            tradeMenuOpen = !tradeMenuOpen;
+            const menu = document.getElementById('tradeMenu');
+            menu.classList.toggle('show', tradeMenuOpen);
+
+            // 关闭合成菜单
+            if (tradeMenuOpen && craftingMenuOpen) {
+                craftingMenuOpen = false;
+                document.getElementById('craftingMenu').classList.remove('show');
+            }
+
+            if (tradeMenuOpen) {
+                renderTradeList();
+            }
+        }
+
+        function renderTradeList() {
+            const list = document.getElementById('tradeList');
+            list.innerHTML = '';
+
+            for (const trade of TRADES) {
+                const div = document.createElement('div');
+                div.className = 'recipe';
+
+                const canTrade = countInInventory(trade.ingredient.item) >= trade.ingredient.count;
+
+                if (!canTrade) {
+                    div.style.opacity = '0.5';
+                }
+
+                const ingredientName = BLOCK_PROPS[trade.ingredient.item] ? BLOCK_PROPS[trade.ingredient.item].name : trade.ingredient.item;
+                const resultName = BLOCK_PROPS[trade.result.item] ? BLOCK_PROPS[trade.result.item].name : trade.result.item;
+
+                const itemsDiv = document.createElement('div');
+                itemsDiv.className = 'recipe-items';
+                itemsDiv.textContent = `${ingredientName} x${trade.ingredient.count}`;
+
+                const arrow = document.createElement('span');
+                arrow.className = 'recipe-arrow';
+                arrow.textContent = '→';
+
+                const result = document.createElement('span');
+                result.className = 'recipe-result';
+                result.textContent = `${resultName} x${trade.result.count}`;
+
+                div.appendChild(itemsDiv);
+                div.appendChild(arrow);
+                div.appendChild(result);
+
+                if (canTrade) {
+                    div.addEventListener('click', () => executeTrade(trade));
+                }
+
+                list.appendChild(div);
+            }
+        }
+
+        function executeTrade(trade) {
+            // 检查材料
+            if (countInInventory(trade.ingredient.item) < trade.ingredient.count) {
+                return;
+            }
+
+            // 消耗材料
+            removeFromInventory(trade.ingredient.item, trade.ingredient.count);
+
+            // 添加结果
+            addToInventory(trade.result.item, trade.result.count);
+
+            // 播放交易成功声音
+            soundSystem.playCraft();
+
+            // 刷新交易列表
+            renderTradeList();
+        }
+
+        // ==================== 方块交互 ====================
+        function placeBlock(x, y) {
+            if (x < 0 || x >= CONFIG.WORLD_WIDTH || y < 0 || y >= CONFIG.WORLD_HEIGHT) return;
+            if (world[y][x] !== BLOCKS.AIR) return;
+
+            const selectedItem = getSelectedItem();
+            if (!selectedItem || !selectedItem.item || selectedItem.count <= 0) return;
+
+            // 工具不能放置
+            if (TOOL_PROPS[selectedItem.item]) return;
+
+            const blockType = selectedItem.item;
+
+            // 检查是否与玩家重叠
+            const blockLeft = x * CONFIG.BLOCK_SIZE;
+            const blockRight = blockLeft + CONFIG.BLOCK_SIZE;
+            const blockTop = y * CONFIG.BLOCK_SIZE;
+            const blockBottom = blockTop + CONFIG.BLOCK_SIZE;
+
+            if (!(player.x + player.width <= blockLeft ||
+                  player.x >= blockRight ||
+                  player.y + player.height <= blockTop ||
+                  player.y >= blockBottom)) {
+                return;
+            }
+
+            world[y][x] = blockType;
+            soundSystem.playPlace(blockType);
+            selectedItem.count--;
+            if (selectedItem.count <= 0) {
+                selectedItem.item = null;
+            }
+            updateUI();
+        }
+
+        // ==================== 事件监听 ====================
+        document.addEventListener('keydown', (e) => {
+            keys[e.code] = true;
+
+            if (e.code >= 'Digit1' && e.code <= 'Digit9') {
+                player.selectedSlot = parseInt(e.code.replace('Digit', '')) - 1;
+                updateUISelection();
+            }
+
+            if (e.code === 'KeyE') {
+                if (tradeMenuOpen) {
+                    toggleTradeMenu();
+                } else {
+                    toggleCraftingMenu();
+                }
+            }
+
+            if (e.code === 'KeyM') {
+                toggleSound();
+            }
+
+            if (e.code === 'KeyO') {
+                saveGame();
+            }
+
+            if (e.code === 'KeyL') {
+                loadGame();
+            }
+
+            if (e.code === 'Escape') {
+                if (tradeMenuOpen) {
+                    toggleTradeMenu();
+                } else if (craftingMenuOpen) {
+                    toggleCraftingMenu();
+                }
+            }
+
+            if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+                e.preventDefault();
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            keys[e.code] = false;
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouseX = e.clientX - rect.left;
+            mouseY = e.clientY - rect.top;
+        });
+
+        canvas.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+
+            mouseDown = true;
+            mouseButton = e.button;
+
+            const blockX = Math.floor((mouseX + camera.x) / CONFIG.BLOCK_SIZE);
+            const blockY = Math.floor((mouseY + camera.y) / CONFIG.BLOCK_SIZE);
+
+            if (e.button === 2) {
+                // 右键：放置方块或吃食物
+                const selectedItem = getSelectedItem();
+
+                // 检查是否是食物
+                if (selectedItem && selectedItem.item && BLOCK_PROPS[selectedItem.item] && BLOCK_PROPS[selectedItem.item].food) {
+                    // 吃食物
+                    const foodValue = BLOCK_PROPS[selectedItem.item].food;
+                    player.hunger = Math.min(CONFIG.MAX_HUNGER, player.hunger + foodValue);
+                    player.health = Math.min(CONFIG.MAX_HEALTH, player.health + Math.floor(foodValue / 2));
+
+                    selectedItem.count--;
+                    if (selectedItem.count <= 0) {
+                        selectedItem.item = null;
+                    }
+
+                    soundSystem.playPickup();
+                    updateStats();
+                    updateUI();
+                    return;
+                }
+
+                placeBlock(blockX, blockY);
+            } else if (e.button === 0) {
+                // 检查是否点击了生物
+                const worldMouseX = mouseX + camera.x;
+                const worldMouseY = mouseY + camera.y;
+
+                for (const entity of entities) {
+                    if (worldMouseX >= entity.x && worldMouseX <= entity.x + entity.width &&
+                        worldMouseY >= entity.y && worldMouseY <= entity.y + entity.height) {
+
+                        // 计算攻击距离
+                        const dx = player.x + player.width / 2 - (entity.x + entity.width / 2);
+                        const dy = player.y + player.height / 2 - (entity.y + entity.height / 2);
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+
+                        if (dist < CONFIG.BLOCK_SIZE * 5) {
+                            // 如果是村民，打开交易菜单
+                            if (entity.type === ENTITY_TYPES.VILLAGER) {
+                                if (!tradeMenuOpen) {
+                                    console.log('点击村民，打开交易菜单');
+                                    toggleTradeMenu();
+                                    showNotification('💰 打开交易菜单', 'info');
+                                }
+                                return;
+                            }
+
+                            // 其他生物进行攻击
+                            // 计算伤害
+                            const selectedItem = getSelectedItem();
+                            let damage = 1;
+
+                            if (selectedItem && selectedItem.item && TOOL_PROPS[selectedItem.item]) {
+                                // 使用工具的伤害值
+                                damage = TOOL_PROPS[selectedItem.item].damage || 1;
+                            }
+
+                            entity.takeDamage(damage);
+                            return; // 攻击了生物，不破坏方块
+                        }
+                    }
+                }
+            }
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            mouseDown = false;
+        });
+
+        canvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+        });
+
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+
+            if (e.deltaY > 0) {
+                player.selectedSlot = (player.selectedSlot + 1) % 9;
+            } else {
+                player.selectedSlot = (player.selectedSlot - 1 + 9) % 9;
+            }
+
+            updateUISelection();
+        });
+
+        // ==================== 游戏循环 ====================
+        let lastTime = 0;
+
+        function gameLoop(timestamp) {
+            const deltaTime = timestamp - lastTime;
+            lastTime = timestamp;
+
+            updatePlayer();
+            updateDroppedItems();
+            updateEntities();
+            updateEntitySpawning();
+            updateCamera();
+            updateBreaking(deltaTime);
+            render();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function updateEntities() {
+            for (const entity of entities) {
+                entity.update();
+            }
+        }
+
+        // ==================== 初始化 ====================
+        // 声音控制
+        function toggleSound() {
+            const enabled = soundSystem.toggle();
+            const button = document.getElementById('soundToggle');
+            button.textContent = enabled ? '🔊 声音: 开' : '🔇 声音: 关';
+
+            // 初始化音频上下文（用户交互后）
+            if (enabled) {
+                soundSystem.init();
+            }
+        }
+
+        document.getElementById('soundToggle').addEventListener('click', () => {
+            toggleSound();
+        });
+
+        initWorld();
+        updateUI();
+        updateStats();
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>

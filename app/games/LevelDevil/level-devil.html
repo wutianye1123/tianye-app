@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Level Devil - 恶魔关卡 (100关)</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+        }
+        .game-container {
+            position: relative;
+        }
+        #gameCanvas {
+            border: 5px solid transparent;
+            border-image: linear-gradient(45deg, #00f5a0, #00d9f5, #a855f7, #f97316) 1;
+            border-radius: 16px;
+            box-shadow: 0 0 60px rgba(0, 245, 160, 0.4), inset 0 0 60px rgba(0, 0, 0, 0.3);
+            animation: borderGlow 3s ease-in-out infinite;
+        }
+        @keyframes borderGlow {
+            0%, 100% { box-shadow: 0 0 60px rgba(0, 245, 160, 0.4), inset 0 0 60px rgba(0, 0, 0, 0.3); }
+            50% { box-shadow: 0 0 80px rgba(0, 217, 245, 0.5), inset 0 0 60px rgba(0, 0, 0, 0.3); }
+        }
+        .ui {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(15, 12, 41, 0.9);
+            padding: 15px 40px;
+            border-radius: 50px;
+            color: #00f5a0;
+            font-size: 26px;
+            font-weight: bold;
+            text-shadow: 0 0 20px rgba(0, 245, 160, 0.8), 2px 2px 4px rgba(0,0,0,0.8);
+            border: 2px solid rgba(0, 245, 160, 0.5);
+            backdrop-filter: blur(10px);
+            display: flex;
+            gap: 30px;
+        }
+        .controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(15, 12, 41, 0.8);
+            padding: 10px 25px;
+            border-radius: 25px;
+            color: #a78bfa;
+            font-size: 14px;
+            text-align: center;
+            border: 1px solid rgba(167, 139, 250, 0.3);
+            backdrop-filter: blur(5px);
+        }
+        .game-over, .level-complete {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: linear-gradient(135deg, rgba(15, 12, 41, 0.95) 0%, rgba(36, 36, 62, 0.95) 100%);
+            padding: 50px 60px;
+            border-radius: 24px;
+            text-align: center;
+            color: white;
+            display: none;
+            z-index: 100;
+            border: 3px solid;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 0 80px rgba(0, 0, 0, 0.8);
+        }
+        .game-over {
+            border-color: #ff4444;
+            box-shadow: 0 0 80px rgba(255, 68, 68, 0.4);
+        }
+        .level-complete {
+            border-color: #44ff44;
+            box-shadow: 0 0 80px rgba(68, 255, 68, 0.4);
+        }
+        .game-over h2 {
+            color: #ff6b6b;
+            margin-bottom: 20px;
+            font-size: 36px;
+            text-shadow: 0 0 20px rgba(255, 107, 107, 0.8);
+        }
+        .level-complete h2 {
+            color: #51cf66;
+            margin-bottom: 20px;
+            font-size: 36px;
+            text-shadow: 0 0 20px rgba(81, 207, 102, 0.8);
+        }
+        .game-over p, .level-complete p {
+            font-size: 18px;
+            color: #c4b5fd;
+        }
+        button {
+            background: linear-gradient(45deg, #00f5a0, #00d9f5);
+            color: #0f0c29;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 30px;
+            cursor: pointer;
+            margin-top: 25px;
+            transition: all 0.3s;
+            box-shadow: 0 5px 20px rgba(0, 245, 160, 0.4);
+        }
+        button:hover {
+            transform: scale(1.08) translateY(-2px);
+            box-shadow: 0 8px 30px rgba(0, 217, 245, 0.6);
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        #saveMsg { position:fixed; top:60px; left:50%; transform:translateX(-50%);
+          color:#0f0; font-size:16px; pointer-events:none; opacity:0;
+          text-shadow:0 0 4px #0f0; font-family:monospace; z-index:9999;
+          transition:opacity 0.3s; }
+    </style>
+</head>
+<body>
+    <div id="saveMsg"></div>
+    <div class="game-container">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <div class="ui">
+            <span>关卡: <span id="levelNum">1</span>/100</span>
+            <span style="margin-left: 30px;">死亡: <span id="deaths">0</span></span>
+        </div>
+        <div class="controls">
+            WASD/方向键移动 | 空格跳跃
+        </div>
+        <div class="game-over" id="gameOver">
+            <h2>你死了!</h2>
+            <p>不要放弃，再试一次!</p>
+            <button onclick="restartLevel()">重新开始</button>
+        </div>
+        <div class="level-complete" id="levelComplete">
+            <h2>关卡完成!</h2>
+            <p>准备好面对下一个挑战了吗?</p>
+            <button onclick="nextLevel()">下一关</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Save/Load system
+        function showSaveToast(msg) {
+            let sm = document.getElementById('saveMsg');
+            if (!sm) { sm = document.createElement('div'); sm.id = 'saveMsg'; document.body.appendChild(sm); }
+            sm.textContent = msg; sm.style.opacity = 1;
+            setTimeout(() => sm.style.opacity = 0, 1500);
+        }
+        function saveGame() {
+            try {
+                localStorage.setItem('levelDevil_save', JSON.stringify({ currentLevel, deaths }));
+                showSaveToast('已保存');
+            } catch (e) { showSaveToast('保存失败'); }
+        }
+        function loadGame() {
+            try {
+                const d = JSON.parse(localStorage.getItem('levelDevil_save'));
+                if (d && typeof d.currentLevel === 'number') {
+                    deaths = d.deaths || 0;
+                    loadLevel(d.currentLevel);
+                    showSaveToast('已加载');
+                }
+            } catch (e) { showSaveToast('加载失败'); }
+        }
+        document.addEventListener('keydown', e => {
+            if (e.code === 'F5') { e.preventDefault(); saveGame(); }
+            if (e.code === 'F9') { e.preventDefault(); loadGame(); }
+        });
+
+        // Game state
+        let currentLevel = 0;
+        let deaths = 0;
+        let gameOver = false;
+        let levelComplete = false;
+
+        // Player
+        const player = {
+            x: 50,
+            y: 500,
+            width: 30,
+            height: 30,
+            velocityX: 0,
+            velocityY: 0,
+            speed: 5,
+            jumpForce: -12,
+            gravity: 0.6,
+            grounded: false,
+            color: '#83ffe7'
+        };
+
+        // Input
+        const keys = {};
+
+        // Particle system
+        let particles = [];
+        let stars = [];
+
+        // Initialize stars
+        for (let i = 0; i < 100; i++) {
+            stars.push({
+                x: Math.random() * 800,
+                y: Math.random() * 600,
+                size: Math.random() * 2 + 0.5,
+                twinkle: Math.random() * Math.PI * 2,
+                speed: Math.random() * 0.02 + 0.01
+            });
+        }
+
+        // Add particle
+        function addParticle(x, y, color, type = 'normal') {
+            particles.push({
+                x: x,
+                y: y,
+                vx: (Math.random() - 0.5) * 4,
+                vy: (Math.random() - 0.5) * 4 - 2,
+                life: 1,
+                color: color,
+                size: Math.random() * 4 + 2,
+                type: type
+            });
+        }
+
+        // Add trail particles
+        function addTrail() {
+            if (Math.abs(player.velocityX) > 0.5) {
+                addParticle(
+                    player.x + player.width / 2,
+                    player.y + player.height,
+                    'rgba(0, 245, 160, 0.5)',
+                    'trail'
+                );
+            }
+        }
+
+        // Add jump particles
+        function addJumpParticles() {
+            for (let i = 0; i < 8; i++) {
+                addParticle(
+                    player.x + player.width / 2,
+                    player.y + player.height,
+                    'rgba(0, 217, 245, 0.8)',
+                    'jump'
+                );
+            }
+        }
+
+        // Add death particles
+        function addDeathParticles() {
+            for (let i = 0; i < 30; i++) {
+                addParticle(
+                    player.x + player.width / 2,
+                    player.y + player.height / 2,
+                    i % 2 === 0 ? '#ff6b6b' : '#ffa94d',
+                    'death'
+                );
+            }
+        }
+
+        // Procedural level generator
+        function generateLevel(levelNum) {
+            const level = {
+                platforms: [],
+                spikes: [],
+                door: { x: 720, y: 490, width: 40, height: 60 },
+                traps: []
+            };
+
+            // Reduced difficulty curve - maxes out at 0.6 instead of 1.0
+            const difficulty = Math.min(levelNum / 150, 0.6);
+
+            // Starting platform
+            level.platforms.push({ x: 0, y: 550, width: 120, height: 50 });
+
+            // Generate platforms based on level number
+            let currentX = 120;
+            let currentY = 550;
+            const targetX = 680;
+
+            while (currentX < targetX) {
+                // Smaller gaps for high levels
+                const gapSize = 45 + Math.random() * (40 + difficulty * 40);
+                // Wider platforms
+                const platformWidth = 70 + Math.random() * (50 - difficulty * 20);
+                // Less extreme height changes
+                const heightChange = (Math.random() - 0.5) * (80 + difficulty * 60);
+
+                currentX += gapSize;
+                currentY = Math.max(250, Math.min(500, currentY + heightChange));
+
+                const platform = {
+                    x: currentX,
+                    y: currentY,
+                    width: platformWidth,
+                    height: 20
+                };
+
+                // Reduced chance of special platforms
+                if (levelNum > 10 && Math.random() < difficulty * 0.25) {
+                    platform.move = true;
+                    platform.range = 25 + Math.random() * (30 + difficulty * 30);
+                    platform.speed = 1.2 + Math.random() * (0.8 + difficulty * 1.2);
+                }
+
+                if (levelNum > 20 && Math.random() < difficulty * 0.2) {
+                    platform.disappear = true;
+                    platform.timer = 0;
+                }
+
+                level.platforms.push(platform);
+
+                // Fewer spikes
+                if (Math.random() < difficulty * 0.3) {
+                    level.spikes.push({
+                        x: currentX - gapSize / 2,
+                        y: 530,
+                        width: gapSize * 0.7,
+                        height: 20,
+                        move: levelNum > 30 && Math.random() < difficulty * 0.2,
+                        range: 35,
+                        speed: 1.8
+                    });
+                }
+
+                // Fewer falling traps
+                if (levelNum > 25 && Math.random() < difficulty * 0.15) {
+                    level.traps.push({
+                        type: 'fallingBlock',
+                        x: currentX,
+                        y: -50,
+                        width: platformWidth,
+                        height: 20,
+                        triggerX: currentX - 40,
+                        fallen: false
+                    });
+                }
+            }
+
+            // Final platform before door
+            level.platforms.push({ x: 620, y: currentY, width: 120, height: 20 });
+
+            // Adjust door position
+            level.door.y = currentY - 60;
+
+            // Add some ground spikes for early levels
+            if (levelNum < 25) {
+                const spikeCount = Math.floor(Math.random() * (1 + levelNum / 12));
+                for (let i = 0; i < spikeCount; i++) {
+                    level.spikes.push({
+                        x: 200 + i * 150,
+                        y: 530,
+                        width: 40 + Math.random() * 30,
+                        height: 20
+                    });
+                }
+            }
+
+            return level;
+        }
+
+        // Hand-designed levels for first 15 levels (tutorial and basic concepts)
+        const handDesignedLevels = [
+            // Level 1 - Tutorial
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 800, height: 50 },
+                    { x: 200, y: 450, width: 150, height: 20 },
+                    { x: 400, y: 350, width: 150, height: 20 },
+                    { x: 600, y: 250, width: 150, height: 20 },
+                ],
+                spikes: [
+                    { x: 350, y: 530, width: 40, height: 20 }
+                ],
+                door: { x: 700, y: 190, width: 40, height: 60 },
+                traps: []
+            },
+            // Level 2 - Moving spikes
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 300, height: 50 },
+                    { x: 400, y: 550, width: 400, height: 50 },
+                    { x: 300, y: 450, width: 100, height: 20 },
+                ],
+                spikes: [
+                    { x: 350, y: 530, width: 50, height: 20, move: true, range: 100, speed: 2 }
+                ],
+                door: { x: 720, y: 490, width: 40, height: 60 },
+                traps: []
+            },
+            // Level 3 - Falling ceiling
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 200, height: 50 },
+                    { x: 300, y: 550, width: 200, height: 50 },
+                    { x: 500, y: 550, width: 300, height: 50 },
+                    { x: 150, y: 450, width: 100, height: 20 },
+                    { x: 350, y: 380, width: 100, height: 20 },
+                    { x: 550, y: 450, width: 100, height: 20 },
+                ],
+                spikes: [
+                    { x: 250, y: 530, width: 50, height: 20 }
+                ],
+                door: { x: 700, y: 490, width: 40, height: 60 },
+                traps: [
+                    { type: 'fallingBlock', x: 350, y: 0, width: 100, height: 25, triggerX: 250, fallen: false }
+                ]
+            },
+            // Level 4 - Disappearing floor
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 150, height: 50 },
+                    { x: 150, y: 550, width: 100, height: 50, disappear: true, timer: 0 },
+                    { x: 250, y: 550, width: 100, height: 50 },
+                    { x: 350, y: 550, width: 100, height: 50, disappear: true },
+                    { x: 450, y: 550, width: 100, height: 50 },
+                    { x: 550, y: 450, width: 150, height: 20 },
+                ],
+                spikes: [
+                    { x: 200, y: 530, width: 50, height: 20 },
+                    { x: 400, y: 530, width: 50, height: 20 }
+                ],
+                door: { x: 650, y: 390, width: 40, height: 60 },
+                traps: []
+            },
+            // Level 5 - Ultimate trap
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 100, height: 50 },
+                    { x: 100, y: 550, width: 80, height: 50, disappear: true },
+                    { x: 180, y: 550, width: 80, height: 50 },
+                    { x: 260, y: 550, width: 80, height: 50, disappear: true },
+                    { x: 340, y: 550, width: 80, height: 50 },
+                    { x: 420, y: 450, width: 80, height: 20, move: true, range: 100, speed: 3 },
+                    { x: 600, y: 400, width: 100, height: 20 },
+                ],
+                spikes: [
+                    { x: 150, y: 530, width: 30, height: 20 },
+                    { x: 300, y: 530, width: 30, height: 20 },
+                    { x: 550, y: 530, width: 100, height: 20, move: true, range: 80, speed: 2.5 }
+                ],
+                door: { x: 700, y: 340, width: 40, height: 60 },
+                traps: [
+                    { type: 'fallingBlock', x: 100, y: 0, width: 80, height: 25, triggerX: 100, fallen: false },
+                    { type: 'fallingBlock', x: 260, y: 0, width: 80, height: 25, triggerX: 260, fallen: false }
+                ]
+            },
+            // Level 6 - Tower climb
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 150, height: 50 },
+                    { x: 200, y: 480, width: 80, height: 20 },
+                    { x: 350, y: 410, width: 80, height: 20 },
+                    { x: 200, y: 340, width: 80, height: 20 },
+                    { x: 50, y: 270, width: 80, height: 20 },
+                    { x: 200, y: 200, width: 80, height: 20 },
+                    { x: 350, y: 130, width: 80, height: 20 },
+                ],
+                spikes: [
+                    { x: 180, y: 530, width: 200, height: 20 }
+                ],
+                door: { x: 380, y: 70, width: 40, height: 60 },
+                traps: [
+                    { type: 'fallingBlock', x: 200, y: -50, width: 80, height: 20, triggerX: 400, fallen: false },
+                    { type: 'fallingBlock', x: 50, y: -50, width: 80, height: 20, triggerX: 150, fallen: false }
+                ]
+            },
+            // Level 7 - Moving maze
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 120, height: 50 },
+                    { x: 200, y: 550, width: 80, height: 20, move: true, range: 60, speed: 2 },
+                    { x: 400, y: 480, width: 80, height: 20, move: true, range: 80, speed: 2.5 },
+                    { x: 600, y: 410, width: 80, height: 20, move: true, range: 100, speed: 3 },
+                    { x: 400, y: 320, width: 150, height: 20 },
+                    { x: 650, y: 250, width: 100, height: 20 },
+                ],
+                spikes: [
+                    { x: 150, y: 530, width: 50, height: 20 },
+                    { x: 500, y: 460, width: 80, height: 20, move: true, range: 60, speed: 2 },
+                    { x: 300, y: 300, width: 60, height: 20 }
+                ],
+                door: { x: 720, y: 190, width: 40, height: 60 },
+                traps: []
+            },
+            // Level 8 - Disappearing path
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 100, height: 50 },
+                    { x: 100, y: 550, width: 60, height: 50, disappear: true },
+                    { x: 160, y: 550, width: 60, height: 50, disappear: true },
+                    { x: 220, y: 550, width: 60, height: 50, disappear: true },
+                    { x: 280, y: 550, width: 60, height: 50, disappear: true },
+                    { x: 340, y: 550, width: 60, height: 50, disappear: true },
+                    { x: 400, y: 550, width: 60, height: 50, disappear: true },
+                    { x: 460, y: 550, width: 60, height: 50 },
+                    { x: 550, y: 450, width: 60, height: 20, disappear: true },
+                    { x: 610, y: 450, width: 60, height: 20, disappear: true },
+                    { x: 670, y: 450, width: 80, height: 20 },
+                ],
+                spikes: [
+                    { x: 450, y: 530, width: 100, height: 20 },
+                    { x: 600, y: 430, width: 70, height: 20 }
+                ],
+                door: { x: 720, y: 390, width: 40, height: 60 },
+                traps: []
+            },
+            // Level 9 - Precision jumping
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 80, height: 50 },
+                    { x: 100, y: 500, width: 40, height: 20 },
+                    { x: 180, y: 450, width: 40, height: 20 },
+                    { x: 260, y: 400, width: 40, height: 20 },
+                    { x: 340, y: 350, width: 40, height: 20 },
+                    { x: 420, y: 300, width: 40, height: 20 },
+                    { x: 500, y: 350, width: 40, height: 20 },
+                    { x: 580, y: 400, width: 40, height: 20 },
+                    { x: 660, y: 350, width: 80, height: 20 },
+                ],
+                spikes: [
+                    { x: 120, y: 530, width: 600, height: 20 }
+                ],
+                door: { x: 720, y: 290, width: 40, height: 60 },
+                traps: [
+                    { type: 'fallingBlock', x: 340, y: 0, width: 40, height: 20, triggerX: 300, fallen: false },
+                    { type: 'fallingBlock', x: 500, y: 0, width: 40, height: 20, triggerX: 450, fallen: false }
+                ]
+            },
+            // Level 10 - Final challenge
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 100, height: 50 },
+                    { x: 120, y: 480, width: 80, height: 20 },
+                    { x: 240, y: 410, width: 80, height: 20, move: true, range: 40, speed: 2 },
+                    { x: 380, y: 340, width: 80, height: 20 },
+                    { x: 500, y: 270, width: 80, height: 20, disappear: true },
+                    { x: 620, y: 200, width: 100, height: 20 },
+                ],
+                spikes: [
+                    { x: 150, y: 530, width: 200, height: 20 },
+                    { x: 400, y: 530, width: 150, height: 20 }
+                ],
+                door: { x: 720, y: 140, width: 40, height: 60 },
+                traps: [
+                    { type: 'fallingBlock', x: 240, y: 0, width: 80, height: 20, triggerX: 200, fallen: false }
+                ]
+            },
+            // Level 11 - Speed run
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 100, height: 50 },
+                    { x: 120, y: 500, width: 70, height: 20, disappear: true },
+                    { x: 210, y: 450, width: 70, height: 20, disappear: true },
+                    { x: 300, y: 400, width: 70, height: 20, disappear: true },
+                    { x: 390, y: 350, width: 70, height: 20, disappear: true },
+                    { x: 480, y: 300, width: 70, height: 20, disappear: true },
+                    { x: 570, y: 250, width: 100, height: 20 },
+                ],
+                spikes: [
+                    { x: 110, y: 530, width: 500, height: 20 }
+                ],
+                door: { x: 680, y: 190, width: 40, height: 60 },
+                traps: []
+            },
+            // Level 12 - Zigzag
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 100, height: 50 },
+                    { x: 150, y: 480, width: 60, height: 20 },
+                    { x: 100, y: 410, width: 60, height: 20 },
+                    { x: 150, y: 340, width: 60, height: 20 },
+                    { x: 100, y: 270, width: 60, height: 20 },
+                    { x: 150, y: 200, width: 60, height: 20 },
+                    { x: 250, y: 150, width: 80, height: 20 },
+                    { x: 400, y: 200, width: 80, height: 20 },
+                    { x: 550, y: 150, width: 100, height: 20 },
+                ],
+                spikes: [
+                    { x: 120, y: 530, width: 100, height: 20 }
+                ],
+                door: { x: 680, y: 90, width: 40, height: 60 },
+                traps: []
+            },
+            // Level 13 - Spikes everywhere
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 80, height: 50 },
+                    { x: 120, y: 480, width: 60, height: 20 },
+                    { x: 220, y: 420, width: 60, height: 20 },
+                    { x: 320, y: 360, width: 60, height: 20 },
+                    { x: 420, y: 300, width: 60, height: 20 },
+                    { x: 520, y: 240, width: 60, height: 20 },
+                    { x: 620, y: 180, width: 80, height: 20 },
+                ],
+                spikes: [
+                    { x: 100, y: 530, width: 60, height: 20 },
+                    { x: 200, y: 460, width: 60, height: 20 },
+                    { x: 300, y: 400, width: 60, height: 20 },
+                    { x: 400, y: 340, width: 60, height: 20 },
+                    { x: 500, y: 280, width: 60, height: 20 },
+                ],
+                door: { x: 700, y: 120, width: 40, height: 60 },
+                traps: []
+            },
+            // Level 14 - Moving platforms intro
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 120, height: 50 },
+                    { x: 160, y: 480, width: 80, height: 20, move: true, range: 50, speed: 2 },
+                    { x: 320, y: 410, width: 80, height: 20 },
+                    { x: 440, y: 340, width: 80, height: 20, move: true, range: 60, speed: 2.5 },
+                    { x: 600, y: 270, width: 100, height: 20 },
+                ],
+                spikes: [
+                    { x: 140, y: 530, width: 100, height: 20 }
+                ],
+                door: { x: 700, y: 210, width: 40, height: 60 },
+                traps: []
+            },
+            // Level 15 - All together
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 120, height: 50 },
+                    { x: 150, y: 480, width: 80, height: 20 },
+                    { x: 260, y: 410, width: 80, height: 20, move: true, range: 30, speed: 1.5 },
+                    { x: 380, y: 340, width: 80, height: 20 },
+                    { x: 500, y: 270, width: 80, height: 20 },
+                    { x: 620, y: 200, width: 100, height: 20 },
+                ],
+                spikes: [
+                    { x: 140, y: 530, width: 100, height: 20 }
+                ],
+                door: { x: 720, y: 140, width: 40, height: 60 },
+                traps: []
+            }
+        ];
+
+        // Generate all 100 levels
+        const levels = [...handDesignedLevels];
+        for (let i = 16; i <= 100; i++) {
+            levels.push(generateLevel(i));
+        }
+
+        let level = JSON.parse(JSON.stringify(levels[0]));
+
+        // Event listeners
+        document.addEventListener('keydown', (e) => {
+            keys[e.code] = true;
+            if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+                e.preventDefault();
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            keys[e.code] = false;
+        });
+
+        function loadLevel(levelIndex) {
+            if (levelIndex >= levels.length) {
+                alert('恭喜你通关了所有100个关卡！你太棒了！');
+                currentLevel = 0;
+                deaths = 0;
+            } else {
+                currentLevel = levelIndex;
+            }
+            level = JSON.parse(JSON.stringify(levels[currentLevel]));
+            resetPlayer();
+            document.getElementById('levelNum').textContent = currentLevel + 1;
+            document.getElementById('deaths').textContent = deaths;
+            gameOver = false;
+            levelComplete = false;
+            document.getElementById('gameOver').style.display = 'none';
+            document.getElementById('levelComplete').style.display = 'none';
+        }
+
+        function resetPlayer() {
+            player.x = 50;
+            player.y = 500;
+            player.velocityX = 0;
+            player.velocityY = 0;
+            player.grounded = false;
+        }
+
+        function restartLevel() {
+            loadLevel(currentLevel);
+        }
+
+        function nextLevel() {
+            loadLevel(currentLevel + 1);
+        }
+
+        function playerDied() {
+            addDeathParticles();
+            deaths++;
+            document.getElementById('deaths').textContent = deaths;
+            gameOver = true;
+            document.getElementById('gameOver').style.display = 'block';
+        }
+
+        function checkCollision(rect1, rect2) {
+            return rect1.x < rect2.x + rect2.width &&
+                   rect1.x + rect1.width > rect2.x &&
+                   rect1.y < rect2.y + rect2.height &&
+                   rect1.y + rect1.height > rect2.y;
+        }
+
+        function update() {
+            if (gameOver || levelComplete) return;
+
+            // Player input
+            if (keys['ArrowLeft'] || keys['KeyA']) {
+                player.velocityX = -player.speed;
+            } else if (keys['ArrowRight'] || keys['KeyD']) {
+                player.velocityX = player.speed;
+            } else {
+                player.velocityX = 0;
+            }
+
+            const wasGrounded = player.grounded;
+            if ((keys['Space'] || keys['ArrowUp'] || keys['KeyW']) && player.grounded) {
+                player.velocityY = player.jumpForce;
+                player.grounded = false;
+                addJumpParticles();
+            }
+
+            // Apply gravity
+            player.velocityY += player.gravity;
+
+            // Update position
+            player.x += player.velocityX;
+            player.y += player.velocityY;
+
+            // Add trail particles when moving
+            addTrail();
+
+            // Keep player in bounds
+            if (player.x < 0) player.x = 0;
+            if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
+
+            // Check if fell off screen
+            if (player.y > canvas.height) {
+                playerDied();
+                return;
+            }
+
+            // Platform collision
+            player.grounded = false;
+            level.platforms.forEach(platform => {
+                if (checkCollision(player, platform)) {
+                    // Landing on top
+                    if (player.velocityY > 0 && player.y + player.height - player.velocityY <= platform.y) {
+                        player.y = platform.y - player.height;
+                        player.velocityY = 0;
+                        player.grounded = true;
+
+                        // Add landing particles
+                        if (!wasGrounded) {
+                            for (let i = 0; i < 5; i++) {
+                                addParticle(
+                                    player.x + Math.random() * player.width,
+                                    player.y + player.height,
+                                    'rgba(0, 245, 160, 0.6)',
+                                    'land'
+                                );
+                            }
+                        }
+
+                        // Disappearing platform
+                        if (platform.disappear) {
+                            if (!platform.timer) platform.timer = 0;
+                            platform.timer += 1;
+                        }
+                    }
+                    // Hitting from below
+                    else if (player.velocityY < 0 && player.y - player.velocityY >= platform.y + platform.height) {
+                        player.y = platform.y + platform.height;
+                        player.velocityY = 0;
+                    }
+                    // Hitting from side
+                    else {
+                        if (player.velocityX > 0) {
+                            player.x = platform.x - player.width;
+                        } else if (player.velocityX < 0) {
+                            player.x = platform.x + platform.width;
+                        }
+                    }
+                }
+            });
+
+            // Remove disappearing platforms
+            level.platforms = level.platforms.filter(p => {
+                if (p.disappear && p.timer && p.timer > 30) {
+                    return false;
+                }
+                return true;
+            });
+
+            // Spike collision
+            level.spikes.forEach(spike => {
+                // Moving spikes
+                if (spike.move) {
+                    if (!spike.originalX) spike.originalX = spike.x;
+                    if (!spike.direction) spike.direction = 1;
+                    spike.x += spike.speed * spike.direction;
+                    if (spike.x > spike.originalX + spike.range || spike.x < spike.originalX - spike.range) {
+                        spike.direction *= -1;
+                    }
+                }
+
+                if (checkCollision(player, spike)) {
+                    playerDied();
+                }
+            });
+
+            // Door collision (level complete)
+            if (checkCollision(player, level.door)) {
+                levelComplete = true;
+                document.getElementById('levelComplete').style.display = 'block';
+            }
+
+            // Traps
+            level.traps.forEach(trap => {
+                if (trap.type === 'fallingBlock' && !trap.fallen) {
+                    if (player.x >= trap.triggerX) {
+                        trap.fallen = true;
+                    }
+                }
+                if (trap.fallen && trap.y < 400) {
+                    trap.y += 8;
+                }
+                if (checkCollision(player, trap)) {
+                    playerDied();
+                }
+            });
+
+            // Moving platforms
+            level.platforms.forEach(platform => {
+                if (platform.move) {
+                    if (!platform.originalX) platform.originalX = platform.x;
+                    if (!platform.direction) platform.direction = 1;
+                    platform.x += platform.speed * platform.direction;
+                    if (platform.x > platform.originalX + platform.range || platform.x < platform.originalX - platform.range) {
+                        platform.direction *= -1;
+                    }
+                }
+            });
+
+            // Update particles
+            particles = particles.filter(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.02;
+                p.vy += 0.1;
+                return p.life > 0;
+            });
+
+            // Update stars
+            stars.forEach(star => {
+                star.twinkle += star.speed;
+            });
+        }
+
+        function draw() {
+            // Clear canvas with gradient background
+            const bgGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            bgGradient.addColorStop(0, '#0f0c29');
+            bgGradient.addColorStop(0.5, '#302b63');
+            bgGradient.addColorStop(1, '#24243e');
+            ctx.fillStyle = bgGradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw twinkling stars
+            stars.forEach(star => {
+                const alpha = 0.3 + Math.sin(star.twinkle) * 0.3 + 0.3;
+                ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Add glow to larger stars
+                if (star.size > 1.5) {
+                    ctx.fillStyle = `rgba(0, 217, 245, ${alpha * 0.3})`;
+                    ctx.beginPath();
+                    ctx.arc(star.x, star.y, star.size * 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+
+            // Draw particles (behind everything)
+            particles.forEach(p => {
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+
+            // Draw platforms with glow effect
+            level.platforms.forEach(platform => {
+                // Glow effect
+                ctx.shadowColor = platform.disappear ? 'rgba(255, 100, 100, 0.5)' : 'rgba(0, 245, 160, 0.3)';
+                ctx.shadowBlur = 15;
+
+                const gradient = ctx.createLinearGradient(platform.x, platform.y, platform.x, platform.y + platform.height);
+                if (platform.move) {
+                    gradient.addColorStop(0, '#a855f7');
+                    gradient.addColorStop(1, '#7c3aed');
+                } else if (platform.disappear) {
+                    gradient.addColorStop(0, '#fb923c');
+                    gradient.addColorStop(1, '#f97316');
+                } else {
+                    gradient.addColorStop(0, '#00f5a0');
+                    gradient.addColorStop(1, '#00d9f5');
+                }
+                ctx.fillStyle = gradient;
+                ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+
+                // Platform border
+                ctx.strokeStyle = platform.move ? '#c4b5fd' : platform.disappear ? '#fed7aa' : '#a7f3d0';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(platform.x, platform.y, platform.width, platform.height);
+
+                // Warning for disappearing platforms
+                if (platform.disappear && platform.timer && platform.timer > 15) {
+                    ctx.fillStyle = `rgba(255, 0, 0, ${platform.timer / 30 * 0.5})`;
+                    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+                }
+
+                ctx.shadowBlur = 0;
+            });
+
+            // Draw spikes with glow
+            level.spikes.forEach(spike => {
+                ctx.shadowColor = 'rgba(255, 68, 68, 0.5)';
+                ctx.shadowBlur = 10;
+
+                const spikeGradient = ctx.createLinearGradient(spike.x, spike.y, spike.x, spike.y + spike.height);
+                spikeGradient.addColorStop(0, '#ff8787');
+                spikeGradient.addColorStop(1, '#ff4444');
+                ctx.fillStyle = spikeGradient;
+
+                const spikeCount = Math.floor(spike.width / 10);
+                for (let i = 0; i < spikeCount; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(spike.x + i * 10, spike.y + spike.height);
+                    ctx.lineTo(spike.x + i * 10 + 5, spike.y);
+                    ctx.lineTo(spike.x + i * 10 + 10, spike.y + spike.height);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+
+                ctx.shadowBlur = 0;
+            });
+
+            // Draw door with glow
+            ctx.shadowColor = 'rgba(74, 222, 128, 0.6)';
+            ctx.shadowBlur = 20;
+
+            const doorGradient = ctx.createLinearGradient(level.door.x, level.door.y, level.door.x + level.door.width, level.door.y);
+            doorGradient.addColorStop(0, '#4ade80');
+            doorGradient.addColorStop(1, '#22c55e');
+            ctx.fillStyle = doorGradient;
+            ctx.fillRect(level.door.x, level.door.y, level.door.width, level.door.height);
+
+            ctx.fillStyle = '#86efac';
+            ctx.fillRect(level.door.x + 5, level.door.y + 5, level.door.width - 10, level.door.height - 10);
+
+            // Door handle with glow
+            ctx.fillStyle = '#fbbf24';
+            ctx.shadowColor = 'rgba(251, 191, 36, 0.8)';
+            ctx.shadowBlur = 10;
+            ctx.beginPath();
+            ctx.arc(level.door.x + 30, level.door.y + 30, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.shadowBlur = 0;
+
+            // Draw traps
+            level.traps.forEach(trap => {
+                if (trap.type === 'fallingBlock') {
+                    if (trap.fallen || trap.y < 100) {
+                        ctx.shadowColor = 'rgba(239, 68, 68, 0.5)';
+                        ctx.shadowBlur = 15;
+
+                        const trapGradient = ctx.createLinearGradient(trap.x, trap.y, trap.x, trap.y + trap.height);
+                        trapGradient.addColorStop(0, '#f87171');
+                        trapGradient.addColorStop(1, '#dc2626');
+                        ctx.fillStyle = trapGradient;
+                        ctx.fillRect(trap.x, trap.y, trap.width, trap.height);
+
+                        ctx.strokeStyle = '#fca5a5';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(trap.x, trap.y, trap.width, trap.height);
+
+                        ctx.shadowBlur = 0;
+                    }
+                }
+            });
+
+            // Draw player with glow and animation
+            const pulse = Math.sin(Date.now() / 200) * 0.1 + 1;
+            ctx.shadowColor = 'rgba(0, 245, 160, 0.8)';
+            ctx.shadowBlur = 20 * pulse;
+
+            const playerGradient = ctx.createLinearGradient(
+                player.x,
+                player.y - 5 * pulse,
+                player.x + player.width,
+                player.y + player.height + 5 * pulse
+            );
+            playerGradient.addColorStop(0, '#00f5a0');
+            playerGradient.addColorStop(0.5, '#00d9f5');
+            playerGradient.addColorStop(1, '#a855f7');
+            ctx.fillStyle = playerGradient;
+
+            // Rounded rectangle for player
+            const radius = 6;
+            ctx.beginPath();
+            ctx.moveTo(player.x + radius, player.y);
+            ctx.lineTo(player.x + player.width - radius, player.y);
+            ctx.quadraticCurveTo(player.x + player.width, player.y, player.x + player.width, player.y + radius);
+            ctx.lineTo(player.x + player.width, player.y + player.height - radius);
+            ctx.quadraticCurveTo(player.x + player.width, player.y + player.height, player.x + player.width - radius, player.y + player.height);
+            ctx.lineTo(player.x + radius, player.y + player.height);
+            ctx.quadraticCurveTo(player.x, player.y + player.height, player.x, player.y + player.height - radius);
+            ctx.lineTo(player.x, player.y + radius);
+            ctx.quadraticCurveTo(player.x, player.y, player.x + radius, player.y);
+            ctx.closePath();
+            ctx.fill();
+
+            // Player eyes with glow
+            ctx.shadowBlur = 5;
+            ctx.shadowColor = 'rgba(255, 255, 255, 0.8)';
+
+            const eyeOffsetX = player.velocityX * 0.3;
+            const eyeOffsetY = player.velocityY * 0.2;
+
+            // Eye whites
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(player.x + 10 + eyeOffsetX, player.y + 12 + eyeOffsetY, 5, 0, Math.PI * 2);
+            ctx.arc(player.x + 20 + eyeOffsetX, player.y + 12 + eyeOffsetY, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Pupils
+            ctx.fillStyle = '#0f0c29';
+            ctx.beginPath();
+            ctx.arc(player.x + 10 + eyeOffsetX, player.y + 12 + eyeOffsetY, 2.5, 0, Math.PI * 2);
+            ctx.arc(player.x + 20 + eyeOffsetX, player.y + 12 + eyeOffsetY, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.shadowBlur = 0;
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Initialize game
+        loadLevel(0);
+        gameLoop();
+    </script>
+</body>
+</html>

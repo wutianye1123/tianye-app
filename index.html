@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>天业太空计划 - Tianye Space Program</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="loading-screen">
+        <div class="loading-content">
+            <h1>天业太空计划</h1>
+            <p>Tianye Space Program</p>
+            <div class="loading-bar"><div class="loading-fill"></div></div>
+        </div>
+    </div>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+
+        <!-- VAB -->
+        <div id="vab-panel" class="panel">
+            <div class="vab-header"><h2>火箭组装大楼</h2><span class="vab-name">VAB</span></div>
+            <div class="vab-body">
+                <div class="parts-list">
+                    <h3>指令舱</h3>
+                    <div class="part-item" data-part="CommandPod"><div class="part-icon">&#9650;</div><div class="part-info"><span class="part-name">指令舱</span><span class="part-mass">1.0t</span></div></div>
+                    <div class="part-item" data-part="CommandPodSmall"><div class="part-icon">&#9652;</div><div class="part-info"><span class="part-name">小型指令舱</span><span class="part-mass">0.6t</span></div></div>
+                    <h3>燃料箱</h3>
+                    <div class="part-item" data-part="LargeTank"><div class="part-icon">&#9644;</div><div class="part-info"><span class="part-name">大型燃料箱</span><span class="part-mass">9.0t</span></div></div>
+                    <div class="part-item" data-part="SmallTank"><div class="part-icon">&#9472;</div><div class="part-info"><span class="part-name">小型燃料箱</span><span class="part-mass">2.5t</span></div></div>
+                    <div class="part-item" data-part="TinyTank"><div class="part-icon">&#9472;</div><div class="part-info"><span class="part-name">迷你燃料箱</span><span class="part-mass">0.6t</span></div></div>
+                    <h3>发动机</h3>
+                    <div class="part-item" data-part="LargeEngine"><div class="part-icon">&#9660;</div><div class="part-info"><span class="part-name">大型发动机</span><span class="part-mass">1.5t / 400kN</span></div></div>
+                    <div class="part-item" data-part="SmallEngine"><div class="part-icon">&#9662;</div><div class="part-info"><span class="part-name">小型发动机</span><span class="part-mass">0.5t / 120kN</span></div></div>
+                    <div class="part-item" data-part="VacuumEngine"><div class="part-icon">&#9662;</div><div class="part-info"><span class="part-name">真空发动机</span><span class="part-mass">1.0t / 80kN Isp390</span></div></div>
+                    <div class="part-item" data-part="SolidBooster"><div class="part-icon">&#9650;</div><div class="part-info"><span class="part-name">固体助推器</span><span class="part-mass">4.8t / 250kN</span></div></div>
+                    <h3>结构</h3>
+                    <div class="part-item" data-part="Decoupler"><div class="part-icon">&#9473;</div><div class="part-info"><span class="part-name">分离器</span><span class="part-mass">0.1t</span></div></div>
+                    <div class="part-item" data-part="Fairing"><div class="part-icon">&#9675;</div><div class="part-info"><span class="part-name">整流罩</span><span class="part-mass">0.2t</span></div></div>
+                    <h3>气动/附件</h3>
+                    <div class="part-item" data-part="Parachute"><div class="part-icon">&#9730;</div><div class="part-info"><span class="part-name">降落伞</span><span class="part-mass">0.1t [P部署]</span></div></div>
+                    <div class="part-item" data-part="SolarPanel"><div class="part-icon">&#9632;</div><div class="part-info"><span class="part-name">太阳能板</span><span class="part-mass">0.05t</span></div></div>
+                    <div class="part-item" data-part="LandingLeg"><div class="part-icon">&#9500;</div><div class="part-info"><span class="part-name">着陆腿</span><span class="part-mass">0.05t</span></div></div>
+                </div>
+                <div class="assembly-area">
+                    <h3>当前组装</h3>
+                    <div id="assembly-list"></div>
+                    <div class="assembly-stats"><span>总质量: <span id="total-mass">0</span>t</span><span>推重比: <span id="twr">0</span></span></div>
+                    <div class="assembly-actions">
+                        <button id="btn-launch" class="btn btn-launch" disabled>发射!</button>
+                        <button id="btn-clear" class="btn btn-clear">清空</button>
+                        <button id="btn-template" class="btn btn-template">示例火箭</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Flight HUD -->
+        <div id="flight-hud" class="hidden">
+            <div id="throttle-bar"><div id="throttle-fill"></div><div id="throttle-label">0%</div></div>
+            <div id="info-bar">
+                <div class="info-item"><span class="info-label">高度</span><span class="info-value" id="hud-altitude">0</span></div>
+                <div class="info-item"><span class="info-label">速度</span><span class="info-value" id="hud-speed">0</span></div>
+                <div class="info-item"><span class="info-label">轨道速度</span><span class="info-value" id="hud-orbital-speed">0</span></div>
+                <div class="info-item"><span class="info-label">远拱点</span><span class="info-value" id="hud-apoapsis">0</span></div>
+                <div class="info-item"><span class="info-label">近拱点</span><span class="info-value" id="hud-periapsis">0</span></div>
+                <div class="info-item"><span class="info-label">G力</span><span class="info-value" id="hud-gforce">0</span></div>
+            </div>
+            <div id="warp-bar">
+                <button class="btn btn-warp" id="btn-warp-down">&lt;</button>
+                <span id="warp-indicator">1x</span>
+                <button class="btn btn-warp" id="btn-warp-up">&gt;</button>
+            </div>
+            <div id="navball-container"><canvas id="navball" width="200" height="200"></canvas></div>
+            <div id="staging-panel"><div class="stage-list" id="stage-list"></div><div class="stage-hint">Space: 分级</div></div>
+            <div id="fuel-panel"><div class="fuel-label">燃料</div><div class="fuel-bar"><div class="fuel-fill" id="fuel-fill"></div></div><div class="fuel-percent" id="fuel-percent">100%</div></div>
+            <div id="bottom-bar">
+                <button class="btn btn-view" id="btn-map">地图 [M]</button>
+                <button class="btn btn-view" id="btn-sas">SAS [T]</button>
+                <button class="btn btn-view" id="btn-back-vab">返回VAB</button>
+            </div>
+            <div id="autopilot-panel" class="panel">
+                <div id="ap-indicator"></div>
+                <h4>自动驾驶</h4>
+                <div id="ap-status">关闭</div>
+                <div class="ap-buttons">
+                    <button class="btn btn-ap" id="btn-ap-orbit">入轨</button>
+                    <button class="btn btn-ap" id="btn-ap-mun">登月</button>
+                    <button class="btn btn-ap" id="btn-ap-land">着陆</button>
+                    <button class="btn btn-ap btn-ap-off" id="btn-ap-off">关闭</button>
+                </div>
+            </div>
+            <div id="controls-help" class="hidden">
+                <h4>操控</h4>
+                <div>W/S 俯仰 | A/D 偏航 | Q/E 滚转</div>
+                <div>Shift/Ctrl 油门 | Z/X 最大/关闭</div>
+                <div>Space 分级 | M 地图 | T SAS</div>
+                <div>P 降落伞 | ,/&gt; 时间加速</div>
+            </div>
+            <button id="btn-help" class="btn btn-help">?</button>
+        </div>
+
+        <!-- Map HUD -->
+        <div id="map-hud" class="hidden">
+            <div id="map-info">
+                <div class="info-item"><span class="info-label">远拱点</span><span class="info-value" id="map-apoapsis">0</span></div>
+                <div class="info-item"><span class="info-label">近拱点</span><span class="info-value" id="map-periapsis">0</span></div>
+                <div class="info-item"><span class="info-label">轨道速度</span><span class="info-value" id="map-speed">0</span></div>
+                <div class="info-item"><span class="info-label">周期</span><span class="info-value" id="map-period">0</span></div>
+                <div class="info-item"><span class="info-label">离心率</span><span class="info-value" id="map-eccentricity">0</span></div>
+            </div>
+            <div id="map-bottom-bar"><button class="btn btn-view" id="btn-flight">飞行视图 [M]</button></div>
+        </div>
+    </div>
+
+    <script type="importmap">{ "imports": { "three": "./js/three.module.js" } }</script>
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>

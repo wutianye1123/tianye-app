@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI音乐生成器 - 程序化音乐创作</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%);
+            color: #fff;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            padding: 30px 0;
+            border-bottom: 2px solid rgba(0, 255, 255, 0.3);
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            font-size: 3em;
+            background: linear-gradient(90deg, #00ffff, #ff00ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 30px rgba(0, 255, 255, 0.5);
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #888;
+            font-size: 1.1em;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        @media (max-width: 1024px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .control-panel {
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid rgba(0, 255, 255, 0.3);
+            border-radius: 15px;
+            padding: 25px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.2);
+        }
+
+        .control-group {
+            margin-bottom: 25px;
+        }
+
+        .control-group label {
+            display: block;
+            color: #00ffff;
+            margin-bottom: 10px;
+            font-size: 0.95em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        select, input[type="range"] {
+            width: 100%;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid rgba(0, 255, 255, 0.4);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #00ffff;
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.5);
+        }
+
+        select option {
+            background: #1a1a2e;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            height: 8px;
+            padding: 0;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #00ffff;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(0, 255, 255, 0.8);
+        }
+
+        input[type="range"]::-webkit-slider-track {
+            background: rgba(0, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+
+        .range-value {
+            text-align: right;
+            color: #ff00ff;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            flex: 1;
+            min-width: 100px;
+            padding: 12px 20px;
+            background: linear-gradient(135deg, rgba(0, 255, 255, 0.2), rgba(255, 0, 255, 0.2));
+            border: 2px solid rgba(0, 255, 255, 0.5);
+            border-radius: 10px;
+            color: #fff;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        button:hover {
+            background: linear-gradient(135deg, rgba(0, 255, 255, 0.4), rgba(255, 0, 255, 0.4));
+            border-color: #00ffff;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.6);
+            transform: translateY(-2px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button.play-btn {
+            background: linear-gradient(135deg, #00ff00, #00ffff);
+            color: #000;
+        }
+
+        button.stop-btn {
+            background: linear-gradient(135deg, #ff0000, #ff00ff);
+        }
+
+        .visualization-area {
+            background: rgba(0, 0, 0, 0.3);
+            border: 2px solid rgba(255, 0, 255, 0.3);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 0 30px rgba(255, 0, 255, 0.2);
+        }
+
+        #visualizer {
+            width: 100%;
+            height: 400px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .now-playing {
+            text-align: center;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+        }
+
+        .now-playing h3 {
+            color: #00ffff;
+            margin-bottom: 10px;
+            font-size: 1.2em;
+        }
+
+        .status {
+            color: #ff00ff;
+            font-size: 1em;
+        }
+
+        .playing .status {
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .preset-buttons {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .preset-btn {
+            padding: 8px 15px;
+            background: rgba(255, 0, 255, 0.2);
+            border: 1px solid rgba(255, 0, 255, 0.4);
+            border-radius: 20px;
+            color: #fff;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .preset-btn:hover {
+            background: rgba(255, 0, 255, 0.4);
+            border-color: #ff00ff;
+        }
+
+        .preset-btn.active {
+            background: rgba(255, 0, 255, 0.5);
+            border-color: #ff00ff;
+            box-shadow: 0 0 15px rgba(255, 0, 255, 0.6);
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+
+        .feature-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(0, 255, 255, 0.2);
+            border-radius: 10px;
+            padding: 20px;
+            transition: all 0.3s ease;
+        }
+
+        .feature-card:hover {
+            border-color: rgba(0, 255, 255, 0.5);
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
+            transform: translateY(-5px);
+        }
+
+        .feature-card h4 {
+            color: #00ffff;
+            margin-bottom: 10px;
+        }
+
+        .feature-card p {
+            color: #aaa;
+            font-size: 0.9em;
+            line-height: 1.6;
+        }
+
+        .volume-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .volume-control input[type="range"] {
+            flex: 1;
+        }
+
+        .volume-icon {
+            font-size: 1.5em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎵 AI音乐生成器</h1>
+            <p class="subtitle">程序化音乐创作 - 探索无限可能</p>
+        </header>
+
+        <div class="main-content">
+            <div class="control-panel">
+                <div class="control-group">
+                    <label>音乐风格</label>
+                    <select id="style">
+                        <option value="electronic">电子音乐</option>
+                        <option value="classical">古典音乐</option>
+                        <option value="jazz">爵士乐</option>
+                        <option value="rock">摇滚</option>
+                        <option value="ambient">环境音乐</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label>音阶类型</label>
+                    <select id="scale">
+                        <option value="major">大调</option>
+                        <option value="minor">小调</option>
+                        <option value="pentatonic">五声</option>
+                        <option value="blues">布鲁斯</option>
+                        <option value="dorian">多里亚</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label>调性</label>
+                    <select id="key">
+                        <option value="C">C (Do)</option>
+                        <option value="D">D (Re)</option>
+                        <option value="E">E (Mi)</option>
+                        <option value="F">F (Fa)</option>
+                        <option value="G">G (Sol)</option>
+                        <option value="A">A (La)</option>
+                        <option value="B">B (Si)</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label>速度 (BPM)</label>
+                    <input type="range" id="bpm" min="60" max="180" value="120">
+                    <div class="range-value"><span id="bpmValue">120</span> BPM</div>
+                </div>
+
+                <div class="control-group">
+                    <label>音色</label>
+                    <select id="waveType">
+                        <option value="sine">正弦波 (柔和)</option>
+                        <option value="triangle">三角波 (温暖)</option>
+                        <option value="square">方波 (电子)</option>
+                        <option value="sawtooth">锯齿波 (明亮)</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label>旋律复杂度</label>
+                    <select id="complexity">
+                        <option value="simple">简单</option>
+                        <option value="medium" selected>中等</option>
+                        <option value="complex">复杂</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label>时长</label>
+                    <select id="duration">
+                        <option value="15">15 秒</option>
+                        <option value="30" selected>30 秒</option>
+                        <option value="60">60 秒</option>
+                        <option value="loop">循环播放</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label>音量</label>
+                    <div class="volume-control">
+                        <span class="volume-icon">🔊</span>
+                        <input type="range" id="volume" min="0" max="100" value="70">
+                        <span id="volumeValue">70%</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>播放控制</label>
+                    <div class="button-group">
+                        <button class="play-btn" id="playBtn">▶ 生成播放</button>
+                        <button class="stop-btn" id="stopBtn">⏹ 停止</button>
+                        <button id="testBtn">🔊 测试音</button>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>快速预设</label>
+                    <div class="preset-buttons">
+                        <button class="preset-btn" data-preset="chill">轻松</button>
+                        <button class="preset-btn" data-preset="energetic">活力</button>
+                        <button class="preset-btn" data-preset="melancholic">忧郁</button>
+                        <button class="preset-btn" data-preset="mysterious">神秘</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="visualization-area">
+                <canvas id="visualizer"></canvas>
+                <div class="now-playing" id="nowPlaying">
+                    <h3>当前状态</h3>
+                    <p class="status">点击"生成播放"开始创作音乐</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="features">
+            <div class="feature-card">
+                <h4>🎼 智能作曲</h4>
+                <p>基于音乐理论的算法生成，确保旋律和谐悦耳</p>
+            </div>
+            <div class="feature-card">
+                <h4>🎨 多种风格</h4>
+                <p>电子、古典、爵士、摇滚等多种风格选择</p>
+            </div>
+            <div class="feature-card">
+                <h4>🎛️ 完全可控</h4>
+                <p>自由调节速度、音色、音阶等参数</p>
+            </div>
+            <div class="feature-card">
+                <h4>👁️ 实时可视化</h4>
+                <p>动态频谱分析，让音乐看得见</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== 音频引擎 ====================
+        class AudioEngine {
+            constructor() {
+                this.audioContext = null;
+                this.masterGain = null;
+                this.analyser = null;
+                this.activeOscillators = [];
+                this.isInitialized = false;
+            }
+
+            async init() {
+                if (this.isInitialized) {
+                    // 确保AudioContext处于运行状态
+                    if (this.audioContext.state === 'suspended') {
+                        await this.audioContext.resume();
+                    }
+                    return this.audioContext;
+                }
+
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                this.masterGain = this.audioContext.createGain();
+                this.analyser = this.audioContext.createAnalyser();
+
+                this.masterGain.connect(this.analyser);
+                this.analyser.connect(this.audioContext.destination);
+
+                this.analyser.fftSize = 2048;
+
+                // 恢复AudioContext（解决浏览器自动播放限制）
+                if (this.audioContext.state === 'suspended') {
+                    await this.audioContext.resume();
+                }
+
+                this.isInitialized = true;
+                return this.audioContext;
+            }
+
+            setVolume(value) {
+                if (this.masterGain) {
+                    this.masterGain.gain.value = value;
+                }
+            }
+
+            playTestNote() {
+                this.init().then(ctx => {
+                    const now = ctx.currentTime;
+                    // 播放C大调三和弦
+                    this.playNote(261.63, 0.5, now, 'sine', 0.3);      // C4
+                    this.playNote(329.63, 0.5, now, 'sine', 0.3);      // E4
+                    this.playNote(392.00, 0.5, now, 'sine', 0.3);      // G4
+                });
+            }
+
+            playNote(frequency, duration, time, waveType = 'sine', volume = 0.3) {
+                if (!this.audioContext) return;
+
+                const oscillator = this.audioContext.createOscillator();
+                const gainNode = this.audioContext.createGain();
+
+                oscillator.type = waveType;
+                oscillator.frequency.setValueAtTime(frequency, time);
+
+                // ADSR包络
+                gainNode.gain.setValueAtTime(0, time);
+                gainNode.gain.linearRampToValueAtTime(volume, time + 0.01);
+                gainNode.gain.exponentialRampToValueAtTime(volume * 0.7, time + duration * 0.3);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, time + duration);
+
+                oscillator.connect(gainNode);
+                gainNode.connect(this.masterGain);
+
+                oscillator.start(time);
+                oscillator.stop(time + duration + 0.1);
+
+                this.activeOscillators.push(oscillator);
+
+                oscillator.onended = () => {
+                    const index = this.activeOscillators.indexOf(oscillator);
+                    if (index > -1) {
+                        this.activeOscillators.splice(index, 1);
+                    }
+                };
+            }
+
+            playChord(frequencies, duration, time, waveType = 'sine', volume = 0.2) {
+                frequencies.forEach(freq => {
+                    this.playNote(freq, duration, time, waveType, volume);
+                });
+            }
+
+            playBass(frequency, duration, time, volume = 0.4) {
+                this.playNote(frequency / 2, duration, time, 'triangle', volume);
+            }
+
+            playDrum(time, type = 'kick') {
+                if (!this.audioContext) return;
+
+                const oscillator = this.audioContext.createOscillator();
+                const gainNode = this.audioContext.createGain();
+
+                if (type === 'kick') {
+                    oscillator.frequency.setValueAtTime(150, time);
+                    oscillator.frequency.exponentialRampToValueAtTime(0.01, time + 0.5);
+                    gainNode.gain.setValueAtTime(1, time);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, time + 0.5);
+                } else if (type === 'snare') {
+                    oscillator.type = 'triangle';
+                    oscillator.frequency.setValueAtTime(200, time);
+                    gainNode.gain.setValueAtTime(0.5, time);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, time + 0.2);
+                } else if (type === 'hihat') {
+                    oscillator.type = 'square';
+                    oscillator.frequency.setValueAtTime(800, time);
+                    gainNode.gain.setValueAtTime(0.1, time);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
+                }
+
+                oscillator.connect(gainNode);
+                gainNode.connect(this.masterGain);
+
+                oscillator.start(time);
+                oscillator.stop(time + 0.5);
+            }
+
+            stop() {
+                this.activeOscillators.forEach(osc => {
+                    try {
+                        osc.stop();
+                    } catch (e) {}
+                });
+                this.activeOscillators = [];
+            }
+
+            getAnalyserData() {
+                if (!this.analyser) return null;
+
+                const bufferLength = this.analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                this.analyser.getByteFrequencyData(dataArray);
+
+                return dataArray;
+            }
+        }
+
+        // ==================== 音乐生成器 ====================
+        class MusicGenerator {
+            constructor() {
+                // 音阶定义
+                this.scales = {
+                    major: [0, 2, 4, 5, 7, 9, 11],
+                    minor: [0, 2, 3, 5, 7, 8, 10],
+                    pentatonic: [0, 2, 4, 7, 9],
+                    blues: [0, 3, 5, 6, 7, 10],
+                    dorian: [0, 2, 3, 5, 7, 9, 10]
+                };
+
+                // 基础频率 (C4 = Middle C)
+                this.baseFrequencies = {
+                    'C': 261.63,
+                    'D': 293.66,
+                    'E': 329.63,
+                    'F': 349.23,
+                    'G': 392.00,
+                    'A': 440.00,
+                    'B': 493.88
+                };
+            }
+
+            getScaleFrequencies(key, scaleName, octaves = 2) {
+                const baseFreq = this.baseFrequencies[key];
+                const scale = this.scales[scaleName];
+                const frequencies = [];
+
+                for (let octave = 0; octave < octaves; octave++) {
+                    scale.forEach(interval => {
+                        const freq = baseFreq * Math.pow(2, (interval + octave * 12) / 12);
+                        frequencies.push(freq);
+                    });
+                }
+
+                return frequencies;
+            }
+
+            getChordFrequencies(rootFreq, scaleName) {
+                const scale = this.scales[scaleName];
+                const rootIndex = scale.indexOf(0);
+
+                // 三和弦: 根音, 三度, 五度
+                const third = scale[rootIndex + 2] !== undefined ? scale[rootIndex + 2] : scale[(rootIndex + 2) % scale.length] + 12;
+                const fifth = scale[rootIndex + 4] !== undefined ? scale[rootIndex + 4] : scale[(rootIndex + 4) % scale.length] + 12;
+
+                return [
+                    rootFreq,
+                    rootFreq * Math.pow(2, third / 12),
+                    rootFreq * Math.pow(2, fifth / 12)
+                ];
+            }
+
+            generateMelody(frequencies, bars, complexity) {
+                const melody = [];
+                const notesPerBar = complexity === 'simple' ? 2 : complexity === 'medium' ? 4 : 8;
+
+                for (let bar = 0; bar < bars; bar++) {
+                    for (let note = 0; note < notesPerBar; note++) {
+                        // 30%概率添加休止符
+                        if (Math.random() < 0.3) {
+                            melody.push(null);
+                            continue;
+                        }
+
+                        const freq = frequencies[Math.floor(Math.random() * frequencies.length)];
+                        melody.push(freq);
+                    }
+                }
+
+                return melody;
+            }
+
+            generateHarmony(melody, frequencies, scaleName) {
+                const harmony = [];
+                const beatDuration = 0.25;
+
+                melody.forEach((note, index) => {
+                    if (note !== null && index % 4 === 0) {
+                        const chordFreqs = this.getChordFrequencies(note, scaleName);
+                        harmony.push({
+                            frequencies: chordFreqs,
+                            startTime: index * beatDuration,
+                            duration: beatDuration * 4
+                        });
+                    }
+                });
+
+                return harmony;
+            }
+
+            generateRhythm(bpm, bars) {
+                const beatsPerBar = 4;
+                const beatDuration = 60 / bpm;
+                const rhythm = [];
+
+                for (let bar = 0; bar < bars; bar++) {
+                    for (let beat = 0; beat < beatsPerBar; beat++) {
+                        const time = (bar * beatsPerBar + beat) * beatDuration;
+
+                        // 踢鼓
+                        if (beat === 0 || beat === 2) {
+                            rhythm.push({ type: 'kick', time: time });
+                        }
+
+                        // 小鼓
+                        if (beat === 1 || beat === 3) {
+                            rhythm.push({ type: 'snare', time: time });
+                        }
+
+                        // 踩镲
+                        rhythm.push({ type: 'hihat', time: time });
+                        rhythm.push({ type: 'hihat', time: time + beatDuration / 2 });
+                    }
+                }
+
+                return rhythm;
+            }
+
+            generateBassline(frequencies, bars, bpm) {
+                const bassline = [];
+                const beatsPerBar = 4;
+                const beatDuration = 60 / bpm;
+                const bassFreqs = frequencies.slice(0, 5); // 使用较低的音符
+
+                for (let bar = 0; bar < bars; bar++) {
+                    const bassNote = bassFreqs[Math.floor(Math.random() * bassFreqs.length)];
+
+                    for (let beat = 0; beat < beatsPerBar; beat++) {
+                        if (beat === 0 || beat === 2) {
+                            bassline.push({
+                                frequency: bassNote,
+                                time: (bar * beatsPerBar + beat) * beatDuration,
+                                duration: beatDuration
+                            });
+                        }
+                    }
+                }
+
+                return bassline;
+            }
+        }
+
+        // ==================== 可视化器 ====================
+        class Visualizer {
+            constructor(canvas) {
+                this.canvas = canvas;
+                this.ctx = canvas.getContext('2d');
+                this.animationId = null;
+                this.hue = 0;
+            }
+
+            resize() {
+                const rect = this.canvas.getBoundingClientRect();
+                this.canvas.width = rect.width;
+                this.canvas.height = rect.height;
+            }
+
+            draw(frequencyData) {
+                const width = this.canvas.width;
+                const height = this.canvas.height;
+
+                // 清空画布
+                this.ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+                this.ctx.fillRect(0, 0, width, height);
+
+                if (!frequencyData) {
+                    // 待机动画
+                    this.drawIdleAnimation();
+                    return;
+                }
+
+                // 绘制频谱柱状图
+                const barCount = 100;
+                const barWidth = width / barCount;
+                const step = Math.floor(frequencyData.length / barCount);
+
+                for (let i = 0; i < barCount; i++) {
+                    const value = frequencyData[i * step];
+                    const barHeight = (value / 255) * height * 0.8;
+                    const x = i * barWidth;
+                    const y = height - barHeight;
+
+                    // 霓虹渐变色
+                    const hue = (this.hue + i * 2) % 360;
+                    this.ctx.fillStyle = `hsla(${hue}, 100%, 50%, 0.8)`;
+                    this.ctx.shadowBlur = 15;
+                    this.ctx.shadowColor = `hsla(${hue}, 100%, 50%, 1)`;
+
+                    this.ctx.fillRect(x + 1, y, barWidth - 2, barHeight);
+                }
+
+                // 绘制波形线
+                this.ctx.beginPath();
+                this.ctx.strokeStyle = `hsla(${this.hue}, 100%, 70%, 0.8)`;
+                this.ctx.lineWidth = 3;
+                this.ctx.shadowBlur = 20;
+                this.ctx.shadowColor = `hsla(${this.hue}, 100%, 70%, 1)`;
+
+                const sliceWidth = width / frequencyData.length;
+                let x = 0;
+
+                for (let i = 0; i < frequencyData.length; i++) {
+                    const v = frequencyData[i] / 255;
+                    const y = (height / 2) + Math.sin(i * 0.1 + this.hue * 0.1) * v * height * 0.3;
+
+                    if (i === 0) {
+                        this.ctx.moveTo(x, y);
+                    } else {
+                        this.ctx.lineTo(x, y);
+                    }
+
+                    x += sliceWidth * 5;
+                }
+
+                this.ctx.stroke();
+
+                this.hue = (this.hue + 0.5) % 360;
+            }
+
+            drawIdleAnimation() {
+                const width = this.canvas.width;
+                const height = this.canvas.height;
+
+                // 波浪效果
+                this.ctx.beginPath();
+                this.ctx.strokeStyle = `hsla(${this.hue}, 100%, 50%, 0.5)`;
+                this.ctx.lineWidth = 2;
+                this.ctx.shadowBlur = 10;
+                this.ctx.shadowColor = `hsla(${this.hue}, 100%, 50%, 1)`;
+
+                for (let y = 0; y < 3; y++) {
+                    this.ctx.beginPath();
+                    for (let x = 0; x < width; x++) {
+                        const waveY = height / 2 + Math.sin(x * 0.02 + this.hue * 0.05 + y) * 50 * Math.sin(this.hue * 0.02);
+                        if (x === 0) {
+                            this.ctx.moveTo(x, waveY + y * 40);
+                        } else {
+                            this.ctx.lineTo(x, waveY + y * 40);
+                        }
+                    }
+                    this.ctx.stroke();
+                }
+
+                this.hue = (this.hue + 0.3) % 360;
+            }
+
+            start(dataCallback) {
+                const animate = () => {
+                    const data = dataCallback ? dataCallback() : null;
+                    this.draw(data);
+                    this.animationId = requestAnimationFrame(animate);
+                };
+                animate();
+            }
+
+            stop() {
+                if (this.animationId) {
+                    cancelAnimationFrame(this.animationId);
+                    this.animationId = null;
+                }
+            }
+        }
+
+        // ==================== 主程序 ====================
+        class MusicApp {
+            constructor() {
+                this.audioEngine = new AudioEngine();
+                this.musicGenerator = new MusicGenerator();
+                this.visualizer = new Visualizer(document.getElementById('visualizer'));
+                this.isPlaying = false;
+                this.scheduledNotes = [];
+
+                this.initElements();
+                this.initEventListeners();
+                this.loadPrefs();
+                this.visualizer.resize();
+
+                window.addEventListener('resize', () => {
+                    this.visualizer.resize();
+                });
+
+                this.visualizer.start(() => this.audioEngine.getAnalyserData());
+            }
+
+            initElements() {
+                this.elements = {
+                    style: document.getElementById('style'),
+                    scale: document.getElementById('scale'),
+                    key: document.getElementById('key'),
+                    bpm: document.getElementById('bpm'),
+                    bpmValue: document.getElementById('bpmValue'),
+                    waveType: document.getElementById('waveType'),
+                    complexity: document.getElementById('complexity'),
+                    duration: document.getElementById('duration'),
+                    volume: document.getElementById('volume'),
+                    volumeValue: document.getElementById('volumeValue'),
+                    playBtn: document.getElementById('playBtn'),
+                    stopBtn: document.getElementById('stopBtn'),
+                    testBtn: document.getElementById('testBtn'),
+                    nowPlaying: document.getElementById('nowPlaying'),
+                    presetBtns: document.querySelectorAll('.preset-btn')
+                };
+            }
+
+            initEventListeners() {
+                this.elements.bpm.addEventListener('input', (e) => {
+                    this.elements.bpmValue.textContent = e.target.value;
+                });
+
+                this.elements.volume.addEventListener('input', (e) => {
+                    this.elements.volumeValue.textContent = e.target.value + '%';
+                    this.audioEngine.setVolume(e.target.value / 100);
+                });
+
+                this.elements.playBtn.addEventListener('click', () => {
+                    this.generateAndPlay();
+                });
+
+                this.elements.stopBtn.addEventListener('click', () => {
+                    this.stop();
+                });
+
+                this.elements.testBtn.addEventListener('click', () => {
+                    this.audioEngine.playTestNote();
+                    this.updateStatus('播放测试音...', true);
+                    setTimeout(() => {
+                        if (!this.isPlaying) {
+                            this.updateStatus('点击"生成播放"开始创作音乐', false);
+                        }
+                    }, 1000);
+                });
+
+                this.elements.presetBtns.forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        this.applyPreset(e.target.dataset.preset);
+
+                        // 更新按钮状态
+                        this.elements.presetBtns.forEach(b => b.classList.remove('active'));
+                        e.target.classList.add('active');
+                        this.savePrefs();
+                    });
+                });
+
+                // Auto-save on any control change
+                ['style','scale','key','waveType','complexity','duration'].forEach(id => {
+                    this.elements[id].addEventListener('change', () => this.savePrefs());
+                });
+                this.elements.bpm.addEventListener('input', () => this.savePrefs());
+                this.elements.volume.addEventListener('input', () => this.savePrefs());
+            }
+
+            savePrefs() {
+                try {
+                    localStorage.setItem('musicGen_prefs', JSON.stringify({
+                        style: this.elements.style.value,
+                        scale: this.elements.scale.value,
+                        key: this.elements.key.value,
+                        bpm: this.elements.bpm.value,
+                        waveType: this.elements.waveType.value,
+                        complexity: this.elements.complexity.value,
+                        duration: this.elements.duration.value,
+                        volume: this.elements.volume.value
+                    }));
+                } catch (e) {}
+            }
+
+            loadPrefs() {
+                try {
+                    const p = JSON.parse(localStorage.getItem('musicGen_prefs'));
+                    if (!p) return;
+                    if (p.style) this.elements.style.value = p.style;
+                    if (p.scale) this.elements.scale.value = p.scale;
+                    if (p.key) this.elements.key.value = p.key;
+                    if (p.bpm) { this.elements.bpm.value = p.bpm; this.elements.bpmValue.textContent = p.bpm; }
+                    if (p.waveType) this.elements.waveType.value = p.waveType;
+                    if (p.complexity) this.elements.complexity.value = p.complexity;
+                    if (p.duration) this.elements.duration.value = p.duration;
+                    if (p.volume) { this.elements.volume.value = p.volume; this.elements.volumeValue.textContent = p.volume + '%'; }
+                } catch (e) {}
+            }
+
+            applyPreset(preset) {
+                const presets = {
+                    chill: {
+                        style: 'ambient',
+                        scale: 'pentatonic',
+                        bpm: 80,
+                        waveType: 'sine',
+                        complexity: 'simple'
+                    },
+                    energetic: {
+                        style: 'electronic',
+                        scale: 'minor',
+                        bpm: 140,
+                        waveType: 'sawtooth',
+                        complexity: 'complex'
+                    },
+                    melancholic: {
+                        style: 'classical',
+                        scale: 'minor',
+                        bpm: 70,
+                        waveType: 'triangle',
+                        complexity: 'medium'
+                    },
+                    mysterious: {
+                        style: 'ambient',
+                        scale: 'dorian',
+                        bpm: 90,
+                        waveType: 'sine',
+                        complexity: 'complex'
+                    }
+                };
+
+                const config = presets[preset];
+                if (config) {
+                    this.elements.style.value = config.style;
+                    this.elements.scale.value = config.scale;
+                    this.elements.bpm.value = config.bpm;
+                    this.elements.bpmValue.textContent = config.bpm;
+                    this.elements.waveType.value = config.waveType;
+                    this.elements.complexity.value = config.complexity;
+                }
+            }
+
+            async generateAndPlay() {
+                if (this.isPlaying) {
+                    this.stop();
+                }
+
+                // 等待音频引擎初始化完成
+                await this.audioEngine.init();
+                this.audioEngine.setVolume(this.elements.volume.value / 100);
+
+                const config = {
+                    style: this.elements.style.value,
+                    scale: this.elements.scale.value,
+                    key: this.elements.key.value,
+                    bpm: parseInt(this.elements.bpm.value),
+                    waveType: this.elements.waveType.value,
+                    complexity: this.elements.complexity.value,
+                    duration: this.elements.duration.value
+                };
+
+                this.isPlaying = true;
+                this.updateStatus('正在生成音乐...', true);
+
+                const frequencies = this.musicGenerator.getScaleFrequencies(config.key, config.scale);
+                const bars = config.duration === 'loop' ? 8 : parseInt(config.duration);
+                const beatDuration = 60 / config.bpm;
+
+                // 生成旋律
+                const melody = this.musicGenerator.generateMelody(
+                    frequencies,
+                    bars,
+                    config.complexity
+                );
+
+                // 生成和声
+                const harmony = this.musicGenerator.generateHarmony(melody, frequencies, config.scale);
+
+                // 生成节奏
+                const rhythm = this.musicGenerator.generateRhythm(config.bpm, bars);
+
+                // 生成低音
+                const bassline = this.musicGenerator.generateBassline(frequencies, bars, config.bpm);
+
+                // 安排播放
+                const currentTime = this.audioEngine.audioContext.currentTime + 0.1;
+
+                // 播放旋律
+                melody.forEach((note, index) => {
+                    if (note !== null) {
+                        const time = currentTime + index * beatDuration;
+                        this.audioEngine.playNote(note, beatDuration * 0.8, time, config.waveType, 0.3);
+                    }
+                });
+
+                // 播放和声
+                harmony.forEach(chord => {
+                    const time = currentTime + chord.startTime;
+                    this.audioEngine.playChord(
+                        chord.frequencies,
+                        chord.duration,
+                        time,
+                        'triangle',
+                        0.15
+                    );
+                });
+
+                // 播放节奏
+                rhythm.forEach(beat => {
+                    const time = currentTime + beat.time;
+                    this.audioEngine.playDrum(time, beat.type);
+                });
+
+                // 播放低音
+                bassline.forEach(bass => {
+                    const time = currentTime + bass.time;
+                    this.audioEngine.playBass(bass.frequency, bass.duration, time, 0.25);
+                });
+
+                this.updateStatus(`正在播放: ${this.getStyleName(config.style)} - ${config.bpm} BPM`, true);
+
+                // 循环或自动停止
+                if (config.duration === 'loop') {
+                    const loopDuration = bars * 4 * beatDuration;
+                    setTimeout(() => {
+                        if (this.isPlaying) {
+                            this.generateAndPlay();
+                        }
+                    }, loopDuration * 1000 - 500);
+                } else {
+                    const totalDuration = bars * 4 * beatDuration;
+                    setTimeout(() => {
+                        this.stop();
+                    }, totalDuration * 1000);
+                }
+            }
+
+            stop() {
+                this.audioEngine.stop();
+                this.isPlaying = false;
+                this.updateStatus('点击"生成播放"开始创作音乐', false);
+            }
+
+            updateStatus(text, isPlaying) {
+                const statusEl = this.elements.nowPlaying.querySelector('.status');
+                statusEl.textContent = text;
+
+                if (isPlaying) {
+                    this.elements.nowPlaying.classList.add('playing');
+                } else {
+                    this.elements.nowPlaying.classList.remove('playing');
+                }
+            }
+
+            getStyleName(style) {
+                const names = {
+                    electronic: '电子音乐',
+                    classical: '古典音乐',
+                    jazz: '爵士乐',
+                    rock: '摇滚',
+                    ambient: '环境音乐'
+                };
+                return names[style] || style;
+            }
+        }
+
+        // 启动应用
+        document.addEventListener('DOMContentLoaded', () => {
+            new MusicApp();
+        });
+    </script>
+</body>
+</html>

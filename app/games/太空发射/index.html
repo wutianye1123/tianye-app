@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>太空发射</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;overflow:hidden;font-family:'PingFang SC','Microsoft YaHei',sans-serif;user-select:none;-webkit-user-select:none}
+canvas{display:block}
+#buildUI{position:fixed;left:0;top:0;width:280px;height:100%;background:rgba(10,12,30,0.92);border-right:1px solid rgba(100,140,255,0.2);z-index:10;display:flex;flex-direction:column;padding:12px;color:#ccc;font-size:13px}
+#buildUI h2{color:#6af;font-size:16px;margin-bottom:8px;text-align:center}
+#buildUI .section{margin-bottom:10px}
+#buildUI .section-title{color:#8bf;font-size:12px;border-bottom:1px solid rgba(100,140,255,0.15);padding-bottom:4px;margin-bottom:6px}
+#partsList{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
+.part-btn{background:rgba(30,50,100,0.5);border:1px solid rgba(100,140,255,0.2);color:#aac;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;transition:all 0.15s}
+.part-btn:hover{background:rgba(60,100,200,0.4);border-color:rgba(130,170,255,0.5);color:#fff}
+.part-btn.sel{background:rgba(80,140,255,0.35);border-color:#6af;color:#fff;box-shadow:0 0 6px rgba(80,140,255,0.3)}
+#rocketStack{flex:1;overflow-y:auto;display:flex;flex-direction:column-reverse;align-items:center;gap:2px;padding:8px;border:1px solid rgba(100,140,255,0.1);border-radius:6px;background:rgba(0,0,20,0.3);min-height:120px;max-height:340px}
+.stack-part{background:rgba(40,60,120,0.3);border:1px solid rgba(100,140,255,0.2);padding:3px 8px;border-radius:3px;font-size:10px;cursor:pointer;color:#aac;width:100%;text-align:center;position:relative;transition:all 0.15s}
+.stack-part:hover{background:rgba(120,40,40,0.4);border-color:#f66;color:#faa}
+.stack-part.decoupler{background:rgba(255,180,40,0.15);border-color:rgba(255,180,40,0.3);color:#fc8}
+.stack-part.engine{background:rgba(255,100,40,0.2);border-color:rgba(255,100,40,0.3);color:#fa8}
+#stackPlaceholder{color:#444;font-size:11px;padding:20px;text-align:center}
+#rocketStats{margin-top:8px;font-size:10px;color:#89a;line-height:1.6}
+#rocketStats span{color:#ccf}
+#btnLaunch{width:100%;padding:12px;margin-top:8px;background:linear-gradient(135deg,#f60,#f30);border:none;color:#fff;font-size:16px;font-weight:bold;border-radius:8px;cursor:pointer;letter-spacing:3px;transition:transform 0.1s}
+#btnLaunch:active{transform:scale(0.96)}
+#btnLaunch:disabled{background:#333;color:#666;cursor:not-allowed}
+#hud{position:fixed;top:0;left:280px;right:0;pointer-events:none;z-index:5;padding:8px 12px;display:none;flex-wrap:wrap;gap:6px 18px;font-size:12px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.7)}
+.hud-item{min-width:80px}
+.hud-item .label{color:#89a;font-size:9px}
+.hud-item .val{font-size:15px;font-weight:bold;font-family:monospace}
+.hud-item .val.warn{color:#f84}
+.hud-item .val.danger{color:#f44}
+#stageInfo{position:fixed;right:12px;top:50%;transform:translateY(-50%);pointer-events:none;z-index:5;display:none;text-align:right}
+#stageInfo .stage-name{color:#fc8;font-size:14px;font-weight:bold}
+#stageInfo .stage-fuel{width:8px;height:120px;background:rgba(255,255,255,0.1);border-radius:4px;margin:6px auto 0;position:relative;overflow:hidden}
+#stageInfo .stage-fuel-fill{position:absolute;bottom:0;width:100%;background:linear-gradient(0deg,#f30,#f80,#ff0);border-radius:4px;transition:height 0.3s}
+#orbitInfo{position:fixed;bottom:60px;left:300px;pointer-events:none;z-index:5;display:none;font-size:11px;color:#aac;font-family:monospace;line-height:1.5}
+#helpBar{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);pointer-events:none;z-index:5;display:none;font-size:11px;color:#556;text-align:center;background:rgba(0,0,0,0.5);padding:6px 14px;border-radius:14px}
+#msgOverlay{position:fixed;top:40%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:6;font-size:20px;font-weight:bold;color:#ff0;text-shadow:0 0 12px rgba(255,200,0,0.5);transition:opacity 0.5s;opacity:0}
+#controlsToggle{position:fixed;top:8px;right:8px;z-index:8;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#888;padding:3px 8px;border-radius:4px;cursor:pointer;font-size:10px;display:none}
+#controlsToggle:hover{color:#fff}
+@media(max-width:600px){
+  #buildUI{width:220px;font-size:11px;padding:8px}
+  .part-btn{padding:3px 6px;font-size:9px}
+  #hud{left:220px;font-size:10px}
+  #orbitInfo{left:230px;font-size:9px}
+}
+</style>
+</head>
+<body>
+<div id="buildUI">
+  <h2>火箭组装</h2>
+  <div class="section">
+    <div class="section-title">选择部件</div>
+    <div id="partsList"></div>
+  </div>
+  <div class="section">
+    <div class="section-title">火箭结构 (从上到下, 点击移除)</div>
+    <div id="rocketStack"><div id="stackPlaceholder">点击上方部件添加到火箭</div></div>
+  </div>
+  <div id="rocketStats"></div>
+  <button id="btnLaunch">发 射</button>
+</div>
+<div id="hud">
+  <div class="hud-item"><div class="label">高度 ALT</div><div class="val" id="hudAlt">0 m</div></div>
+  <div class="hud-item"><div class="label">速度 VEL</div><div class="val" id="hudVel">0 m/s</div></div>
+  <div class="hud-item"><div class="label">轨道速度</div><div class="val" id="hudOrbV">—</div></div>
+  <div class="hud-item"><div class="label">远地点 AP</div><div class="val" id="hudAp">—</div></div>
+  <div class="hud-item"><div class="label">近地点 PE</div><div class="val" id="hudPe">—</div></div>
+  <div class="hud-item"><div class="label">推力 N</div><div class="val" id="hudThrust">0</div></div>
+  <div class="hud-item"><div class="label">质量 kg</div><div class="val" id="hudMass">0</div></div>
+</div>
+<div id="orbitInfo"></div>
+<div id="stageInfo">
+  <div class="stage-name" id="stageLabel"></div>
+  <div class="stage-fuel"><div class="stage-fuel-fill" id="stageFuelFill" style="height:100%"></div></div>
+</div>
+<div id="helpBar">W/S 俯仰 · A/D 偏航 · Shift 油门+ · Ctrl 油门- · Z全推力 X切断 · 空格分离 · 鼠标旋转视角 · 滚轮缩放</div>
+<div id="msgOverlay"></div>
+<button id="controlsToggle" title="显示/隐藏操作提示" onclick="toggleHelp()">?</button>
+<canvas id="c"></canvas>
+<script src="three.min.js"></script>
+<script>
+// ===== 物理常量 (缩放后) =====
+const EARTH_R = 600;
+const EARTH_MU = 9.8 * EARTH_R * EARTH_R; // GM
+const ATMOSPHERE_H = 700;
+const MOON_R = 160;
+const MOON_MU = 1.62 * MOON_R * MOON_R;
+const MOON_ORBIT_R = 3800;
+const MOON_PERIOD = 240;
+const SUN_R = 400;
+const SUN_DIST = 18000;
+
+// ===== 部件定义 =====
+const PARTS = {
+  nose:      {name:'鼻锥',     mass:200,   fuel:0,    thrust:0,     icon:'▲', type:'structural'},
+  payload:   {name:'载荷舱',   mass:800,   fuel:0,    thrust:0,     icon:'◆', type:'structural'},
+  tankS:     {name:'燃料箱S',  mass:300,   fuel:1500, thrust:0,     icon:'🟫', type:'tank'},
+  tankM:     {name:'燃料箱M',  mass:600,   fuel:4000, thrust:0,     icon:'🟫', type:'tank'},
+  tankL:     {name:'燃料箱L',  mass:1200,  fuel:9000, thrust:0,     icon:'🟫', type:'tank'},
+  engineA:   {name:'发动机A',  mass:500,   fuel:0,    thrust:35000, icon:'🔵', type:'engine'},
+  engineB:   {name:'发动机B',  mass:900,   fuel:0,    thrust:80000, icon:'🔴', type:'engine'},
+  decoupler: {name:'分离器',   mass:150,   fuel:0,    thrust:0,     icon:'⚡', type:'decoupler'},
+  fin:       {name:'尾翼',     mass:100,   fuel:0,    thrust:0,     icon:'▸', type:'structural'},
+};
+
+// ===== 全局状态 =====
+let mode = 'build'; // build | flight
+let rocketStack = []; // [{id:'tankM', mass, fuel, thrust}, ...]
+let selectedPart = null;
+let thrustLevel = 0; // 0..1
+let currentStage = 0;
+let stages = []; // each = {parts, burnt:false}
+let crash = false;
+let landed = false;
+let showHelp = true;
+let paused = false;
+
+// 物理状态
+let rPos = new THREE.Vector3(0, EARTH_R, 0);
+let rVel = new THREE.Vector3(0, 0, 0);
+let rocketQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), new THREE.Vector3(0,1,0));
+let rMass = 0, rFuel = 0, rThrust = 0;
+let simTime = 0;
+let trailPoints = [];
+let orbitLine = null;
+let moonAngle = 0;
+
+// Three.js
+let scene, camera, renderer;
+let earthMesh, atmosphereMesh, moonMesh, sunMesh;
+let rocketGroup;
+let exhaustParticles = [];
+let starField;
+let cameraYaw = 0, cameraPitch = 0.4, cameraDist = 80;
+let mouseDown = false, lastMouseX = 0, lastMouseY = 0;
+
+// 输入
+let keys = {};
+let throttleTarget = 0;
+
+function initThreeJS(){
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.5, 100000);
+  camera.position.set(0, EARTH_R+80, 80);
+  renderer = new THREE.WebGLRenderer({canvas:document.getElementById('c'),antialias:true});
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+
+  const starsGeo = new THREE.BufferGeometry();
+  const starVerts = [];
+  for(let i=0;i<4000;i++){
+    const theta = Math.random()*Math.PI*2, phi = Math.acos(2*Math.random()-1);
+    const r = 40000+Math.random()*20000;
+    starVerts.push(Math.cos(theta)*Math.sin(phi)*r, Math.sin(theta)*Math.sin(phi)*r, Math.cos(phi)*r);
+  }
+  starsGeo.setAttribute('position', new THREE.Float32BufferAttribute(starVerts,3));
+  const starsMat = new THREE.PointsMaterial({color:0xffffff, size:30, sizeAttenuation:false});
+  starField = new THREE.Points(starsGeo, starsMat);
+  scene.add(starField);
+
+  const earthGeo = new THREE.SphereGeometry(EARTH_R, 64, 48);
+  const earthMat = new THREE.MeshPhongMaterial({
+    color: 0x3366aa,
+    emissive: 0x112244,
+    specular: 0x224466,
+    shininess: 10
+  });
+  earthMesh = new THREE.Mesh(earthGeo, earthMat);
+  scene.add(earthMesh);
+
+  const cloudsGeo = new THREE.SphereGeometry(EARTH_R+3, 48, 36);
+  const cloudsMat = new THREE.MeshPhongMaterial({color:0xffffff, emissive:0x222233, transparent:true, opacity:0.12});
+  atmosphereMesh = new THREE.Mesh(cloudsGeo, cloudsMat);
+  scene.add(atmosphereMesh);
+
+  const atmoGeo = new THREE.SphereGeometry(EARTH_R+35, 48, 36);
+  const atmoMat = new THREE.ShaderMaterial({
+    uniforms:{},
+    vertexShader:`varying vec3 vNormal;varying vec3 vPos;void main(){vNormal=normalize(normalMatrix*normal);vec4 mp=modelViewMatrix*vec4(position,1.0);vPos=mp.xyz;gl_Position=projectionMatrix*mp;}`,
+    fragmentShader:`varying vec3 vNormal;varying vec3 vPos;void main(){float i=pow(0.6+0.4*dot(vNormal,vec3(0,0,1)),2.0);vec3 c=mix(vec3(0.3,0.5,0.9),vec3(0.15,0.25,0.45),i);gl_FragColor=vec4(c,0.18);}`,
+    transparent:true, depthWrite:false
+  });
+  const atmoShell = new THREE.Mesh(atmoGeo, atmoMat);
+  scene.add(atmoShell);
+
+  const moonGeo = new THREE.SphereGeometry(MOON_R, 32, 24);
+  const moonMat = new THREE.MeshPhongMaterial({color:0xcccccc, emissive:0x111111, specular:0x111111});
+  moonMesh = new THREE.Mesh(moonGeo, moonMat);
+  scene.add(moonMesh);
+
+  const sunGeo = new THREE.SphereGeometry(SUN_R, 32, 24);
+  const sunMat = new THREE.MeshBasicMaterial({color:0xffff88});
+  sunMesh = new THREE.Mesh(sunGeo, sunMat);
+  sunMesh.position.set(SUN_DIST, SUN_DIST*0.4, 0);
+  scene.add(sunMesh);
+
+  const ambient = new THREE.AmbientLight(0x334466);
+  scene.add(ambient);
+  const sunLight = new THREE.DirectionalLight(0xffffcc, 1.2);
+  sunLight.position.copy(sunMesh.position);
+  scene.add(sunLight);
+
+  rocketGroup = new THREE.Group();
+  scene.add(rocketGroup);
+
+  const gridHelper = new THREE.PolarGridHelper(EARTH_R+1, 32, 20, 64, 0x446688, 0x223344);
+  scene.add(gridHelper);
+
+  // orbit line
+  orbitLine = new THREE.Line(
+    new THREE.BufferGeometry(),
+    new THREE.LineBasicMaterial({color:0x44aaff, transparent:true, opacity:0.4})
+  );
+  orbitLine.visible = false;
+  scene.add(orbitLine);
+}
+
+function updateOrbitLine(){
+  if(crash || landed){ orbitLine.visible=false; return; }
+  const r = rPos.length();
+  const v = rVel.length();
+  const mu = EARTH_MU;
+  const specificEnergy = v*v/2 - mu/r;
+  if(specificEnergy >= 0){
+    const pts=[];
+    const dt=2;
+    let pr=rPos.clone(), pv=rVel.clone();
+    for(let i=0;i<400;i++){
+      const rr=pr.length();
+      const g=pr.clone().normalize().multiplyScalar(-mu/(rr*rr));
+      pv.add(g.clone().multiplyScalar(dt));
+      pr.add(pv.clone().multiplyScalar(dt));
+      pts.push(pr.x, pr.y, pr.z);
+      if(pr.length()<EARTH_R) break;
+    }
+    orbitLine.geometry.dispose();
+    orbitLine.geometry=new THREE.BufferGeometry();
+    orbitLine.geometry.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));
+    orbitLine.visible=true;
+    return;
+  }
+  const hVec = rPos.clone().cross(rVel);
+  const h = hVec.length();
+  const eVec = rVel.clone().cross(hVec).divideScalar(mu).sub(rPos.clone().normalize());
+  const e = eVec.length();
+  const a = -mu/(2*specificEnergy);
+  const pts=[];
+  const n=300;
+  for(let i=0;i<=n;i++){
+    const theta=(i/n)*Math.PI*2;
+    const rr=a*(1-e*e)/(1+e*Math.cos(theta));
+    if(rr<EARTH_R*0.5||rr>50000) continue;
+    const evn=eVec.clone().normalize();
+    const perp=new THREE.Vector3(-evn.y,evn.x,0).normalize();
+    if(perp.length()<0.1) perp.set(0,0,1).crossVectors(perp.set(1,0,0),evn).normalize();
+    const p=evn.clone().multiplyScalar(rr*Math.cos(theta)).add(perp.clone().multiplyScalar(rr*Math.sin(theta)));
+    pts.push(p.x,p.y,p.z);
+  }
+  orbitLine.geometry.dispose();
+  orbitLine.geometry=new THREE.BufferGeometry();
+  orbitLine.geometry.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));
+  orbitLine.visible=true;
+}
+
+function buildRocketModel(){
+  while(rocketGroup.children.length>0) rocketGroup.remove(rocketGroup.children[0]);
+  let yOff = 0;
+  for(const part of rocketStack){
+    const def = PARTS[part.id];
+    const h = part.id==='decoupler'?1.2 : part.id==='nose'?4 : part.id.startsWith('tank')?part.id==='tankS'?4:part.id==='tankM'?6:8 : part.id.startsWith('engine')?5 : part.id==='fin'?2:3;
+    const w = part.id==='nose'?1.5 : part.id.startsWith('engine')?2.8 : part.id==='decoupler'?2.2 : 2;
+
+    const geo = part.id==='nose' ? new THREE.ConeGeometry(w/2, h, 8) : new THREE.CylinderGeometry(w/2, part.id.startsWith('engine')?w*0.6:w/2, h, 8);
+    let color = 0x8899bb;
+    if(def.type==='tank') color=0xdd8833;
+    else if(def.type==='engine') color=0x666677;
+    else if(def.type==='decoupler') color=0xffcc44;
+    else if(part.id==='nose') color=0xcc4444;
+    else if(part.id==='payload') color=0x4488cc;
+    else if(part.id==='fin') color=0x666699;
+
+    const mat = new THREE.MeshPhongMaterial({color, specular:0x222222, shininess:20});
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = yOff + h/2;
+    mesh.userData.partId = part.id;
+    rocketGroup.add(mesh);
+
+    if(part.id==='fin'){
+      for(let i=0;i<3;i++){
+        const fGeo=new THREE.BoxGeometry(0.3, h, w*0.8);
+        const fMesh=new THREE.Mesh(fGeo, new THREE.MeshPhongMaterial({color:0x666699,specular:0x111111}));
+        fMesh.position.set(0, yOff+h/2, 0);
+        fMesh.rotateY(i*Math.PI*2/3);
+        fMesh.translateZ(w/2+0.4);
+        rocketGroup.add(fMesh);
+      }
+    }
+
+    yOff += h;
+    if(part.id==='decoupler') yOff += 0.5;
+  }
+  rocketGroup.position.set(0, EARTH_R, 0);
+  rocketGroup.quaternion.identity();
+}
+
+function computeRocketStats(){
+  let totalMass=0, totalFuel=0, maxThrust=0;
+  let stageList=[];
+  let curStage=[];
+  for(let i=0;i<rocketStack.length;i++){
+    const p=rocketStack[i], def=PARTS[p.id];
+    totalMass+=def.mass; totalFuel+=def.fuel;
+    if(def.thrust>maxThrust) maxThrust=def.thrust;
+    curStage.push(i);
+    if(def.type==='decoupler'||i===rocketStack.length-1){
+      stageList.push({indices:[...curStage], burnt:false});
+      curStage=[];
+    }
+  }
+  // 如果第一部分是结构件+发动机，合并上去找到的发动机
+  stages = [];
+  let engineFound = false;
+  for(let s=stageList.length-1;s>=0;s--){
+    const parts=stageList[s].indices;
+    const hasEngine=parts.some(i=>PARTS[rocketStack[i].id].type==='engine');
+    if(hasEngine) engineFound=true;
+    stages.unshift({indices:parts, burnt:!engineFound}); // 没有发动机的级标记为已燃尽
+  }
+  if(stages.length===0) stages=[{indices:rocketStack.map((_,i)=>i), burnt:false}];
+
+  currentStage = stages.findIndex(s=>!s.burnt);
+  if(currentStage<0) currentStage=stages.length-1;
+
+  return {totalMass, totalFuel, maxThrust};
+}
+
+function renderRocketStats(){
+  const s=computeRocketStats();
+  const canLaunch=rocketStack.some(p=>PARTS[p.id].type==='engine');
+  document.getElementById('rocketStats').innerHTML=`
+    总质量: <span>${(s.totalMass/1000).toFixed(1)}t</span> | 燃料: <span>${(s.totalFuel/1000).toFixed(1)}t</span><br>
+    最大推力: <span>${(s.maxThrust/1000).toFixed(1)}kN</span> | 级数: <span>${stages.length}</span><br>
+    推重比: <span>${(s.maxThrust/(s.totalMass*9.8)).toFixed(2)}</span>
+    ${!canLaunch?'<br><span style="color:#f66">需要至少一个发动机!</span>':''}
+  `;
+  document.getElementById('btnLaunch').disabled = !canLaunch;
+}
+
+function renderParts(){
+  const el=document.getElementById('partsList');
+  el.innerHTML='';
+  for(const [id, def] of Object.entries(PARTS)){
+    const btn=document.createElement('div');
+    btn.className='part-btn'+(selectedPart===id?' sel':'');
+    btn.textContent=def.icon+' '+def.name;
+    btn.title=def.type==='engine'?`推力:${(def.thrust/1000).toFixed(0)}kN`:
+              def.type==='tank'?`燃料:${def.fuel}kg`:'';
+    btn.onclick=()=>{ selectedPart=selectedPart===id?null:id; renderParts(); };
+    el.appendChild(btn);
+  }
+}
+
+function renderStack(){
+  const el=document.getElementById('rocketStack');
+  el.innerHTML='';
+  if(rocketStack.length===0){
+    el.innerHTML='<div id="stackPlaceholder">点击上方部件添加到火箭</div>';
+    return;
+  }
+  for(let i=rocketStack.length-1;i>=0;i--){
+    const p=rocketStack[i], def=PARTS[p.id];
+    const div=document.createElement('div');
+    div.className='stack-part'+(def.type==='decoupler'?' decoupler':'')+(def.type==='engine'?' engine':'');
+    div.textContent=(i+1)+'. '+def.name;
+    div.title='点击移除';
+    div.onclick=()=>{ rocketStack.splice(i,1); renderStack(); renderRocketStats(); buildRocketModel(); };
+    el.appendChild(div);
+  }
+}
+
+function addPart(){
+  if(!selectedPart) return;
+  const def=PARTS[selectedPart];
+  rocketStack.push({id:selectedPart});
+  // 自动调整：发动机必须在燃料箱/tank下面（更高y）
+  // 只做基本验证
+  renderStack();
+  renderRocketStats();
+  buildRocketModel();
+}
+
+// 点击火箭堆外区域添加部件
+document.getElementById('rocketStack').addEventListener('dblclick', addPart);
+document.getElementById('partsList').addEventListener('dblclick', addPart);
+
+// ===== 物理模拟 =====
+function getActiveEngineThrust(){
+  if(currentStage<0||currentStage>=stages.length) return 0;
+  const stage=stages[currentStage];
+  if(stage.burnt) return 0;
+  let thrust=0;
+  for(const idx of stage.indices){
+    const p=rocketStack[idx];
+    const def=PARTS[p.id];
+    if(def.type==='engine'&&p.fuel!==undefined&&p.fuel>0) thrust+=def.thrust;
+    else if(def.type==='engine'&&p.fuel===undefined) thrust+=def.thrust; // structural engine = infinite
+  }
+  return thrust;
+}
+
+function getActiveFuelMass(){
+  if(currentStage<0||currentStage>=stages.length) return 0;
+  const stage=stages[currentStage];
+  if(stage.burnt) return 0;
+  let fuel=0;
+  for(const idx of stage.indices){
+    const p=rocketStack[idx];
+    if(p.fuel!==undefined) fuel+=p.fuel;
+  }
+  return fuel;
+}
+
+function consumeFuel(dt, thrustFraction){
+  if(currentStage<0||currentStage>=stages.length) return;
+  const stage=stages[currentStage];
+  if(stage.burnt) return;
+  let totalFuel=0, totalThrust=0;
+  const tanks=[];
+  for(const idx of stage.indices){
+    const p=rocketStack[idx], def=PARTS[p.id];
+    if(def.type==='engine') totalThrust+=def.thrust;
+    if(p.fuel!==undefined){ totalFuel+=p.fuel; tanks.push({idx, part:p}); }
+  }
+  if(totalFuel<=0||totalThrust<=0) return;
+  const fuelRate=totalThrust*thrustFraction*0.000012;
+  const consumed=Math.min(totalFuel, fuelRate*dt);
+  if(consumed<=0) return;
+  for(const t of tanks){
+    if(consumed<=0) break;
+    const take=Math.min(t.part.fuel, consumed);
+    t.part.fuel-=take;
+    consumed-=take;
+  }
+}
+
+function getRocketMass(){
+  let mass=0;
+  for(const p of rocketStack){
+    const def=PARTS[p.id];
+    mass+=def.mass;
+    if(p.fuel!==undefined) mass+=p.fuel;
+  }
+  return mass;
+}
+
+function getTotalMass(){
+  let mass=0;
+  for(let p of rocketStack){
+    const def=PARTS[p.id];
+    mass+=def.mass;
+    if(p.fuel!==undefined) mass+=p.fuel;
+  }
+  return mass;
+}
+
+function getActiveThrust(){
+  let t=0;
+  if(currentStage>=0&&currentStage<stages.length&&!stages[currentStage].burnt){
+    for(const idx of stages[currentStage].indices){
+      const def=PARTS[rocketStack[idx].id];
+      if(def.type==='engine') t+=def.thrust;
+    }
+  }
+  return t;
+}
+
+function physicsStep(dt){
+  if(crash||landed||paused) return;
+  const subSteps=8, sdt=dt/subSteps;
+  for(let step=0;step<subSteps;step++){
+    simTime+=sdt;
+    // gravity
+    const rr=rPos.length();
+    const gDir=rPos.clone().normalize().multiplyScalar(-1);
+    let gMag=EARTH_MU/(rr*rr);
+    // moon gravity
+    const moonPos=new THREE.Vector3(Math.cos(moonAngle)*MOON_ORBIT_R, 0, Math.sin(moonAngle)*MOON_ORBIT_R);
+    const toMoon=moonPos.clone().sub(rPos);
+    const moonDist=toMoon.length();
+    if(moonDist>MOON_R+10){
+      gMag+=MOON_MU/(moonDist*moonDist);
+    }
+    const gAcc=gDir.multiplyScalar(EARTH_MU/(rr*rr));
+    // moon
+    const mDir=toMoon.normalize();
+    const mAcc=mDir.multiplyScalar(MOON_MU/(moonDist*moonDist));
+    const gravAcc=gAcc.add(mAcc);
+
+    // thrust
+    const mass=getTotalMass();
+    const thrustF=thrustLevel*getActiveThrust();
+    const thrustDir=new THREE.Vector3(0,1,0).applyQuaternion(rocketGroup.quaternion);
+    const thrustAcc=thrustDir.clone().multiplyScalar(thrustF/mass);
+
+    // drag (atmosphere)
+    const alt=rr-EARTH_R;
+    let dragAcc=new THREE.Vector3();
+    if(alt<ATMOSPHERE_H-EARTH_R){
+      const rho=1.2*Math.exp(-alt/80);
+      const vRel=rVel.length();
+      const Cd=0.3;
+      const area=6;
+      const dragMag=0.5*rho*vRel*vRel*Cd*area;
+      const dragDir=rVel.clone().normalize().multiplyScalar(-1);
+      dragAcc=dragDir.multiplyScalar(dragMag/mass);
+    }
+
+    // integrate
+    const acc=gravAcc.add(thrustAcc).add(dragAcc);
+    const oldVel=rVel.clone();
+    rVel.add(acc.clone().multiplyScalar(sdt));
+    rPos.add(oldVel.clone().add(rVel).multiplyScalar(0.5*sdt));
+
+    // consume fuel
+    if(thrustLevel>0) consumeFuel(sdt, thrustLevel);
+
+    // check crash/land
+    const dist=rPos.length();
+    if(dist<EARTH_R){
+      const spd=rVel.length();
+      if(spd<15){
+        landed=true;
+        rVel.set(0,0,0);
+        rPos.normalize().multiplyScalar(EARTH_R);
+        showMessage('着陆成功! 🎉', '#0f0');
+      } else {
+        crash=true;
+        showMessage('坠毁! 💥', '#f44');
+        explodeRocket();
+      }
+      orbitLine.visible=false;
+      return;
+    }
+
+    // update rocket position and orientation
+    rocketGroup.position.copy(rPos);
+    if(thrustLevel>0.01&&!crash){
+      const up=rPos.clone().normalize();
+      const fwd=new THREE.Vector3(0,1,0).applyQuaternion(rocketGroup.quaternion);
+      const targetQ=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), up);
+      rocketGroup.quaternion.slerp(targetQ, 0.5*sdt);
+    }
+
+    // stage fuel check
+    if(currentStage>=0&&currentStage<stages.length){
+      const stage=stages[currentStage];
+      let hasFuel=false;
+      for(const idx of stage.indices){
+        if(rocketStack[idx].fuel!==undefined&&rocketStack[idx].fuel>0.001){ hasFuel=true; break; }
+        if(PARTS[rocketStack[idx].id].type==='engine'&&rocketStack[idx].fuel===undefined){ hasFuel=true; break; }
+      }
+      if(!hasFuel) stage.burnt=true;
+    }
+
+    // trail
+    if(simTime%0.5<sdt) trailPoints.push(rPos.clone());
+    if(trailPoints.length>800) trailPoints.shift();
+
+    if(thrustLevel>0.01&&!crash) addExhaust();
+  }
+}
+
+function separateStage(){
+  if(currentStage<0||currentStage>=stages.length) return;
+  const stage=stages[currentStage];
+  if(stage.burnt) return; // already burnt, nothing to separate
+  // Find all engine parts that have no fuel
+  let canSeparate=true;
+  for(const idx of stage.indices){
+    const p=rocketStack[idx];
+    if(p.fuel!==undefined&&p.fuel>0.1) canSeparate=false;
+  }
+  if(!canSeparate) return;
+
+  stage.burnt=true;
+  showMessage('级间分离! 🚀','#fc0');
+  // next stage
+  currentStage++;
+  if(currentStage>=stages.length) currentStage=stages.length-1;
+
+  // visual: remove old stage parts? No, keep them visually but they're dead weight
+  // Actually in KSP you drop the dead stage. Let's mark decoupler as separated.
+  // Find the next decoupler above the current stage
+  // Simplified: cut off everything below the first decoupler above current engine
+  let cutoffIdx=-1;
+  for(let i=0;i<rocketStack.length;i++){
+    const p=rocketStack[i];
+    if(PARTS[p.id].type==='decoupler'){
+      // check if this decoupler is between dead stage and active stage
+      const idxInStages=stages.findIndex(s=>s.indices.includes(i));
+      if(idxInStages===currentStage-1){
+        cutoffIdx=i;
+        break;
+      }
+    }
+  }
+  if(cutoffIdx>=0){
+    // Remove everything below and including the decoupler
+    const removed=rocketStack.splice(0, cutoffIdx+1);
+    // Rebuild stages
+    computeRocketStats();
+    buildRocketModel();
+    rocketGroup.position.copy(rPos);
+    rocketGroup.quaternion.identity();
+  }
+}
+
+function addExhaust(){
+  if(thrustLevel<0.01) return;
+  const pos=rocketGroup.position.clone();
+  const down=new THREE.Vector3(0,-1,0).applyQuaternion(rocketGroup.quaternion);
+  const pGeo=new THREE.SphereGeometry(0.3+Math.random()*0.6, 4, 4);
+  const pMat=new THREE.MeshBasicMaterial({color:new THREE.Color().setHSL(0.1,1,0.3+Math.random()*0.5),transparent:true,opacity:0.7});
+  const p=new THREE.Mesh(pGeo,pMat);
+  p.position.copy(pos.clone().add(down.clone().multiplyScalar(3+Math.random()*5)));
+  p.userData.life=0.5+Math.random()*0.5;
+  p.userData.vel=down.clone().multiplyScalar(15+Math.random()*30).add(new THREE.Vector3((Math.random()-0.5)*5,(Math.random()-0.5)*5,(Math.random()-0.5)*5));
+  scene.add(p);
+  exhaustParticles.push(p);
+}
+
+function explodeRocket(){
+  for(let i=0;i<40;i++){
+    const pGeo=new THREE.SphereGeometry(0.3+Math.random()*1.5, 4, 4);
+    const pMat=new THREE.MeshBasicMaterial({color:new THREE.Color().setHSL(Math.random()*0.15,1,0.4+Math.random()*0.5),transparent:true});
+    const p=new THREE.Mesh(pGeo,pMat);
+    p.position.copy(rPos.clone().add(new THREE.Vector3((Math.random()-0.5)*5,(Math.random()-0.5)*5,(Math.random()-0.5)*5)));
+    p.userData.life=1.5+Math.random()*2;
+    p.userData.vel=new THREE.Vector3((Math.random()-0.5)*40,(Math.random()-0.5)*40,(Math.random()-0.5)*40);
+    scene.add(p);
+    exhaustParticles.push(p);
+  }
+}
+
+function showMessage(msg, color){
+  const el=document.getElementById('msgOverlay');
+  el.textContent=msg; el.style.color=color||'#ff0'; el.style.opacity='1';
+  setTimeout(()=>{ el.style.opacity='0'; }, 2000);
+}
+
+function getOrbitalParams(){
+  const r=rPos.length(), v=rVel.length();
+  const mu=EARTH_MU;
+  const E=v*v/2-mu/r;
+  if(E>=0) return {ap:'—', pe:'—', type:'逃逸轨道'};
+  const hVec=rPos.clone().cross(rVel);
+  const h=hVec.length();
+  const eVec=rVel.clone().cross(hVec).divideScalar(mu).sub(rPos.clone().normalize());
+  const e=eVec.length();
+  const a=-mu/(2*E);
+  const ap=a*(1+e)-EARTH_R;
+  const pe=a*(1-e)-EARTH_R;
+  return {ap:ap.toFixed(0)+'m', pe:Math.max(0,pe).toFixed(0)+'m', type:e<1?'椭圆轨道':'抛物线'};
+}
+
+function updateHUD(){
+  if(mode!=='flight') return;
+  const alt=rPos.length()-EARTH_R;
+  const vel=rVel.length();
+  const orb=getOrbitalParams();
+  document.getElementById('hudAlt').textContent=alt<1000?alt.toFixed(0)+' m':(alt/1000).toFixed(1)+' km';
+  document.getElementById('hudVel').textContent=vel.toFixed(0)+' m/s';
+  const orbV=Math.sqrt(EARTH_MU/rPos.length());
+  document.getElementById('hudOrbV').textContent=orbV.toFixed(0)+' m/s';
+  document.getElementById('hudAp').textContent=orb.ap;
+  document.getElementById('hudPe').textContent=orb.pe;
+  document.getElementById('hudThrust').textContent=(thrustLevel*getActiveThrust()/1000).toFixed(0)+' kN';
+  document.getElementById('hudMass').textContent=(getTotalMass()/1000).toFixed(1)+' t';
+  const velRatio=vel/orbV;
+  if(velRatio>0.95) document.getElementById('hudVel').className='val';
+  else if(velRatio>0.5) document.getElementById('hudVel').className='val warn';
+  else document.getElementById('hudVel').className='val danger';
+
+  // fuel indicator
+  if(currentStage>=0&&currentStage<stages.length){
+    const stage=stages[currentStage];
+    let maxFuel=0, curFuel=0;
+    for(const idx of stage.indices){
+      const p=rocketStack[idx], def=PARTS[p.id];
+      if(p.fuel!==undefined){ maxFuel+=def.fuel; curFuel+=p.fuel; }
+    }
+    const fpct=maxFuel>0?(curFuel/maxFuel*100):0;
+    document.getElementById('stageFuelFill').style.height=fpct+'%';
+    document.getElementById('stageLabel').textContent='第'+(currentStage+1)+'级';
+  }
+}
+
+function launchRocket(){
+  const stats=computeRocketStats();
+  if(!rocketStack.some(p=>PARTS[p.id].type==='engine')) return;
+
+  // init physics from build
+  for(const p of rocketStack){
+    if(PARTS[p.id].type==='tank') p.fuel=PARTS[p.id].fuel;
+  }
+
+  currentStage=0;
+  for(let s of stages) s.burnt=false;
+  rPos.set(0, EARTH_R, 0);
+  rVel.set(0, 0, 0);
+  thrustLevel=0; throttleTarget=0;
+  crash=false; landed=false; simTime=0;
+  trailPoints=[];
+  rocketGroup.position.copy(rPos);
+  rocketGroup.quaternion.identity();
+  cameraYaw=0; cameraPitch=0.4; cameraDist=80;
+  exhaustParticles.forEach(p=>scene.remove(p)); exhaustParticles=[];
+
+  document.getElementById('buildUI').style.display='none';
+  document.getElementById('hud').style.display='flex';
+  document.getElementById('orbitInfo').style.display='block';
+  document.getElementById('stageInfo').style.display='block';
+  document.getElementById('helpBar').style.display=showHelp?'block':'none';
+  document.getElementById('controlsToggle').style.display='block';
+  mode='flight';
+  orbitLine.visible=true;
+  updateOrbitLine();
+}
+
+function backToBuild(){
+  mode='build';
+  document.getElementById('buildUI').style.display='flex';
+  document.getElementById('hud').style.display='none';
+  document.getElementById('orbitInfo').style.display='none';
+  document.getElementById('stageInfo').style.display='none';
+  document.getElementById('helpBar').style.display='none';
+  document.getElementById('controlsToggle').style.display='none';
+  exhaustParticles.forEach(p=>scene.remove(p)); exhaustParticles=[];
+  orbitLine.visible=false;
+  crash=false; landed=false;
+  rocketGroup.position.set(0, EARTH_R, 0);
+  rocketGroup.quaternion.identity();
+  rPos.set(0, EARTH_R, 0);
+  rVel.set(0, 0, 0);
+  cameraYaw=0; cameraPitch=0.4; cameraDist=80;
+  camera.position.set(0, EARTH_R+80, 80);
+  // rebuild model
+  buildRocketModel();
+  renderRocketStats();
+}
+
+function toggleHelp(){ showHelp=!showHelp; document.getElementById('helpBar').style.display=showHelp?'block':'none'; }
+
+// ===== 输入处理 =====
+document.addEventListener('keydown',e=>{
+  keys[e.code]=true;
+  if(mode==='flight'){
+    if(e.code==='Space'){ e.preventDefault(); separateStage(); }
+    if(e.code==='KeyZ') throttleTarget=1;
+    if(e.code==='KeyX') throttleTarget=0;
+    if(e.code==='Escape') backToBuild();
+  }
+});
+document.addEventListener('keyup',e=>{
+  keys[e.code]=false;
+});
+
+document.addEventListener('mousedown',e=>{ if(e.target.tagName==='CANVAS'){ mouseDown=true; lastMouseX=e.clientX; lastMouseY=e.clientY; } });
+document.addEventListener('mouseup',()=>{ mouseDown=false; });
+document.addEventListener('mousemove',e=>{
+  if(!mouseDown||mode!=='flight') return;
+  cameraYaw+=(e.clientX-lastMouseX)*0.005;
+  cameraPitch=Math.max(-1.4,Math.min(1.4,cameraPitch+(e.clientY-lastMouseY)*0.005));
+  lastMouseX=e.clientX; lastMouseY=e.clientY;
+});
+document.addEventListener('wheel',e=>{
+  if(mode!=='flight') return;
+  cameraDist=Math.max(5,Math.min(5000,cameraDist*(1+e.deltaY*0.001)));
+});
+
+// touch
+let touchIds={};
+document.addEventListener('touchstart',e=>{
+  if(e.target.tagName==='CANVAS'){
+    for(const t of e.changedTouches) touchIds[t.identifier]={x:t.clientX,y:t.clientY};
+  }
+},{passive:false});
+document.addEventListener('touchmove',e=>{
+  if(mode!=='flight') return;
+  e.preventDefault();
+  for(const t of e.changedTouches){
+    if(touchIds[t.identifier]){
+      cameraYaw+=(t.clientX-touchIds[t.identifier].x)*0.005;
+      cameraPitch=Math.max(-1.4,Math.min(1.4,cameraPitch+(t.clientY-touchIds[t.identifier].y)*0.005));
+      touchIds[t.identifier]={x:t.clientX,y:t.clientY};
+    }
+  }
+},{passive:false});
+document.addEventListener('touchend',e=>{
+  for(const t of e.changedTouches) delete touchIds[t.identifier];
+});
+
+// ===== 渲染循环 =====
+let lastTime=performance.now();
+function animate(time){
+  requestAnimationFrame(animate);
+  const dt=Math.min((time-lastTime)/1000, 0.1);
+  lastTime=time;
+
+  // input
+  if(mode==='flight'){
+    if(keys['ShiftLeft']||keys['ShiftRight']) throttleTarget=Math.min(1,throttleTarget+dt*0.5);
+    if(keys['ControlLeft']||keys['ControlRight']) throttleTarget=Math.max(0,throttleTarget-dt*0.5);
+
+    const wDown=!!keys['KeyW']||!!keys['ArrowUp'];
+    const sDown=!!keys['KeyS']||!!keys['ArrowDown'];
+    const aDown=!!keys['KeyA']||!!keys['ArrowLeft'];
+    const dDown=!!keys['KeyD']||!!keys['ArrowRight'];
+
+    if(wDown||sDown||aDown||dDown){
+      const rotSpeed=1.2;
+      const q=rocketGroup.quaternion;
+      const pitchQ=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), (wDown?-1:sDown?1:0)*rotSpeed*dt);
+      const yawQ=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), (aDown?-1:dDown?1:0)*rotSpeed*dt);
+      q.multiplyQuaternions(pitchQ, q);
+      q.multiplyQuaternions(yawQ, q);
+      q.normalize();
+    }
+
+    thrustLevel+=(throttleTarget-thrustLevel)*Math.min(1,dt*3);
+    if(thrustLevel<0.001) thrustLevel=0;
+    if(thrustLevel>0.999) thrustLevel=1;
+  }
+
+  // physics
+  physicsStep(dt);
+
+  // moon orbit
+  moonAngle += (Math.PI*2/MOON_PERIOD)*dt;
+  moonMesh.position.set(Math.cos(moonAngle)*MOON_ORBIT_R, 0, Math.sin(moonAngle)*MOON_ORBIT_R);
+
+  // sun stays fixed at far distance
+
+  // camera
+  if(mode==='flight'){
+    const camTarget=rPos.clone();
+    const camPhi=cameraPitch, camTheta=cameraYaw;
+    const cx=Math.cos(camPhi)*Math.sin(camTheta)*cameraDist;
+    const cy=Math.sin(camPhi)*cameraDist;
+    const cz=Math.cos(camPhi)*Math.cos(camTheta)*cameraDist;
+    camera.position.set(camTarget.x+cx, camTarget.y+cy, camTarget.z+cz);
+    camera.lookAt(camTarget);
+  } else {
+    const camTarget=new THREE.Vector3(0, EARTH_R+20, 0);
+    camera.position.set(0, EARTH_R+60, 80);
+    camera.lookAt(camTarget);
+  }
+
+  // exhaust particles
+  for(let i=exhaustParticles.length-1;i>=0;i--){
+    const p=exhaustParticles[i];
+    p.userData.life-=dt;
+    p.position.add(p.userData.vel.clone().multiplyScalar(dt));
+    p.material.opacity=Math.max(0,p.userData.life/(p.userData.maxLife||2));
+    p.scale.setScalar(p.userData.life/(p.userData.maxLife||2));
+    if(p.userData.life<=0){ scene.remove(p); exhaustParticles.splice(i,1); }
+  }
+
+  // trail
+  if(trailPoints.length>1&&mode==='flight'&&!crash){
+    if(!scene.getObjectByName('trailLine')){
+      const tGeo=new THREE.BufferGeometry();
+      const tMat=new THREE.LineBasicMaterial({color:0xff8844, transparent:true, opacity:0.5});
+      const tLine=new THREE.Line(tGeo,tMat);
+      tLine.name='trailLine';
+      scene.add(tLine);
+    }
+    const tLine=scene.getObjectByName('trailLine');
+    const pts=[];
+    for(const tp of trailPoints) pts.push(tp.x,tp.y,tp.z);
+    tLine.geometry.dispose();
+    tLine.geometry=new THREE.BufferGeometry();
+    tLine.geometry.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));
+  }
+
+  if(mode==='flight'&&simTime%2<dt) updateOrbitLine();
+  updateHUD();
+
+  // orbit info text
+  if(mode==='flight'){
+    const orb=getOrbitalParams();
+    const alt=rPos.length()-EARTH_R;
+    document.getElementById('orbitInfo').innerHTML=
+      `轨道类型: ${orb.type}<br>远地点: ${orb.ap}<br>近地点: ${orb.pe}<br>${alt>ATMOSPHERE_H-EARTH_R?'已在太空!':'大气层内'}`;
+  }
+
+  renderer.render(scene, camera);
+}
+
+document.getElementById('btnLaunch').addEventListener('click', launchRocket);
+window.addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+// init
+initThreeJS();
+renderParts();
+renderStack();
+buildRocketModel();
+renderRocketStats();
+requestAnimationFrame(animate);
+
+// 双击部件添加到火箭堆
+document.getElementById('partsList').addEventListener('click',(e)=>{
+  if(e.target.classList.contains('part-btn')&&e.detail===2) addPart();
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🚀 无限宇宙航天飞机</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            overflow: hidden;
+            background: #000;
+            font-family: 'Courier New', monospace;
+        }
+
+        #gameCanvas {
+            display: block;
+            cursor: crosshair;
+        }
+
+        #controls {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px 25px;
+            border-radius: 15px;
+            border: 2px solid #00ffff;
+            color: #00ffff;
+            text-align: center;
+            z-index: 100;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+        }
+
+        #controls h3 {
+            margin-bottom: 10px;
+            text-shadow: 0 0 10px #00ffff;
+        }
+
+        #controls p {
+            font-size: 12px;
+            margin: 5px 0;
+            opacity: 0.9;
+        }
+
+        .key {
+            display: inline-block;
+            background: rgba(0, 255, 255, 0.2);
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin: 0 2px;
+        }
+
+        #speedometer {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px 20px;
+            border-radius: 10px;
+            border: 2px solid #ff6b6b;
+            color: #ff6b6b;
+            z-index: 100;
+            box-shadow: 0 0 20px rgba(255, 107, 107, 0.5);
+        }
+
+        #speedometer div {
+            margin: 5px 0;
+        }
+
+        #speedometer .value {
+            font-size: 20px;
+            font-weight: bold;
+            text-shadow: 0 0 10px #ff6b6b;
+        }
+
+        #shipCustomizer {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 20px;
+            border-radius: 15px;
+            border: 2px solid #a855f7;
+            color: #a855f7;
+            z-index: 100;
+            box-shadow: 0 0 20px rgba(168, 85, 247, 0.5);
+            max-width: 250px;
+        }
+
+        #shipCustomizer h3 {
+            margin-bottom: 15px;
+            text-shadow: 0 0 10px #a855f7;
+        }
+
+        #shipCustomizer label {
+            display: block;
+            margin: 10px 0 5px;
+            font-size: 12px;
+        }
+
+        #shipCustomizer input[type="color"] {
+            width: 100%;
+            height: 35px;
+            border: 2px solid #a855f7;
+            border-radius: 5px;
+            cursor: pointer;
+            background: transparent;
+        }
+
+        #shipCustomizer input[type="range"] {
+            width: 100%;
+            accent-color: #a855f7;
+        }
+
+        #shipCustomizer .color-option {
+            margin: 15px 0;
+        }
+
+        .btn-warp {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #ff6b6b, #a855f7);
+            border: none;
+            padding: 15px 30px;
+            border-radius: 50px;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            z-index: 100;
+            transition: all 0.3s;
+            box-shadow: 0 0 30px rgba(255, 107, 107, 0.7);
+        }
+
+        .btn-warp:hover {
+            transform: scale(1.1);
+            box-shadow: 0 0 50px rgba(255, 107, 107, 1);
+        }
+
+        .btn-warp:active {
+            transform: scale(0.95);
+        }
+        #saveMsg { position:fixed; top:60px; left:50%; transform:translateX(-50%);
+          color:#0f0; font-size:16px; pointer-events:none; opacity:0;
+          text-shadow:0 0 4px #0f0; font-family:monospace; z-index:9999;
+          transition:opacity 0.3s; }
+    </style>
+</head>
+<body>
+    <div id="saveMsg"></div>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="shipCustomizer">
+        <h3>🎨 飞船定制</h3>
+        <div class="color-option">
+            <label>机身颜色</label>
+            <input type="color" id="shipColor" value="#00ffff">
+        </div>
+        <div class="color-option">
+            <label>引擎火焰颜色</label>
+            <input type="color" id="flameColor" value="#ff6b6b">
+        </div>
+        <div class="color-option">
+            <label>飞船大小</label>
+            <input type="range" id="shipSize" min="0.5" max="2" step="0.1" value="1">
+        </div>
+    </div>
+
+    <div id="speedometer">
+        <div>速度</div>
+        <div class="value" id="speedValue">0</div>
+        <div>km/s</div>
+        <div style="margin-top: 10px; font-size: 12px;">坐标: <span id="coordinates">0, 0</span></div>
+    </div>
+
+    <div id="controls">
+        <h3>🚀 飞船控制</h3>
+        <p><span class="key">W</span> / <span class="key">↑</span> 前进</p>
+        <p><span class="key">S</span> / <span class="key">↓</span> 后退</p>
+        <p><span class="key">A</span> / <span class="key">←</span> 左转</p>
+        <p><span class="key">D</span> / <span class="key">→</span> 右转</p>
+        <p><span class="key">SPACE</span> 加速推进</p>
+    </div>
+
+    <button class="btn-warp" id="warpBtn">⚡ 曲速引擎</button>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // 设置画布大小
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // 飞船配置
+        const ship = {
+            x: canvas.width / 2,
+            y: canvas.height / 2,
+            vx: 0,
+            vy: 0,
+            angle: -Math.PI / 2, // 朝上
+            thrust: 0.15,
+            rotationSpeed: 0.08,
+            friction: 0.99,
+            size: 1,
+            color: '#00ffff',
+            flameColor: '#ff6b6b'
+        };
+
+        // 星星
+        const stars = [];
+        const numStars = 500;
+
+        // 行星
+        const planets = [];
+
+        // 粒子（引擎火焰效果）
+        const particles = [];
+
+        // 按键状态
+        const keys = {
+            w: false, a: false, s: false, d: false,
+            ArrowUp: false, ArrowLeft: false, ArrowDown: false, ArrowRight: false,
+            ' ': false
+        };
+
+        // 曲速效果
+        let warpSpeed = false;
+        let warpLines = [];
+
+        // 初始化星星
+        for (let i = 0; i < numStars; i++) {
+            stars.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                size: Math.random() * 2 + 0.5,
+                speed: Math.random() * 2 + 0.5,
+                brightness: Math.random()
+            });
+        }
+
+        // 初始化行星
+        for (let i = 0; i < 5; i++) {
+            planets.push({
+                x: Math.random() * 4000 - 2000,
+                y: Math.random() * 4000 - 2000,
+                radius: Math.random() * 100 + 50,
+                color: `hsl(${Math.random() * 360}, 70%, 50%)`,
+                rings: Math.random() > 0.7,
+                ringsColor: `hsl(${Math.random() * 360}, 50%, 60%)`
+            });
+        }
+
+        // 初始化曲速线条
+        for (let i = 0; i < 100; i++) {
+            warpLines.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                length: Math.random() * 100 + 50
+            });
+        }
+
+        // 事件监听
+        document.addEventListener('keydown', (e) => {
+            if (keys.hasOwnProperty(e.key)) {
+                keys[e.key] = true;
+                e.preventDefault();
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (keys.hasOwnProperty(e.key)) {
+                keys[e.key] = false;
+            }
+        });
+
+        // 飞船定制
+        document.getElementById('shipColor').addEventListener('input', (e) => {
+            ship.color = e.target.value;
+        });
+
+        document.getElementById('flameColor').addEventListener('input', (e) => {
+            ship.flameColor = e.target.value;
+        });
+
+        document.getElementById('shipSize').addEventListener('input', (e) => {
+            ship.size = parseFloat(e.target.value);
+        });
+
+        // Save/Load system
+        function showSaveToast(msg) {
+            const sm = document.getElementById('saveMsg');
+            sm.textContent = msg; sm.style.opacity = 1;
+            setTimeout(() => sm.style.opacity = 0, 1500);
+        }
+        function saveShip() {
+            try {
+                localStorage.setItem('spaceShip_save', JSON.stringify({
+                    color: ship.color, flameColor: ship.flameColor, size: ship.size
+                }));
+                showSaveToast('已保存');
+            } catch(e) { showSaveToast('保存失败'); }
+        }
+        function loadShip() {
+            try {
+                const d = JSON.parse(localStorage.getItem('spaceShip_save'));
+                if (d) {
+                    if (d.color) { ship.color = d.color; document.getElementById('shipColor').value = d.color; }
+                    if (d.flameColor) { ship.flameColor = d.flameColor; document.getElementById('flameColor').value = d.flameColor; }
+                    if (d.size) { ship.size = d.size; document.getElementById('shipSize').value = d.size; }
+                    showSaveToast('已加载');
+                }
+            } catch(e) { showSaveToast('加载失败'); }
+        }
+        document.addEventListener('keydown', e => {
+            if (e.code === 'F5') { e.preventDefault(); saveShip(); }
+            if (e.code === 'F9') { e.preventDefault(); loadShip(); }
+        });
+        // Auto-load on startup
+        loadShip();
+
+        document.getElementById('warpBtn').addEventListener('click', () => {
+            warpSpeed = true;
+            setTimeout(() => {
+                warpSpeed = false;
+            }, 3000);
+        });
+
+        // 窗口大小调整
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+
+        // 绘制星星
+        function drawStars() {
+            stars.forEach(star => {
+                const alpha = 0.5 + 0.5 * Math.sin(Date.now() * 0.001 * star.speed + star.brightness * 10);
+                ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        // 更新星星位置
+        function updateStars() {
+            const speed = warpSpeed ? 50 : Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+            const angle = Math.atan2(ship.vy, ship.vx);
+
+            stars.forEach(star => {
+                if (warpSpeed) {
+                    star.x -= Math.cos(angle) * speed;
+                    star.y -= Math.sin(angle) * speed;
+                } else {
+                    star.x -= ship.vx * 0.5;
+                    star.y -= ship.vy * 0.5;
+                }
+
+                // 循环星星
+                if (star.x < 0) star.x = canvas.width;
+                if (star.x > canvas.width) star.x = 0;
+                if (star.y < 0) star.y = canvas.height;
+                if (star.y > canvas.height) star.y = 0;
+            });
+        }
+
+        // 绘制行星
+        function drawPlanets() {
+            planets.forEach(planet => {
+                // 计算行星相对于屏幕的位置
+                const relX = planet.x - ship.x + canvas.width / 2;
+                const relY = planet.y - ship.y + canvas.height / 2;
+
+                // 只绘制在屏幕内的行星
+                if (relX > -planet.radius * 2 && relX < canvas.width + planet.radius * 2 &&
+                    relY > -planet.radius * 2 && relY < canvas.height + planet.radius * 2) {
+
+                    // 行星光晕
+                    const gradient = ctx.createRadialGradient(relX, relY, 0, relX, relY, planet.radius * 1.5);
+                    gradient.addColorStop(0, planet.color);
+                    gradient.addColorStop(1, 'transparent');
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(relX, relY, planet.radius * 1.5, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // 行星本体
+                    ctx.fillStyle = planet.color;
+                    ctx.beginPath();
+                    ctx.arc(relX, relY, planet.radius, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // 行星环
+                    if (planet.rings) {
+                        ctx.strokeStyle = planet.ringsColor;
+                        ctx.lineWidth = 10;
+                        ctx.beginPath();
+                        ctx.ellipse(relX, relY, planet.radius * 1.8, planet.radius * 0.3, Math.PI / 6, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+                }
+            });
+        }
+
+        // 绘制飞船
+        function drawShip() {
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.rotate(ship.angle + Math.PI / 2);
+            ctx.scale(ship.size, ship.size);
+
+            // 引擎火焰
+            if (keys.w || keys.ArrowUp || keys[' ']) {
+                const flameSize = 30 + Math.random() * 20;
+                const gradient = ctx.createLinearGradient(0, 25, 0, 25 + flameSize);
+                gradient.addColorStop(0, ship.flameColor);
+                gradient.addColorStop(1, 'transparent');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.moveTo(-15, 25);
+                ctx.lineTo(0, 25 + flameSize);
+                ctx.lineTo(15, 25);
+                ctx.fill();
+
+                // 添加粒子
+                particles.push({
+                    x: canvas.width / 2,
+                    y: canvas.height / 2,
+                    vx: -Math.sin(ship.angle) * (5 + Math.random() * 5) + ship.vx,
+                    vy: Math.cos(ship.angle) * (5 + Math.random() * 5) + ship.vy,
+                    life: 1,
+                    color: ship.flameColor
+                });
+            }
+
+            // 飞船主体
+            ctx.fillStyle = ship.color;
+            ctx.beginPath();
+            ctx.moveTo(0, -30);
+            ctx.lineTo(-20, 25);
+            ctx.lineTo(-10, 20);
+            ctx.lineTo(0, 25);
+            ctx.lineTo(10, 20);
+            ctx.lineTo(20, 25);
+            ctx.closePath();
+            ctx.fill();
+
+            // 飞船边框光晕
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            ctx.shadowColor = ship.color;
+            ctx.shadowBlur = 20;
+            ctx.stroke();
+
+            // 驾驶舱
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.beginPath();
+            ctx.ellipse(0, -5, 6, 10, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 机翼
+            ctx.fillStyle = ship.color;
+            ctx.globalAlpha = 0.6;
+            ctx.beginPath();
+            ctx.moveTo(-20, 20);
+            ctx.lineTo(-35, 35);
+            ctx.lineTo(-20, 30);
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.moveTo(20, 20);
+            ctx.lineTo(35, 35);
+            ctx.lineTo(20, 30);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        // 绘制粒子
+        function drawParticles() {
+            particles.forEach((p, i) => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.02;
+
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                    return;
+                }
+
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+        }
+
+        // 绘制曲速效果
+        function drawWarpEffect() {
+            if (!warpSpeed) return;
+
+            const angle = Math.atan2(ship.vy, ship.vx);
+
+            warpLines.forEach(line => {
+                ctx.strokeStyle = `rgba(0, 255, 255, ${0.3 + Math.random() * 0.3})`;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(line.x, line.y);
+                ctx.lineTo(
+                    line.x - Math.cos(angle) * line.length,
+                    line.y - Math.sin(angle) * line.length
+                );
+                ctx.stroke();
+
+                line.x -= Math.cos(angle) * 100;
+                line.y -= Math.sin(angle) * 100;
+
+                if (line.x < 0 || line.x > canvas.width || line.y < 0 || line.y > canvas.height) {
+                    line.x = Math.random() * canvas.width;
+                    line.y = Math.random() * canvas.height;
+                }
+            });
+
+            // 屏幕边缘发光
+            const gradient = ctx.createRadialGradient(
+                canvas.width / 2, canvas.height / 2, 0,
+                canvas.width / 2, canvas.height / 2, canvas.width / 2
+            );
+            gradient.addColorStop(0, 'transparent');
+            gradient.addColorStop(1, 'rgba(0, 255, 255, 0.2)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // 更新飞船
+        function updateShip() {
+            // 旋转
+            if (keys.a || keys.ArrowLeft) ship.angle -= ship.rotationSpeed;
+            if (keys.d || keys.ArrowRight) ship.angle += ship.rotationSpeed;
+
+            // 推进
+            const thrust = keys[' '] ? ship.thrust * 3 : ship.thrust;
+            if (keys.w || keys.ArrowUp) {
+                ship.vx += Math.cos(ship.angle) * thrust;
+                ship.vy += Math.sin(ship.angle) * thrust;
+            }
+            if (keys.s || keys.ArrowDown) {
+                ship.vx -= Math.cos(ship.angle) * thrust * 0.5;
+                ship.vy -= Math.sin(ship.angle) * thrust * 0.5;
+            }
+
+            // 摩擦力
+            ship.vx *= ship.friction;
+            ship.vy *= ship.friction;
+
+            // 曲速
+            if (warpSpeed) {
+                ship.vx += Math.cos(ship.angle) * 0.5;
+                ship.vy += Math.sin(ship.angle) * 0.5;
+            }
+
+            // 更新位置
+            ship.x += ship.vx;
+            ship.y += ship.vy;
+
+            // 更新速度显示
+            const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+            document.getElementById('speedValue').textContent = (speed * 10).toFixed(1);
+            document.getElementById('coordinates').textContent =
+                `${Math.round(ship.x)}, ${Math.round(ship.y)}`;
+        }
+
+        // 游戏循环
+        function gameLoop() {
+            // 清屏（带拖尾效果）
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 绘制
+            drawStars();
+            updateStars();
+            drawPlanets();
+            drawParticles();
+            drawWarpEffect();
+            drawShip();
+
+            // 更新
+            updateShip();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // 启动游戏
+        gameLoop();
+    </script>
+</body>
+</html>

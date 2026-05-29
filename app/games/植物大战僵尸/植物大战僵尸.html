@@ -1,0 +1,1599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>植物大战僵尸</title>
+    <script src="p5.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #1a1a2e;
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+        }
+        #gameCanvas {
+            border: 4px solid #2d5016;
+            box-shadow: 0 10px 50px rgba(0,0,0,0.5);
+            border-radius: 5px;
+        }
+        .ui-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            pointer-events: none;
+        }
+        .resource-bar {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px 20px;
+            border-radius: 10px;
+            pointer-events: auto;
+        }
+        .sun-icon {
+            font-size: 32px;
+            filter: drop-shadow(0 0 10px orange);
+        }
+        .sun-count {
+            color: #ffcc00;
+            font-size: 28px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        .level-info {
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        .card-slot {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            pointer-events: auto;
+        }
+        .plant-card {
+            width: 70px;
+            height: 90px;
+            background: linear-gradient(180deg, #4a7c2e 0%, #2d5016 100%);
+            border: 3px solid #6b9b3a;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            position: relative;
+        }
+        .plant-card:hover {
+            transform: scale(1.1);
+            border-color: #8bc34a;
+        }
+        .plant-card.selected {
+            border-color: #ffcc00;
+            box-shadow: 0 0 15px rgba(255,204,0,0.8);
+        }
+        .plant-card.disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .plant-card-icon {
+            font-size: 36px;
+        }
+        .plant-card-cost {
+            color: #ffcc00;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .game-over {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            padding: 40px 60px;
+            border-radius: 20px;
+            text-align: center;
+            z-index: 1000;
+            border: 4px solid #ff4444;
+        }
+        .game-over h1 {
+            color: #ff4444;
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+        .game-over p {
+            color: white;
+            font-size: 24px;
+            margin-bottom: 30px;
+        }
+        .restart-btn {
+            padding: 15px 40px;
+            background: linear-gradient(180deg, #4a7c2e 0%, #2d5016 100%);
+            border: 3px solid #6b9b3a;
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .restart-btn:hover {
+            transform: scale(1.1);
+            background: linear-gradient(180deg, #5a9c3e 0%, #3d6026 100%);
+        }
+        .wave-notification {
+            position: fixed;
+            top: 30%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 48px;
+            font-weight: bold;
+            color: #ff4444;
+            text-shadow: 3px 3px 6px rgba(0,0,0,0.8);
+            z-index: 100;
+            animation: waveAlert 3s forwards;
+            pointer-events: none;
+        }
+        @keyframes waveAlert {
+            0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+            20% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+            80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+            100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+        }
+        @keyframes fadeInOut {
+            0% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+            15% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+            85% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+            100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+        }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+        <div class="ui-overlay">
+            <div class="resource-bar">
+                <span class="sun-icon">☀️</span>
+                <span class="sun-count" id="sun-display">50</span>
+                <span class="level-info" id="level-display">第 1 波 - 僵尸: 0</span>
+            </div>
+        </div>
+        <div class="card-slot" id="card-slot"></div>
+        <div style="position: absolute; top: 10px; right: 10px; display: flex; gap: 10px;">
+            <button onclick="game.saveGame()" style="padding: 10px 20px; background: linear-gradient(180deg, #4a7c2e 0%, #2d5016 100%); border: 3px solid #6b9b3a; color: white; font-weight: bold; border-radius: 8px; cursor: pointer;">💾 保存</button>
+            <button onclick="game.loadGame()" style="padding: 10px 20px; background: linear-gradient(180deg, #4a7c2e 0%, #2d5016 100%); border: 3px solid #6b9b3a; color: white; font-weight: bold; border-radius: 8px; cursor: pointer;">📂 读取</button>
+            <button onclick="game.clearSave()" style="padding: 10px 20px; background: linear-gradient(180deg, #7c2e2e 0%, #501616 100%); border: 3px solid #9b3a3a; color: white; font-weight: bold; border-radius: 8px; cursor: pointer;">🗑️ 清除存档</button>
+        </div>
+    </div>
+
+    <div id="game-over" class="game-over hidden">
+        <h1>☠️ 僵尸吃掉了你的脑子！</h1>
+        <p id="final-score">存活了 0 波</p>
+        <button class="restart-btn" onclick="location.reload()">🔄 重新开始</button>
+    </div>
+
+    <script>
+// Audio System
+class AudioManager {
+    constructor() {
+        this.audioContext = null;
+        this.initialized = false;
+    }
+
+    init() {
+        if (this.initialized) return;
+
+        try {
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            this.initialized = true;
+        } catch (e) {
+            console.log('Audio not supported');
+        }
+    }
+
+    playTone(frequency, duration, type = 'sine', volume = 0.3) {
+        if (!this.initialized || !this.audioContext) return;
+
+        try {
+            const oscillator = this.audioContext.createOscillator();
+            const gainNode = this.audioContext.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(this.audioContext.destination);
+
+            oscillator.frequency.value = frequency;
+            oscillator.type = type;
+
+            gainNode.gain.setValueAtTime(volume, this.audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + duration);
+
+            oscillator.start(this.audioContext.currentTime);
+            oscillator.stop(this.audioContext.currentTime + duration);
+        } catch (e) {}
+    }
+
+    playSunCollect() {
+        this.playTone(880, 0.1, 'sine', 0.2);
+        setTimeout(() => this.playTone(1100, 0.15, 'sine', 0.2), 50);
+    }
+
+    playPlantPlace() {
+        this.playTone(400, 0.1, 'triangle', 0.15);
+        setTimeout(() => this.playTone(600, 0.1, 'triangle', 0.15), 50);
+    }
+
+    playPeaShoot() {
+        this.playTone(600, 0.05, 'square', 0.1);
+    }
+
+    playIcePeaShoot() {
+        this.playTone(800, 0.08, 'sine', 0.1);
+        setTimeout(() => this.playTone(600, 0.08, 'sine', 0.08), 30);
+    }
+
+    playZombieHit() {
+        this.playTone(200, 0.1, 'sawtooth', 0.15);
+    }
+
+    playZombieDie() {
+        this.playTone(150, 0.2, 'sawtooth', 0.2);
+        setTimeout(() => this.playTone(100, 0.3, 'sawtooth', 0.15), 100);
+    }
+
+    playExplosion() {
+        // Noise for explosion
+        if (!this.initialized || !this.audioContext) return;
+
+        try {
+            const bufferSize = this.audioContext.sampleRate * 0.5;
+            const buffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
+            const data = buffer.getChannelData(0);
+
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = Math.random() * 2 - 1;
+            }
+
+            const noise = this.audioContext.createBufferSource();
+            noise.buffer = buffer;
+
+            const gainNode = this.audioContext.createGain();
+            gainNode.gain.setValueAtTime(0.5, this.audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.5);
+
+            noise.connect(gainNode);
+            gainNode.connect(this.audioContext.destination);
+
+            noise.start(this.audioContext.currentTime);
+            noise.stop(this.audioContext.currentTime + 0.5);
+        } catch (e) {}
+
+        this.playTone(100, 0.3, 'sawtooth', 0.3);
+    }
+
+    playChomp() {
+        this.playTone(300, 0.1, 'square', 0.2);
+        setTimeout(() => this.playTone(200, 0.1, 'square', 0.2), 80);
+        setTimeout(() => this.playTone(150, 0.15, 'square', 0.15), 160);
+    }
+
+    playWaveAlert() {
+        this.playTone(400, 0.3, 'sawtooth', 0.25);
+        setTimeout(() => this.playTone(500, 0.3, 'sawtooth', 0.25), 200);
+        setTimeout(() => this.playTone(600, 0.4, 'sawtooth', 0.25), 400);
+    }
+
+    playGameOver() {
+        this.playTone(400, 0.5, 'sawtooth', 0.3);
+        setTimeout(() => this.playTone(300, 0.5, 'sawtooth', 0.3), 400);
+        setTimeout(() => this.playTone(200, 0.8, 'sawtooth', 0.3), 800);
+        setTimeout(() => this.playTone(100, 1.0, 'sawtooth', 0.25), 1200);
+    }
+
+    playPotatoArm() {
+        this.playTone(500, 0.1, 'sine', 0.15);
+        setTimeout(() => this.playTone(700, 0.15, 'sine', 0.15), 100);
+    }
+
+    playNutCrack() {
+        this.playTone(800, 0.05, 'square', 0.2);
+        setTimeout(() => this.playTone(600, 0.05, 'square', 0.15), 30);
+    }
+}
+
+// Create global audio manager
+const audioManager = new AudioManager();
+
+// Game Configuration
+const CELL_SIZE = 90;
+const GRID_COLS = 9;
+const GRID_ROWS = 5;
+const GRID_OFFSET_X = 220;
+const GRID_OFFSET_Y = 100;
+
+// Plant Types
+const PLANT_TYPES = {
+    sunflower: {
+        name: '向日葵',
+        icon: '🌻',
+        cost: 50,
+        health: 300,
+        cooldown: 500,
+        sunProduction: 25,
+        sunInterval: 600
+    },
+    peashooter: {
+        name: '豌豆射手',
+        icon: '🌱',
+        cost: 100,
+        health: 300,
+        cooldown: 500,
+        bulletDamage: 20,
+        fireRate: 90
+    },
+    wallnut: {
+        name: '坚果墙',
+        icon: '🥔',
+        cost: 50,
+        health: 4000,
+        cooldown: 1800
+    },
+    snowpea: {
+        name: '寒冰射手',
+        icon: '❄️',
+        cost: 175,
+        health: 300,
+        cooldown: 500,
+        bulletDamage: 20,
+        fireRate: 90,
+        slows: true
+    },
+    cherrybomb: {
+        name: '樱桃炸弹',
+        icon: '🍒',
+        cost: 150,
+        health: 10000,
+        cooldown: 3000,
+        explosionDamage: 1800,
+        explosionRange: 150
+    },
+    chomper: {
+        name: '大嘴花',
+        icon: '🦷',
+        cost: 150,
+        health: 300,
+        cooldown: 3000,
+        damage: 500,
+        eatRange: 80,
+        digestTime: 600
+    },
+    potato: {
+        name: '土豆雷',
+        icon: '🥔',
+        cost: 25,
+        health: 300,
+        cooldown: 1800,
+        armTime: 900,
+        explosionDamage: 1800
+    },
+    repeater: {
+        name: '双发射手',
+        icon: '🌿',
+        cost: 200,
+        health: 300,
+        cooldown: 500,
+        bulletDamage: 20,
+        fireRate: 90,
+        shots: 2
+    }
+};
+
+// Zombie Types
+const ZOMBIE_TYPES = {
+    normal: {
+        name: '普通僵尸',
+        icon: '🧟',
+        health: 200,
+        speed: 0.3,
+        damage: 1
+    },
+    conehead: {
+        name: '路障僵尸',
+        icon: '🧟‍♂️',
+        health: 560,
+        speed: 0.3,
+        damage: 1
+    },
+    buckethead: {
+        name: '铁桶僵尸',
+        icon: '🧟',
+        health: 1300,
+        speed: 0.3,
+        damage: 1
+    }
+};
+
+// Classes
+class Plant {
+    constructor(type, col, row) {
+        this.type = type;
+        this.col = col;
+        this.row = row;
+        this.x = GRID_OFFSET_X + col * CELL_SIZE + CELL_SIZE / 2;
+        this.y = GRID_OFFSET_Y + row * CELL_SIZE + CELL_SIZE / 2;
+        this.health = PLANT_TYPES[type].health;
+        this.maxHealth = this.health;
+        this.lastAction = 0;
+        this.armed = false;
+        this.digesting = false;
+        this.digestTimer = 0;
+    }
+
+    update(zombiesInRow, bullets) {
+        const plantData = PLANT_TYPES[this.type];
+
+        // Sunflower produces sun
+        if (this.type === 'sunflower') {
+            if (frameCount - this.lastAction > plantData.sunInterval) {
+                this.lastAction = frameCount;
+                game.addSun(this.x, this.y, plantData.sunProduction);
+            }
+        }
+
+        // Peashooters fire bullets
+        if (this.type === 'peashooter' || this.type === 'snowpea' || this.type === 'repeater') {
+            if (frameCount - this.lastAction > plantData.fireRate) {
+                // Check if zombies in row
+                const hasZombie = zombiesInRow.some(z => z.x > this.x);
+                if (hasZombie) {
+                    this.lastAction = frameCount;
+                    const shots = this.type === 'repeater' ? plantData.shots : 1;
+
+                    for (let i = 0; i < shots; i++) {
+                        setTimeout(() => {
+                            const bullet = new Bullet(
+                                this.x + 20,
+                                this.y,
+                                plantData.bulletDamage,
+                                this.type === 'snowpea'
+                            );
+                            bullets.push(bullet);
+
+                            // Play shoot sound
+                            if (this.type === 'snowpea') {
+                                audioManager.playIcePeaShoot();
+                            } else {
+                                audioManager.playPeaShoot();
+                            }
+                        }, i * 150);
+                    }
+                }
+            }
+        }
+
+        // Cherry bomb explodes immediately
+        if (this.type === 'cherrybomb') {
+            this.health = 0; // Die after explosion
+            // Explode and damage nearby zombies
+            const zombies = game.getAllZombies();
+            zombies.forEach(zombie => {
+                const d = dist(this.x, this.y, zombie.x, zombie.y);
+                if (d < plantData.explosionRange) {
+                    zombie.takeDamage(plantData.explosionDamage);
+                }
+            });
+            game.addExplosion(this.x, this.y);
+            audioManager.playExplosion();
+        }
+
+        // Potato mine arms after time
+        if (this.type === 'potato' && !this.armed) {
+            if (frameCount - this.lastAction > plantData.armTime) {
+                this.armed = true;
+                audioManager.playPotatoArm();
+            }
+        }
+
+        // Potato mine explodes when zombie steps on it
+        if (this.type === 'potato' && this.armed) {
+            const nearbyZombie = zombiesInRow.find(z => Math.abs(z.x - this.x) < 40);
+            if (nearbyZombie) {
+                nearbyZombie.takeDamage(plantData.explosionDamage);
+                this.health = 0;
+                game.addExplosion(this.x, this.y);
+                audioManager.playExplosion();
+            }
+        }
+
+        // Chomper eats zombies
+        if (this.type === 'chomper' && !this.digesting) {
+            const nearbyZombie = zombiesInRow.find(z => z.x > this.x && z.x - this.x < plantData.eatRange);
+            if (nearbyZombie) {
+                nearbyZombie.takeDamage(plantData.damage);
+                this.digesting = true;
+                this.digestTimer = frameCount;
+                this.lastAction = frameCount;
+                audioManager.playChomp();
+            }
+        }
+
+        // Chomper digest timer
+        if (this.digesting && frameCount - this.digestTimer > plantData.digestTime) {
+            this.digesting = false;
+        }
+    }
+
+    draw() {
+        const plantData = PLANT_TYPES[this.type];
+        const size = 60;
+
+        push();
+        translate(this.x, this.y);
+
+        // Draw plant
+        textAlign(CENTER, CENTER);
+        textSize(size);
+
+        // Special visual states
+        if (this.type === 'potato' && !this.armed) {
+            // Unarmed potato mine - smaller
+            textSize(size * 0.7);
+            text('🥔', 0, 0);
+            // Arming indicator
+            const progress = (frameCount - this.lastAction) / plantData.armTime;
+            noFill();
+            stroke(255, 0, 0);
+            strokeWeight(3);
+            arc(0, 0, size * 0.8, size * 0.8, -PI/2, -PI/2 + progress * TWO_PI);
+        } else if (this.type === 'chomper' && this.digesting) {
+            // Chomper digesting - show eating
+            textSize(size * 0.9);
+            text('😋', 0, 0);
+        } else if (this.type === 'cherrybomb') {
+            // Exploding
+            textSize(size * 1.2);
+            text('💥', 0, 0);
+        } else {
+            // Normal state
+            text(plantData.icon, 0, 0);
+        }
+
+        // Health bar
+        if (this.health < this.maxHealth) {
+            const barWidth = 50;
+            const barHeight = 5;
+            const healthPercent = this.health / this.maxHealth;
+
+            noStroke();
+            fill(100);
+            rect(-barWidth/2, -size/2 - 10, barWidth, barHeight);
+
+            fill(0, 255, 0);
+            rect(-barWidth/2, -size/2 - 10, barWidth * healthPercent, barHeight);
+        }
+
+        pop();
+    }
+
+    takeDamage(damage) {
+        this.health -= damage;
+        return this.health <= 0;
+    }
+}
+
+class Zombie {
+    constructor(row, type = 'normal') {
+        this.row = row;
+        this.type = type;
+        this.x = width + 50;
+        this.y = GRID_OFFSET_Y + row * CELL_SIZE + CELL_SIZE / 2;
+        this.zombieData = ZOMBIE_TYPES[type];
+        this.health = this.zombieData.health;
+        this.maxHealth = this.health;
+        this.speed = this.zombieData.speed;
+        this.eating = false;
+        this.frozen = false;
+        this.frozenTimer = 0;
+        this.targetPlant = null;
+    }
+
+    update(plantsInRow) {
+        // Frozen effect
+        if (this.frozen) {
+            this.frozenTimer--;
+            if (this.frozenTimer <= 0) {
+                this.frozen = false;
+            }
+        }
+
+        const currentSpeed = this.frozen ? this.speed * 0.5 : this.speed;
+
+        // Check for plants to eat
+        this.targetPlant = null;
+        this.eating = false;
+
+        for (let plant of plantsInRow) {
+            if (Math.abs(plant.x - this.x) < 40) {
+                if (!this.eating) {
+                    // Start eating - play crack sound for nuts
+                    if (plant.type === 'wallnut' && frameCount % 60 === 0) {
+                        audioManager.playNutCrack();
+                    }
+                }
+                this.eating = true;
+                this.targetPlant = plant;
+                plant.takeDamage(this.zombieData.damage);
+                break;
+            }
+        }
+
+        // Move if not eating
+        if (!this.eating) {
+            this.x -= currentSpeed;
+        }
+
+        // Game over check
+        if (this.x < GRID_OFFSET_X - 50) {
+            game.gameOver();
+        }
+    }
+
+    draw() {
+        push();
+        translate(this.x, this.y);
+
+        const size = 55;
+
+        // Draw zombie
+        textAlign(CENTER, CENTER);
+        textSize(size);
+
+        if (this.frozen) {
+            // Frozen effect - blue tint
+            drawingContext.shadowBlur = 20;
+            drawingContext.shadowColor = 'rgba(0, 200, 255, 0.8)';
+        }
+
+        if (this.eating && frameCount % 30 < 15) {
+            // Eating animation
+            text('😋', 0, 0);
+        } else {
+            text(this.zombieData.icon, 0, 0);
+        }
+
+        drawingContext.shadowBlur = 0;
+
+        // Health bar - always show
+        const barWidth = 50;
+        const barHeight = 5;
+        let healthPercent = this.health / this.maxHealth;
+
+        // 限制血条在0-1之间，防止溢出
+        healthPercent = Math.max(0, Math.min(1, healthPercent));
+
+        noStroke();
+        fill(100);
+        rect(-barWidth/2, -size/2 - 10, barWidth, barHeight);
+
+        const healthColor = healthPercent > 0.5 ? color(0, 255, 0) :
+                          healthPercent > 0.25 ? color(255, 200, 0) :
+                          color(255, 0, 0);
+        fill(healthColor);
+        rect(-barWidth/2, -size/2 - 10, barWidth * healthPercent, barHeight);
+
+        // Cone/bucket indicator
+        if (this.type === 'conehead') {
+            textSize(20);
+            text('⚠️', 20, -30);
+        } else if (this.type === 'buckethead') {
+            textSize(20);
+            text('🪣', 20, -30);
+        }
+
+        pop();
+    }
+
+    takeDamage(damage) {
+        this.health -= damage;
+        return this.health <= 0;
+    }
+
+    freeze() {
+        this.frozen = true;
+        this.frozenTimer = 180; // 3 seconds at 60fps
+    }
+}
+
+class Bullet {
+    constructor(x, y, damage, isFreezing = false) {
+        this.x = x;
+        this.y = y;
+        this.damage = damage;
+        this.isFreezing = isFreezing;
+        this.speed = 8;
+        this.size = 15;
+    }
+
+    update() {
+        this.x += this.speed;
+    }
+
+    draw() {
+        push();
+        translate(this.x, this.y);
+
+        if (this.isFreezing) {
+            // Ice pea
+            fill(100, 200, 255);
+            stroke(50, 150, 255);
+        } else {
+            // Normal pea
+            fill(100, 255, 100);
+            stroke(50, 200, 50);
+        }
+
+        strokeWeight(2);
+        ellipse(0, 0, this.size, this.size);
+
+        // Highlight
+        noStroke();
+        fill(255, 255, 255, 150);
+        ellipse(-this.size * 0.15, -this.size * 0.15, this.size * 0.4, this.size * 0.4);
+
+        pop();
+    }
+
+    isOffScreen() {
+        return this.x > width;
+    }
+}
+
+class Sun {
+    constructor(x, y, value) {
+        this.x = x;
+        this.y = y;
+        this.value = value;
+        this.size = 50;
+        this.targetY = y;
+        this.collected = false;
+        this.alpha = 255;
+        this.lifeTime = 600; // 10 seconds
+        this.spawnTime = frameCount;
+
+        // If spawning from sky, set target
+        if (y < 0) {
+            this.targetY = random(100, height - 100);
+        }
+    }
+
+    update() {
+        // Fall to target
+        if (this.y < this.targetY) {
+            this.y += 3;
+        }
+
+        // Lifetime countdown
+        if (frameCount - this.spawnTime > this.lifeTime) {
+            this.alpha -= 5;
+        }
+
+        return this.alpha <= 0;
+    }
+
+    draw() {
+        push();
+        translate(this.x, this.y);
+
+        // Pulse animation
+        const pulse = sin(frameCount * 0.1) * 5;
+
+        // Outer glow
+        drawingContext.shadowBlur = 30 + pulse;
+        drawingContext.shadowColor = 'rgba(255, 200, 0, 0.8)';
+
+        // Sun body
+        fill(255, 220, 0, this.alpha);
+        noStroke();
+        ellipse(0, 0, this.size + pulse);
+
+        // Inner glow
+        fill(255, 255, 100, this.alpha);
+        ellipse(0, 0, this.size * 0.6);
+
+        // Rays
+        stroke(255, 200, 0, this.alpha);
+        strokeWeight(3);
+        const rays = 8;
+        for (let i = 0; i < rays; i++) {
+            const angle = (TWO_PI / rays) * i + frameCount * 0.02;
+            const x1 = cos(angle) * (this.size * 0.6);
+            const y1 = sin(angle) * (this.size * 0.6);
+            const x2 = cos(angle) * (this.size * 0.8 + pulse);
+            const y2 = sin(angle) * (this.size * 0.8 + pulse);
+            line(x1, y1, x2, y2);
+        }
+
+        drawingContext.shadowBlur = 0;
+
+        pop();
+    }
+
+    isClicked(mx, my) {
+        const d = dist(mx, my, this.x, this.y);
+        return d < this.size / 2 + 20;
+    }
+
+    collect() {
+        this.collected = true;
+        return this.value;
+    }
+}
+
+class Explosion {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.size = 20;
+        this.maxSize = 150;
+        this.alpha = 255;
+        this.frame = 0;
+    }
+
+    update() {
+        this.frame++;
+        this.size += 15;
+        this.alpha -= 15;
+        return this.alpha <= 0;
+    }
+
+    draw() {
+        push();
+        translate(this.x, this.y);
+
+        noFill();
+        stroke(255, 100, 0, this.alpha);
+        strokeWeight(5);
+        ellipse(0, 0, this.size);
+
+        stroke(255, 200, 0, this.alpha * 0.8);
+        strokeWeight(3);
+        ellipse(0, 0, this.size * 0.7);
+
+        // Particles
+        for (let i = 0; i < 8; i++) {
+            const angle = (TWO_PI / 8) * i + this.frame * 0.1;
+            const dist = this.size * 0.4;
+            fill(255, 150, 0, this.alpha);
+            noStroke();
+            ellipse(cos(angle) * dist, sin(angle) * dist, 15);
+        }
+
+        pop();
+    }
+}
+
+class Game {
+    constructor() {
+        this.sun = 50;
+        this.plants = [];
+        this.zombies = [];
+        this.bullets = [];
+        this.suns = [];
+        this.explosions = [];
+        this.damageNumbers = []; // Store damage numbers to display
+        this.selectedPlant = null;
+        this.wave = 1;
+        this.zombiesSpawned = 0;
+        this.zombiesPerWave = 5;
+        this.spawnTimer = 0;
+        this.sunSpawnTimer = 0;
+        this.gameRunning = true;
+        this.waveTimer = 0;
+        this.waveInProgress = false;
+        this.plantCooldowns = {};
+        this.lastAutoSave = 0;
+        this.autoSaveInterval = 1800; // Auto-save every 30 seconds
+
+        this.initCardSlot();
+        this.updateUI();
+
+        // Try to auto-load saved game
+        // Commented out - uncomment if you want auto-load on start
+        // this.loadGame();
+    }
+
+    addDamageNumber(x, y, damage) {
+        this.damageNumbers.push({
+            x: x,
+            y: y,
+            damage: damage,
+            life: 60
+        });
+    }
+
+    initCardSlot() {
+        const container = document.getElementById('card-slot');
+        container.innerHTML = '';
+
+        Object.entries(PLANT_TYPES).forEach(([key, plant]) => {
+            const card = document.createElement('div');
+            card.className = 'plant-card';
+            card.dataset.type = key;
+            card.innerHTML = `
+                <div class="plant-card-icon">${plant.icon}</div>
+                <div class="plant-card-cost">${plant.cost}</div>
+            `;
+            card.onclick = () => this.selectPlant(key, card);
+            container.appendChild(card);
+
+            // Initialize cooldown
+            this.plantCooldowns[key] = 0;
+        });
+    }
+
+    selectPlant(type, cardElement) {
+        // Check cooldown
+        if (frameCount < this.plantCooldowns[type]) {
+            this.showNotification('冷却中！');
+            return;
+        }
+
+        // Check if can afford
+        if (this.sun < PLANT_TYPES[type].cost) {
+            this.showNotification('阳光不足！');
+            return;
+        }
+
+        // Update UI selection
+        document.querySelectorAll('.plant-card').forEach(c => c.classList.remove('selected'));
+
+        if (this.selectedPlant === type) {
+            this.selectedPlant = null;
+        } else {
+            this.selectedPlant = type;
+            cardElement.classList.add('selected');
+        }
+    }
+
+    placePlant(col, row) {
+        if (!this.selectedPlant) return;
+
+        // Check if cell is occupied
+        const occupied = this.plants.some(p => p.col === col && p.row === row);
+        if (occupied) {
+            this.showNotification('这里已经有植物了！');
+            return;
+        }
+
+        const plantType = this.selectedPlant;
+        const cost = PLANT_TYPES[plantType].cost;
+
+        // Deduct sun
+        this.sun -= cost;
+
+        // Create plant
+        const plant = new Plant(plantType, col, row);
+        this.plants.push(plant);
+
+        // Play plant sound
+        audioManager.playPlantPlace();
+
+        // Set cooldown
+        this.plantCooldowns[plantType] = frameCount + PLANT_TYPES[plantType].cooldown;
+
+        // Deselect
+        this.selectedPlant = null;
+        document.querySelectorAll('.plant-card').forEach(c => c.classList.remove('selected'));
+
+        this.updateUI();
+    }
+
+    spawnZombie() {
+        if (this.zombiesSpawned >= this.zombiesPerWave) return;
+
+        this.spawnTimer++;
+        if (this.spawnTimer > 300) { // Spawn every 5 seconds
+            this.spawnTimer = 0;
+            this.zombiesSpawned++;
+
+            const row = floor(random(GRID_ROWS));
+
+            // Random zombie type based on wave
+            let type = 'normal';
+            const rand = random();
+
+            if (this.wave >= 3 && rand < 0.2) {
+                type = 'buckethead';
+            } else if (this.wave >= 2 && rand < 0.4) {
+                type = 'conehead';
+            }
+
+            this.zombies.push(new Zombie(row, type));
+        }
+    }
+
+    addSun(x, y, value) {
+        this.suns.push(new Sun(x, y, value));
+    }
+
+    addExplosion(x, y) {
+        this.explosions.push(new Explosion(x, y));
+    }
+
+    collectSun(sun) {
+        const value = sun.collect();
+        this.sun += value;
+        audioManager.playSunCollect();
+        this.updateUI();
+    }
+
+    getAllZombies() {
+        return this.zombies;
+    }
+
+    gameOver() {
+        this.gameRunning = false;
+        audioManager.playGameOver();
+        document.getElementById('final-score').textContent = `存活了 ${this.wave} 波`;
+        document.getElementById('game-over').classList.remove('hidden');
+    }
+
+    showNotification(message) {
+        // Create floating notification
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 20px 40px;
+            border-radius: 10px;
+            font-size: 24px;
+            font-weight: bold;
+            z-index: 1000;
+            animation: fadeInOut 2s forwards;
+            border: 3px solid #6b9b3a;
+        `;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 2000);
+    }
+
+    saveGame() {
+        try {
+            const saveData = {
+                sun: this.sun,
+                wave: this.wave,
+                zombiesSpawned: this.zombiesSpawned,
+                zombiesPerWave: this.zombiesPerWave,
+                waveInProgress: this.waveInProgress,
+                spawnTimer: this.spawnTimer,
+                sunSpawnTimer: this.sunSpawnTimer,
+                waveTimer: this.waveTimer,
+                gameRunning: this.gameRunning,
+                plantCooldowns: this.plantCooldowns,
+                plants: this.plants.map(p => ({
+                    type: p.type,
+                    col: p.col,
+                    row: p.row,
+                    health: p.health,
+                    maxHealth: p.maxHealth,
+                    lastAction: p.lastAction,
+                    armed: p.armed,
+                    digesting: p.digesting,
+                    digestTimer: p.digestTimer
+                })),
+                zombies: this.zombies.map(z => ({
+                    row: z.row,
+                    type: z.type,
+                    x: z.x,
+                    y: z.y,
+                    health: z.health,
+                    maxHealth: z.maxHealth,
+                    frozen: z.frozen,
+                    frozenTimer: z.frozenTimer,
+                    eating: z.eating
+                })),
+                bullets: this.bullets.map(b => ({
+                    x: b.x,
+                    y: b.y,
+                    damage: b.damage,
+                    isFreezing: b.isFreezing
+                })),
+                suns: this.suns.map(s => ({
+                    x: s.x,
+                    y: s.y,
+                    value: s.value,
+                    targetY: s.targetY,
+                    collected: s.collected,
+                    lifeTime: s.lifeTime,
+                    spawnTime: s.spawnTime - frameCount
+                }))
+            };
+
+            localStorage.setItem('pvzSave', JSON.stringify(saveData));
+            this.showNotification('💾 游戏已保存！');
+        } catch (e) {
+            console.error('Save failed:', e);
+            this.showNotification('❌ 保存失败！');
+        }
+    }
+
+    loadGame() {
+        try {
+            const saveData = localStorage.getItem('pvzSave');
+            if (!saveData) {
+                this.showNotification('❌ 没有找到存档！');
+                return;
+            }
+
+            const data = JSON.parse(saveData);
+
+            // Restore basic game state
+            this.sun = data.sun;
+            this.wave = data.wave;
+            this.zombiesSpawned = data.zombiesSpawned;
+            this.zombiesPerWave = data.zombiesPerWave;
+            this.waveInProgress = data.waveInProgress;
+            this.spawnTimer = data.spawnTimer || 0;
+            this.sunSpawnTimer = data.sunSpawnTimer || 0;
+            this.waveTimer = data.waveTimer || 0;
+            this.gameRunning = data.gameRunning;
+            this.plantCooldowns = data.plantCooldowns || {};
+
+            // Clear existing entities
+            this.plants = [];
+            this.zombies = [];
+            this.bullets = [];
+            this.suns = [];
+            this.explosions = [];
+            this.damageNumbers = [];
+
+            // Restore plants
+            if (data.plants && Array.isArray(data.plants)) {
+                data.plants.forEach(plantData => {
+                    const plant = new Plant(plantData.type, plantData.col, plantData.row);
+                    plant.health = plantData.health;
+                    plant.maxHealth = plantData.maxHealth;
+                    plant.lastAction = plantData.lastAction;
+                    plant.armed = plantData.armed;
+                    plant.digesting = plantData.digesting;
+                    plant.digestTimer = plantData.digestTimer;
+                    this.plants.push(plant);
+                });
+            }
+
+            // Restore zombies
+            if (data.zombies && Array.isArray(data.zombies)) {
+                data.zombies.forEach(zombieData => {
+                    const zombie = new Zombie(zombieData.row, zombieData.type);
+                    zombie.x = zombieData.x;
+                    zombie.y = zombieData.y;
+                    zombie.health = zombieData.health;
+                    zombie.maxHealth = zombieData.maxHealth;
+                    zombie.frozen = zombieData.frozen;
+                    zombie.frozenTimer = zombieData.frozenTimer;
+                    zombie.eating = zombieData.eating;
+                    this.zombies.push(zombie);
+                });
+            }
+
+            // Restore bullets
+            if (data.bullets && Array.isArray(data.bullets)) {
+                data.bullets.forEach(bd => {
+                    const bullet = new Bullet(bd.x, bd.y, bd.damage, bd.isFreezing);
+                    this.bullets.push(bullet);
+                });
+            }
+
+            // Restore suns
+            if (data.suns && Array.isArray(data.suns)) {
+                data.suns.forEach(sd => {
+                    if (!sd.collected) {
+                        const sun = new Sun(sd.x, sd.y, sd.value);
+                        sun.targetY = sd.targetY;
+                        sun.lifeTime = sd.lifeTime;
+                        sun.spawnTime = frameCount + (sd.spawnTime || 0);
+                        this.suns.push(sun);
+                    }
+                });
+            }
+
+            this.updateUI();
+            this.showNotification('📂 存档已读取！');
+        } catch (e) {
+            console.error('Load failed:', e);
+            this.showNotification('❌ 读取失败！');
+        }
+    }
+
+    clearSave() {
+        try {
+            localStorage.removeItem('pvzSave');
+            this.showNotification('🗑️ 存档已清除！请刷新页面重新开始。');
+        } catch (e) {
+            console.error('Clear failed:', e);
+            this.showNotification('❌ 清除失败！');
+        }
+    }
+
+    updateUI() {
+        document.getElementById('sun-display').textContent = this.sun;
+        document.getElementById('level-display').textContent =
+            `第 ${this.wave} 波 - 僵尸: ${this.zombiesSpawned}/${this.zombiesPerWave}`;
+
+        // Update card states
+        Object.entries(PLANT_TYPES).forEach(([key, plant]) => {
+            const card = document.querySelector(`[data-type="${key}"]`);
+            if (card) {
+                if (this.sun < plant.cost || frameCount < this.plantCooldowns[key]) {
+                    card.classList.add('disabled');
+                } else {
+                    card.classList.remove('disabled');
+                }
+            }
+        });
+    }
+
+    update() {
+        if (!this.gameRunning) return;
+
+        // Auto-save periodically
+        if (frameCount - this.lastAutoSave > this.autoSaveInterval) {
+            this.lastAutoSave = frameCount;
+            // Auto-save silently (without notification)
+            try {
+                const saveData = {
+                    sun: this.sun,
+                    wave: this.wave,
+                    zombiesSpawned: this.zombiesSpawned,
+                    zombiesPerWave: this.zombiesPerWave,
+                    waveInProgress: this.waveInProgress,
+                    spawnTimer: this.spawnTimer,
+                    sunSpawnTimer: this.sunSpawnTimer,
+                    waveTimer: this.waveTimer,
+                    gameRunning: this.gameRunning,
+                    plantCooldowns: this.plantCooldowns,
+                    plants: this.plants.map(p => ({
+                        type: p.type,
+                        col: p.col,
+                        row: p.row,
+                        health: p.health,
+                        maxHealth: p.maxHealth,
+                        lastAction: p.lastAction,
+                        armed: p.armed,
+                        digesting: p.digesting,
+                        digestTimer: p.digestTimer
+                    })),
+                    zombies: this.zombies.map(z => ({
+                        row: z.row,
+                        type: z.type,
+                        x: z.x,
+                        y: z.y,
+                        health: z.health,
+                        maxHealth: z.maxHealth,
+                        frozen: z.frozen,
+                        frozenTimer: z.frozenTimer,
+                        eating: z.eating
+                    }))
+                };
+                localStorage.setItem('pvzSave', JSON.stringify(saveData));
+            } catch (e) {
+                console.error('Auto-save failed:', e);
+            }
+        }
+
+        // Spawn natural sun
+        this.sunSpawnTimer++;
+        if (this.sunSpawnTimer > 600) { // Every 10 seconds
+            this.sunSpawnTimer = 0;
+            this.addSun(random(GRID_OFFSET_X, width - 100), -50, 25);
+        }
+
+        // Wave management
+        this.waveTimer++;
+
+        if (!this.waveInProgress && this.waveTimer > 600) {
+            this.waveInProgress = true;
+            this.showWaveNotification();
+        }
+
+        if (this.waveInProgress) {
+            this.spawnZombie();
+
+            // Check if wave complete
+            if (this.zombiesSpawned >= this.zombiesPerWave && this.zombies.length === 0) {
+                this.waveInProgress = false;
+                this.wave++;
+                this.zombiesSpawned = 0;
+                this.zombiesPerWave = 5 + this.wave * 2;
+                this.waveTimer = 0;
+
+                // Bonus sun for completing wave
+                this.addSun(width / 2, height / 2, 50);
+                this.updateUI();
+
+                // Auto-save on wave complete
+                try {
+                    const saveData = {
+                        sun: this.sun,
+                        wave: this.wave,
+                        zombiesSpawned: this.zombiesSpawned,
+                        zombiesPerWave: this.zombiesPerWave,
+                        waveInProgress: this.waveInProgress,
+                        spawnTimer: this.spawnTimer,
+                        sunSpawnTimer: this.sunSpawnTimer,
+                        waveTimer: this.waveTimer,
+                        gameRunning: this.gameRunning,
+                        plantCooldowns: this.plantCooldowns,
+                        plants: this.plants.map(p => ({
+                            type: p.type,
+                            col: p.col,
+                            row: p.row,
+                            health: p.health,
+                            maxHealth: p.maxHealth,
+                            lastAction: p.lastAction,
+                            armed: p.armed,
+                            digesting: p.digesting,
+                            digestTimer: p.digestTimer
+                        })),
+                        zombies: this.zombies.map(z => ({
+                            row: z.row,
+                            type: z.type,
+                            x: z.x,
+                            y: z.y,
+                            health: z.health,
+                            maxHealth: z.maxHealth,
+                            frozen: z.frozen,
+                            frozenTimer: z.frozenTimer,
+                            eating: z.eating
+                        }))
+                    };
+                    localStorage.setItem('pvzSave', JSON.stringify(saveData));
+                } catch (e) {
+                    console.error('Auto-save failed:', e);
+                }
+            }
+        }
+
+        // Update plants (iterate backwards to safely remove)
+        for (let pIndex = this.plants.length - 1; pIndex >= 0; pIndex--) {
+            const plant = this.plants[pIndex];
+            const zombiesInRow = this.zombies.filter(z => z.row === plant.row);
+            plant.update(zombiesInRow, this.bullets);
+
+            if (plant.health <= 0) {
+                this.plants.splice(pIndex, 1);
+            }
+        }
+
+        // Update zombies (iterate backwards to safely remove)
+        for (let zIndex = this.zombies.length - 1; zIndex >= 0; zIndex--) {
+            const zombie = this.zombies[zIndex];
+            const plantsInRow = this.plants.filter(p => p.row === zombie.row);
+            zombie.update(plantsInRow);
+
+            // Check if zombie died - remove if health <= 0
+            if (zombie.health <= 0) {
+                audioManager.playZombieDie();
+                this.zombies.splice(zIndex, 1);
+            }
+        }
+
+        // Update bullets (iterate backwards to safely remove)
+        for (let bIndex = this.bullets.length - 1; bIndex >= 0; bIndex--) {
+            const bullet = this.bullets[bIndex];
+            bullet.update();
+
+            // Check collision with zombies
+            let hit = false;
+            for (let zIndex = this.zombies.length - 1; zIndex >= 0; zIndex--) {
+                const zombie = this.zombies[zIndex];
+                if (zombie.row === Math.floor((bullet.y - GRID_OFFSET_Y) / CELL_SIZE)) {
+                    const d = dist(bullet.x, bullet.y, zombie.x, zombie.y);
+                    if (d < 40) {
+                        zombie.takeDamage(bullet.damage);
+                        audioManager.playZombieHit();
+                        // Show damage number
+                        this.addDamageNumber(zombie.x, zombie.y - 30, bullet.damage);
+                        if (bullet.isFreezing) {
+                            zombie.freeze();
+                        }
+                        hit = true;
+                        break;
+                    }
+                }
+            }
+
+            // Remove bullet if it hit or went off screen
+            if (hit || bullet.isOffScreen()) {
+                this.bullets.splice(bIndex, 1);
+            }
+        }
+
+        // Update suns
+        this.suns = this.suns.filter(sun => !sun.update());
+
+        // Update damage numbers
+        this.damageNumbers = this.damageNumbers.filter(dn => {
+            dn.y -= 1;
+            dn.life--;
+            return dn.life > 0;
+        });
+
+        // Update explosions
+        this.explosions = this.explosions.filter(exp => !exp.update());
+
+        // Update UI periodically
+        if (frameCount % 60 === 0) {
+            this.updateUI();
+        }
+    }
+
+    showWaveNotification() {
+        audioManager.playWaveAlert();
+        const notification = document.createElement('div');
+        notification.className = 'wave-notification';
+        notification.textContent = `🧟 第 ${this.wave} 波来袭！`;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 3000);
+    }
+
+    draw() {
+        // Background - lawn
+        background(34, 139, 34);
+
+        // Draw grass pattern
+        for (let row = 0; row < GRID_ROWS; row++) {
+            for (let col = 0; col < GRID_COLS; col++) {
+                const x = GRID_OFFSET_X + col * CELL_SIZE;
+                const y = GRID_OFFSET_Y + row * CELL_SIZE;
+
+                // Checkerboard pattern
+                if ((row + col) % 2 === 0) {
+                    fill(50, 160, 50);
+                } else {
+                    fill(40, 150, 40);
+                }
+                noStroke();
+                rect(x, y, CELL_SIZE, CELL_SIZE);
+
+                // Grid lines
+                stroke(30, 130, 30);
+                strokeWeight(1);
+                noFill();
+                rect(x, y, CELL_SIZE, CELL_SIZE);
+            }
+        }
+
+        // House on left
+        fill(100, 70, 50);
+        rect(0, 0, GRID_OFFSET_X, height);
+
+        // Door
+        fill(80, 50, 30);
+        rect(50, height - 180, 80, 180);
+        fill(60, 40, 20);
+        ellipse(90, height - 180, 80, 40);
+
+        // Windows
+        fill(100, 150, 200);
+        stroke(60, 40, 20);
+        strokeWeight(5);
+        rect(20, 100, 60, 60);
+        rect(110, 100, 60, 60);
+
+        // Draw explosions (behind plants/zombies)
+        this.explosions.forEach(exp => exp.draw());
+
+        // Draw plants
+        this.plants.forEach(plant => plant.draw());
+
+        // Draw zombies
+        this.zombies.forEach(zombie => zombie.draw());
+
+        // Draw bullets
+        this.bullets.forEach(bullet => bullet.draw());
+
+        // Draw suns
+        this.suns.forEach(sun => sun.draw());
+
+        // Draw damage numbers
+        this.damageNumbers.forEach(dn => {
+            push();
+            translate(dn.x, dn.y);
+            fill(255, 50, 50, dn.life * 4);
+            stroke(0, 0, 0, dn.life * 4);
+            strokeWeight(2);
+            textSize(20);
+            textAlign(CENTER, CENTER);
+            text(`-${dn.damage}`, 0, 0);
+            pop();
+        });
+
+        // Draw placement preview
+        if (this.selectedPlant) {
+            const col = floor((mouseX - GRID_OFFSET_X) / CELL_SIZE);
+            const row = floor((mouseY - GRID_OFFSET_Y) / CELL_SIZE);
+
+            if (col >= 0 && col < GRID_COLS && row >= 0 && row < GRID_ROWS) {
+                const x = GRID_OFFSET_X + col * CELL_SIZE + CELL_SIZE / 2;
+                const y = GRID_OFFSET_Y + row * CELL_SIZE + CELL_SIZE / 2;
+
+                // Preview
+                push();
+                translate(x, y);
+                textSize(50);
+                drawingContext.shadowBlur = 20;
+                drawingContext.shadowColor = 'rgba(255, 255, 255, 0.8)';
+                text(PLANT_TYPES[this.selectedPlant].icon, 0, 0);
+                drawingContext.shadowBlur = 0;
+                pop();
+
+                // Grid highlight
+                noFill();
+                stroke(255, 255, 0);
+                strokeWeight(3);
+                rect(GRID_OFFSET_X + col * CELL_SIZE, GRID_OFFSET_Y + row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+            }
+        }
+    }
+}
+
+let game;
+
+function setup() {
+    const canvas = createCanvas(1100, 650);
+    canvas.parent('game-container');
+    game = new Game();
+
+    // Initialize audio system
+    audioManager.init();
+}
+
+function draw() {
+    game.update();
+    game.draw();
+}
+
+function mousePressed() {
+    // Initialize audio on first user interaction (browser requirement)
+    audioManager.init();
+
+    if (!game.gameRunning) return;
+
+    // Check sun clicks
+    for (let sun of game.suns) {
+        if (sun.isClicked(mouseX, mouseY)) {
+            game.collectSun(sun);
+            return;
+        }
+    }
+
+    // Check grid clicks for planting
+    const col = floor((mouseX - GRID_OFFSET_X) / CELL_SIZE);
+    const row = floor((mouseY - GRID_OFFSET_Y) / CELL_SIZE);
+
+    if (col >= 0 && col < GRID_COLS && row >= 0 && row < GRID_ROWS) {
+        game.placePlant(col, row);
+    }
+}
+    </script>
+</body>
+</html>

@@ -1,0 +1,1378 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>轻松水族馆 - 盲盒版</title>
+    <script src="p5.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 50%, #0a1a2e 100%);
+            font-family: 'Microsoft YaHei', sans-serif;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+        }
+        #gameCanvas {
+            border-radius: 15px;
+            box-shadow: 0 20px 80px rgba(0,100,200,0.4), 0 0 100px rgba(100,200,255,0.2);
+        }
+        .ui-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            pointer-events: none;
+        }
+        .resource-bar {
+            display: flex;
+            gap: 15px;
+            background: linear-gradient(135deg, rgba(0,0,0,0.7) 0%, rgba(0,50,100,0.7) 100%);
+            padding: 12px 25px;
+            border-radius: 30px;
+            pointer-events: auto;
+            border: 2px solid rgba(100,200,255,0.3);
+            backdrop-filter: blur(10px);
+        }
+        .resource-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: white;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .resource-icon {
+            font-size: 24px;
+            filter: drop-shadow(0 0 10px currentColor);
+        }
+        .shop-panel {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: linear-gradient(135deg, rgba(0,20,40,0.98) 0%, rgba(20,0,40,0.98) 100%);
+            border-radius: 25px;
+            padding: 35px;
+            min-width: 700px;
+            max-height: 85vh;
+            overflow-y: auto;
+            border: 3px solid rgba(100,200,255,0.5);
+            box-shadow: 0 0 80px rgba(0,150,255,0.4), inset 0 0 50px rgba(100,200,255,0.1);
+            backdrop-filter: blur(20px);
+        }
+        .shop-panel h2 {
+            color: #00ddff;
+            text-align: center;
+            margin-bottom: 25px;
+            font-size: 32px;
+            text-shadow: 0 0 20px #00ddff;
+        }
+        .shop-tabs {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 25px;
+        }
+        .shop-tab {
+            flex: 1;
+            padding: 15px;
+            background: rgba(255,255,255,0.05);
+            border: 2px solid rgba(100,200,255,0.3);
+            color: white;
+            font-size: 17px;
+            cursor: pointer;
+            border-radius: 15px;
+            transition: all 0.3s;
+        }
+        .shop-tab:hover, .shop-tab.active {
+            background: linear-gradient(135deg, #00a8cc 0%, #005f73 100%);
+            border-color: #00ddff;
+            transform: scale(1.05);
+            box-shadow: 0 0 30px rgba(0,200,255,0.5);
+        }
+        .shop-items {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 18px;
+        }
+        .shop-item {
+            background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(100,200,255,0.05) 100%);
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 2px solid transparent;
+        }
+        .shop-item:hover {
+            background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(100,200,255,0.1) 100%);
+            border-color: #00ddff;
+            transform: translateY(-8px);
+            box-shadow: 0 10px 40px rgba(0,200,255,0.3);
+        }
+        .shop-item-icon {
+            font-size: 60px;
+            margin-bottom: 12px;
+            filter: drop-shadow(0 0 15px rgba(255,255,255,0.5));
+        }
+        .shop-item-name {
+            color: white;
+            font-size: 15px;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+        .shop-item-price {
+            color: #ffd700;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .shop-item-rarity {
+            font-size: 13px;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+        .close-btn {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            background: rgba(255,0,0,0.3);
+            border: none;
+            color: white;
+            font-size: 32px;
+            cursor: pointer;
+            opacity: 0.7;
+            border-radius: 50%;
+            width: 45px;
+            height: 45px;
+            transition: all 0.3s;
+        }
+        .close-btn:hover {
+            opacity: 1;
+            background: rgba(255,0,0,0.5);
+            transform: rotate(90deg);
+        }
+        .action-buttons {
+            position: absolute;
+            bottom: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: center;
+            max-width: 90%;
+        }
+        .action-btn {
+            padding: 16px 32px;
+            background: linear-gradient(135deg, #00a8cc 0%, #005f73 100%);
+            border: 2px solid rgba(100,200,255,0.5);
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 35px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 5px 25px rgba(0,168,204,0.5);
+        }
+        .action-btn:hover {
+            transform: scale(1.12);
+            box-shadow: 0 8px 40px rgba(0,200,255,0.7);
+            border-color: #00ddff;
+        }
+        .fish-info-panel {
+            position: absolute;
+            top: 70px;
+            right: 15px;
+            background: linear-gradient(135deg, rgba(0,20,40,0.95) 0%, rgba(20,0,40,0.95) 100%);
+            padding: 20px;
+            border-radius: 20px;
+            border: 2px solid rgba(100,200,255,0.5);
+            min-width: 220px;
+            backdrop-filter: blur(10px);
+        }
+        .fish-info-title {
+            color: #00ddff;
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        .fish-info-item {
+            color: white;
+            font-size: 14px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .fish-info-value {
+            color: #00ddff;
+            font-weight: bold;
+        }
+        .sell-btn {
+            width: 100%;
+            padding: 12px;
+            margin-top: 15px;
+            background: linear-gradient(135deg, #ff6b6b 0%, #c0392b 100%);
+            border: 2px solid rgba(255,100,100,0.5);
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .sell-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 20px rgba(255,100,100,0.5);
+        }
+        .notification {
+            position: fixed;
+            top: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, rgba(0,168,204,0.95) 0%, rgba(0,95,115,0.95) 100%);
+            color: white;
+            padding: 18px 35px;
+            border-radius: 15px;
+            font-size: 17px;
+            font-weight: bold;
+            z-index: 1000;
+            animation: fadeInOut 4s forwards;
+            border: 2px solid rgba(100,200,255,0.5);
+            box-shadow: 0 10px 40px rgba(0,150,255,0.4);
+        }
+        @keyframes fadeInOut {
+            0% { opacity: 0; transform: translateX(-50%) translateY(-30px); }
+            10% { opacity: 1; transform: translateX(-50%) translateY(0); }
+            90% { opacity: 1; transform: translateX(-50%) translateY(0); }
+            100% { opacity: 0; transform: translateX(-50%) translateY(-30px); }
+        }
+        .hidden { display: none !important; }
+
+        /* 盲盒开启动画 */
+        .egg-hatch {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 150px;
+            z-index: 2000;
+            animation: hatchAnimation 2s forwards;
+            filter: drop-shadow(0 0 30px gold);
+        }
+        @keyframes hatchAnimation {
+            0% { transform: translate(-50%, -50%) scale(0); opacity: 0; }
+            20% { transform: translate(-50%, -50%) scale(1.2); opacity: 1; }
+            40% { transform: translate(-50%, -50%) scale(1) rotate(0deg); }
+            60% { transform: translate(-50%, -50%) scale(1.2) rotate(180deg); }
+            80% { transform: translate(-50%, -50%) scale(0.8) rotate(360deg); }
+            100% { transform: translate(-50%, -50%) scale(0) rotate(720deg); opacity: 0; }
+        }
+
+        /* 幼鱼提示 */
+        .baby-fish-indicator {
+            position: absolute;
+            background: linear-gradient(135deg, rgba(255,200,100,0.9) 0%, rgba(255,150,50,0.9) 100%);
+            color: white;
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-size: 12px;
+            font-weight: bold;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+        <div class="ui-overlay">
+            <div class="resource-bar">
+                <div class="resource-item">
+                    <span class="resource-icon">🪙</span>
+                    <span id="gold-display">0</span>
+                </div>
+                <div class="resource-item">
+                    <span class="resource-icon">💎</span>
+                    <span id="diamond-display">0</span>
+                </div>
+                <div class="resource-item">
+                    <span class="resource-icon">🐟</span>
+                    <span id="fish-count-display">0</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="fish-info-panel" class="fish-info-panel hidden">
+            <div class="fish-info-title">🐠 鱼类信息</div>
+            <div class="fish-info-item">
+                <span>名称:</span>
+                <span class="fish-info-value" id="fish-name">-</span>
+            </div>
+            <div class="fish-info-item">
+                <span>稀有度:</span>
+                <span class="fish-info-value" id="fish-rarity">-</span>
+            </div>
+            <div class="fish-info-item">
+                <span>成长:</span>
+                <span class="fish-info-value" id="fish-growth">-</span>
+            </div>
+            <div class="fish-info-item">
+                <span>价值:</span>
+                <span class="fish-info-value" id="fish-value">-</span>
+            </div>
+            <button id="sell-button" class="sell-btn" onclick="game.sellSelectedFish()">💰 卖出</button>
+        </div>
+
+        <div class="action-buttons">
+            <button class="action-btn" onclick="game.buyMysteryEgg('common')">🥚 普通鱼卵</button>
+            <button class="action-btn" onclick="game.buyMysteryEgg('rare')">🥚 稀有鱼卵</button>
+            <button class="action-btn" onclick="game.buyMysteryEgg('epic')">🥚 史诗鱼卵</button>
+            <button class="action-btn" onclick="game.buyMysteryEgg('legendary')">🥚 传说鱼卵</button>
+            <button class="action-btn" onclick="game.feedAll()">🍞 喂食</button>
+            <button class="action-btn" onclick="game.openShop()">🏪 商店</button>
+            <button class="action-btn" onclick="game.openCollection()">📚 图鉴</button>
+            <button class="action-btn" onclick="game.saveGame()">💾 保存</button>
+            <button class="action-btn" onclick="game.loadGame()">📂 读取</button>
+        </div>
+    </div>
+
+    <div id="shop-panel" class="shop-panel hidden">
+        <button class="close-btn" onclick="game.closeShop()">&times;</button>
+        <h2>🏪 水族馆商店</h2>
+        <div class="shop-tabs">
+            <button class="shop-tab active" onclick="game.switchShopTab('decor')">🌿 装饰</button>
+            <button class="shop-tab" onclick="game.switchShopTab('food')">🍞 鱼食</button>
+        </div>
+        <div id="shop-items" class="shop-items"></div>
+    </div>
+
+    <script>
+const FISH_TYPES = {
+    common: [
+        { name: '小丑鱼', icon: '🐠', rarity: 'common', price: 100, sellPrice: 50, speed: 2, size: 35, growthTime: 120, color: [255, 150, 50] },
+        { name: '蓝唐王鱼', icon: '🐟', rarity: 'common', price: 150, sellPrice: 75, speed: 2.5, size: 30, growthTime: 100, color: [50, 150, 255] },
+        { name: '黄金鱼', icon: '🐡', rarity: 'common', price: 200, sellPrice: 100, speed: 1.8, size: 40, growthTime: 140, color: [255, 200, 50] },
+        { name: '孔雀鱼', icon: '🐠', rarity: 'common', price: 120, sellPrice: 60, speed: 3, size: 25, growthTime: 90, color: [100, 200, 150] },
+    ],
+    rare: [
+        { name: '天使鱼', icon: '🐠', rarity: 'rare', price: 500, sellPrice: 250, speed: 3, size: 45, growthTime: 180, color: [150, 255, 200] },
+        { name: '蝴蝶鱼', icon: '🦋', rarity: 'rare', price: 600, sellPrice: 300, speed: 3.5, size: 40, growthTime: 160, color: [255, 200, 100] },
+        { name: '河豚', icon: '🐡', rarity: 'rare', price: 700, sellPrice: 350, speed: 2, size: 50, growthTime: 200, color: [200, 150, 255] },
+        { name: '神仙鱼', icon: '🐟', rarity: 'rare', price: 800, sellPrice: 400, speed: 2.8, size: 48, growthTime: 190, color: [255, 150, 200] },
+    ],
+    epic: [
+        { name: '锦鲤', icon: '🎏', rarity: 'epic', price: 2000, sellPrice: 1000, speed: 4, size: 55, growthTime: 300, color: [255, 100, 150] },
+        { name: '海马', icon: '🦩', rarity: 'epic', price: 3000, sellPrice: 1500, speed: 2.5, size: 45, growthTime: 240, color: [255, 200, 100] },
+        { name: '电鳗', icon: '⚡', rarity: 'epic', price: 4000, sellPrice: 2000, speed: 5, size: 60, growthTime: 280, color: [255, 255, 100] },
+        { name: '龙鱼', icon: '🐉', rarity: 'epic', price: 5000, sellPrice: 2500, speed: 3.5, size: 65, growthTime: 320, color: [200, 100, 255] },
+    ],
+    legendary: [
+        { name: '美人鱼', icon: '🧜', rarity: 'legendary', price: 10000, sellPrice: 5000, speed: 5, size: 70, growthTime: 400, color: [100, 255, 255] },
+        { name: '海龙', icon: '🐉', rarity: 'legendary', price: 15000, sellPrice: 7500, speed: 6, size: 80, growthTime: 500, color: [255, 215, 0] },
+        { name: '海神使者', icon: '👼', rarity: 'legendary', price: 20000, sellPrice: 10000, speed: 7, size: 85, growthTime: 600, color: [150, 100, 255] },
+    ]
+};
+
+const EGG_PRICES = {
+    common: 80,
+    rare: 400,
+    epic: 1500,
+    legendary: 8000
+};
+
+const DECOR_TYPES = [
+    { name: '水草', icon: '🌿', price: 50 },
+    { name: '海藻', icon: '🌱', price: 80 },
+    { name: '珊瑚', icon: '🪸', price: 200 },
+    { name: '贝壳', icon: '🐚', price: 150 },
+    { name: '海星', icon: '⭐', price: 300 },
+    { name: '珍珠', icon: '🔮', price: 500 },
+    { name: '水晶', icon: '💎', price: 800 },
+    { name: '宝藏箱', icon: '🎁', price: 1000 },
+];
+
+class Fish {
+    constructor(type, x, y, isBaby = true) {
+        this.id = Date.now() + Math.random();
+        this.type = type;
+        this.x = x;
+        this.y = y;
+        this.vx = (Math.random() - 0.5) * type.speed;
+        this.vy = (Math.random() - 0.5) * type.speed * 0.5;
+        this.targetSize = type.size;
+        this.currentSize = isBaby ? type.size * 0.25 : type.size;
+        this.growth = 0;
+        this.growthTime = type.growthTime;
+        this.facingRight = this.vx > 0;
+        this.hunger = 100;
+        this.happiness = 100;
+        this.age = 0;
+        this.isBaby = isBaby;
+        this.isRevealed = !isBaby;
+        this.color = type.color;
+        this.tailWag = 0;
+        this.finWave = 0;
+        this.glowIntensity = 0;
+        this.selected = false;
+    }
+
+    getRarityColor(rarity) {
+        const colors = {
+            common: [100, 200, 255],
+            rare: [100, 255, 150],
+            epic: [255, 150, 255],
+            legendary: [255, 215, 0]
+        };
+        return colors[rarity] || colors.common;
+    }
+
+    update(tankWidth, tankHeight, foods) {
+        // Growth
+        if (this.isBaby && this.growth < this.growthTime) {
+            this.growth++;
+            const growthProgress = this.growth / this.growthTime;
+            this.currentSize = this.targetSize * (0.25 + growthProgress * 0.75);
+
+            // Reveal fish when fully grown
+            if (this.growth >= this.growthTime) {
+                this.isBaby = false;
+                this.isRevealed = true;
+                game.showNotification(`🎉 你的 ${this.type.name} 长大了！`, this.type.rarity);
+            }
+        }
+
+        // Animation updates
+        this.tailWag += 0.15;
+        this.finWave += 0.1;
+
+        // Glow effect for legendary fish
+        if (this.type.rarity === 'legendary') {
+            this.glowIntensity = sin(millis() / 500) * 0.5 + 0.5;
+        }
+
+        // Hunger
+        this.hunger = max(0, this.hunger - 0.015);
+        this.age++;
+
+        // Find food
+        if (this.hunger < 80 && foods.length > 0) {
+            let closestFood = null;
+            let closestDist = Infinity;
+            for (let food of foods) {
+                const d = dist(this.x, this.y, food.x, food.y);
+                if (d < closestDist) {
+                    closestDist = d;
+                    closestFood = food;
+                }
+            }
+            if (closestFood && closestDist < 200) {
+                const angle = atan2(closestFood.y - this.y, closestFood.x - this.x);
+                this.vx = cos(angle) * this.type.speed * 1.5;
+                this.vy = sin(angle) * this.type.speed * 1.5;
+                if (closestDist < this.currentSize) {
+                    closestFood.eaten = true;
+                    this.hunger = min(100, this.hunger + 35);
+                    this.happiness = min(100, this.happiness + 15);
+                }
+            }
+        }
+
+        // Random movement
+        if (random() < 0.02) {
+            this.vx += (Math.random() - 0.5) * 0.5;
+            this.vy += (Math.random() - 0.5) * 0.3;
+        }
+
+        // Apply speed limit
+        const speedLimit = this.type.speed;
+        const currentSpeed = sqrt(this.vx * this.vx + this.vy * this.vy);
+        if (currentSpeed > speedLimit) {
+            this.vx = (this.vx / currentSpeed) * speedLimit;
+            this.vy = (this.vy / currentSpeed) * speedLimit;
+        }
+
+        // Update position
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // Boundary check
+        const margin = this.currentSize;
+        if (this.x < margin) { this.x = margin; this.vx *= -1; }
+        if (this.x > tankWidth - margin) { this.x = tankWidth - margin; this.vx *= -1; }
+        if (this.y < margin) { this.y = margin; this.vy *= -1; }
+        if (this.y > tankHeight - margin) { this.y = tankHeight - margin; this.vy *= -1; }
+
+        this.facingRight = this.vx > 0;
+    }
+
+    draw() {
+        push();
+        translate(this.x, this.y);
+        if (!this.facingRight) {
+            scale(-1, 1);
+        }
+
+        const size = this.currentSize;
+        const tailWagOffset = sin(this.tailWag) * size * 0.15;
+        const finWaveOffset = sin(this.finWave) * size * 0.1;
+
+        // Glow effect for legendary
+        if (this.type.rarity === 'legendary' && !this.isBaby) {
+            try {
+                const c0 = constrain(this.color[0], 0, 255);
+                const c1 = constrain(this.color[1], 0, 255);
+                const c2 = constrain(this.color[2], 0, 255);
+                drawingContext.shadowBlur = 30 + this.glowIntensity * 20;
+                drawingContext.shadowColor = `rgba(${c0}, ${c1}, ${c2}, 0.8)`;
+            } catch (e) {}
+        }
+
+        // Baby fish (egg/fry)
+        if (this.isBaby) {
+            // Egg glow
+            try {
+                drawingContext.shadowBlur = 20;
+                drawingContext.shadowColor = 'rgba(255, 200, 100, 0.8)';
+            } catch (e) {}
+
+            // Egg body with solid color (simplified)
+            fill(255, 220, 180, 230);
+            stroke(255, 200, 150, 200);
+            strokeWeight(2);
+            ellipse(0, 0, size, size * 0.85);
+
+            // Egg pattern
+            noStroke();
+            fill(255, 220, 180, 150);
+            ellipse(size * 0.1, -size * 0.1, size * 0.15);
+            ellipse(-size * 0.05, size * 0.15, size * 0.12);
+
+            // Mystery mark
+            fill(255, 200, 100, 200);
+            textSize(size * 0.4);
+            textAlign(CENTER, CENTER);
+            text('?', 0, 0);
+
+            // Sparkles
+            if (frameCount % 30 < 15) {
+                fill(255, 255, 255, 200);
+                noStroke();
+                const sparkleX = sin(frameCount * 0.1) * size * 0.2;
+                const sparkleY = cos(frameCount * 0.15) * size * 0.15;
+                ellipse(sparkleX, sparkleY, 3, 3);
+            }
+
+            try {
+                drawingContext.shadowBlur = 0;
+            } catch (e) {}
+        } else {
+            // Adult fish with enhanced visuals
+
+            // Clamp color values to valid range
+            const c0 = constrain(this.color[0], 0, 255);
+            const c1 = constrain(this.color[1], 0, 255);
+            const c2 = constrain(this.color[2], 0, 255);
+            const c0b = constrain(this.color[0] - 30, 0, 255);
+            const c1b = constrain(this.color[1] - 30, 0, 255);
+            const c2b = constrain(this.color[2] - 30, 0, 255);
+
+            // Body with simple solid color
+            fill(c0, c1, c2, 230);
+            stroke(c0b, c1b, c2b, 200);
+            strokeWeight(2);
+            ellipse(0, 0, size, size * 0.6);
+
+            // Scales pattern
+            noStroke();
+            for (let i = 0; i < 3; i++) {
+                for (let j = 0; j < 2; j++) {
+                    const scaleX = -size * 0.2 + i * size * 0.15;
+                    const scaleY = -size * 0.15 + j * size * 0.2;
+                    fill(255, 255, 255, 30);
+                    ellipse(scaleX, scaleY, size * 0.12, size * 0.1);
+                }
+            }
+
+            // Dynamic tail
+            fill(c0, c1, c2, 180);
+            noStroke();
+            beginShape();
+            vertex(-size * 0.35, 0);
+            vertex(-size * 0.85 + tailWagOffset, -size * 0.35);
+            vertex(-size * 0.9 + tailWagOffset, 0);
+            vertex(-size * 0.85 + tailWagOffset, size * 0.35);
+            endShape(CLOSE);
+
+            // Dorsal fin
+            fill(c0, c1, c2, 160);
+            beginShape();
+            vertex(-size * 0.1, -size * 0.25);
+            vertex(-size * 0.25, -size * 0.5 + finWaveOffset);
+            vertex(0, -size * 0.35 + finWaveOffset * 0.5);
+            vertex(size * 0.15, -size * 0.45 + finWaveOffset * 0.7);
+            endShape(CLOSE);
+
+            // Pectoral fin
+            fill(c0, c1, c2, 150);
+            beginShape();
+            vertex(size * 0.1, size * 0.2);
+            vertex(-size * 0.15, size * 0.5 + sin(this.finWave * 1.2) * size * 0.1);
+            vertex(size * 0.15, size * 0.35);
+            endShape(CLOSE);
+
+            // Eye with detail
+            fill(255);
+            noStroke();
+            ellipse(size * 0.25, -size * 0.08, size * 0.2);
+            fill(0);
+            ellipse(size * 0.28, -size * 0.08, size * 0.12);
+            fill(255);
+            ellipse(size * 0.3, -size * 0.1, size * 0.05);
+
+            // Mouth
+            noFill();
+            stroke(c0b, c1b, c2b, 150);
+            strokeWeight(1.5);
+            arc(size * 0.35, size * 0.05, size * 0.1, size * 0.08, 0.2, PI - 0.2);
+
+            // Rarity effects
+            if (this.type.rarity === 'epic' || this.type.rarity === 'legendary') {
+                // Particle trail
+                if (frameCount % 10 === 0 && game) {
+                    game.addParticle(this.x, this.y, [c0, c1, c2]);
+                }
+            }
+
+            try {
+                drawingContext.shadowBlur = 0;
+            } catch (e) {}
+        }
+
+        // Selection indicator
+        if (this.selected) {
+            noFill();
+            stroke(255, 215, 0);
+            strokeWeight(3);
+            ellipse(0, 0, size * 1.5);
+        }
+
+        pop();
+
+        // Icon above fish (only when revealed)
+        if (!this.isBaby && this.isRevealed) {
+            textSize(size * 0.6);
+            textAlign(CENTER, CENTER);
+            text(this.type.icon, this.x, this.y - size * 0.8);
+        }
+    }
+}
+
+class Particle {
+    constructor(x, y, color) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.size = random(3, 8);
+        this.life = 1;
+        this.decay = random(0.01, 0.03);
+        this.vx = random(-1, 1);
+        this.vy = random(-0.5, 0.5);
+    }
+
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life -= this.decay;
+        this.size *= 0.98;
+    }
+
+    draw() {
+        noStroke();
+        const c0 = constrain(this.color[0], 0, 255);
+        const c1 = constrain(this.color[1], 0, 255);
+        const c2 = constrain(this.color[2], 0, 255);
+        const alpha = constrain(this.life * 150, 0, 255);
+        fill(c0, c1, c2, alpha);
+        ellipse(this.x, this.y, this.size);
+    }
+}
+
+class Bubble {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.size = random(5, 15);
+        this.speed = random(1, 3);
+        this.wobble = random(1000);
+    }
+
+    update() {
+        this.y -= this.speed;
+        this.x += sin(millis() / 200 + this.wobble) * 0.5;
+    }
+
+    draw() {
+        fill(255, 255, 255, 100);
+        noStroke();
+        ellipse(this.x, this.y, this.size);
+        fill(255, 255, 255, 150);
+        ellipse(this.x - this.size * 0.2, this.y - this.size * 0.2, this.size * 0.3);
+    }
+}
+
+class Decoration {
+    constructor(type, x, y) {
+        this.type = type;
+        this.x = x;
+        this.y = y;
+        this.swayOffset = random(1000);
+    }
+
+    draw() {
+        push();
+        translate(this.x, this.y);
+
+        if (this.type.name === '水草' || this.type.name === '海藻') {
+            const sway = sin(millis() / 1000 + this.swayOffset) * 5;
+            rotate(sway * 0.02);
+        }
+
+        textSize(40);
+        textAlign(CENTER, CENTER);
+        text(this.type.icon, 0, 0);
+        pop();
+    }
+}
+
+class Game {
+    constructor() {
+        this.gold = 1500;
+        this.diamonds = 100;
+        this.fishes = [];
+        this.foods = [];
+        this.bubbles = [];
+        this.particles = [];
+        this.decorations = [];
+        this.collection = {};
+        this.shopOpen = false;
+        this.collectionOpen = false;
+        this.currentShopTab = 'decor';
+        this.lastIncomeTime = millis() || 0;
+        this.incomeInterval = 3000;
+        this.selectedFish = null;
+        this.autoSaveInterval = 60000; // 1 minute
+        this.lastAutoSave = millis() || 0;
+
+        // Add initial decorations
+        this.decorations.push(new Decoration(DECOR_TYPES[0], 100, 550));
+        this.decorations.push(new Decoration(DECOR_TYPES[0], 200, 560));
+
+        // Add initial fish
+        this.addFish(FISH_TYPES.common[0], true);
+        this.addFish(FISH_TYPES.common[1], true);
+
+        // Try to load saved game
+        this.loadGame(true);
+    }
+
+    addFish(type, isBaby = true) {
+        const x = random(50, width - 50);
+        const y = random(50, height - 100);
+        const fish = new Fish(type, x, y, isBaby);
+        this.fishes.push(fish);
+
+        // Add to collection when revealed
+        if (!isBaby) {
+            this.revealFishInCollection(fish);
+        }
+
+        this.updateUI();
+        return fish;
+    }
+
+    revealFishInCollection(fish) {
+        if (!this.collection[fish.type.name]) {
+            this.collection[fish.type.name] = 0;
+        }
+        this.collection[fish.type.name]++;
+    }
+
+    buyMysteryEgg(rarity) {
+        const price = EGG_PRICES[rarity];
+        if (this.gold < price) {
+            this.showNotification('金币不足！');
+            return;
+        }
+
+        this.gold -= price;
+
+        // Show egg hatching animation
+        this.showEggHatchAnimation();
+
+        // Determine which fish from the rarity pool
+        const fishPool = FISH_TYPES[rarity];
+        const randomFish = fishPool[Math.floor(Math.random() * fishPool.length)];
+
+        // Add baby fish
+        setTimeout(() => {
+            this.addFish(randomFish, true);
+            const rarityNames = { common: '普通', rare: '稀有', epic: '史诗', legendary: '传说' };
+            this.showNotification(`🥚 ${rarityNames[rarity]}鱼卵已孵化！`, rarity);
+        }, 2000);
+
+        this.updateUI();
+    }
+
+    showEggHatchAnimation() {
+        const eggDiv = document.createElement('div');
+        eggDiv.className = 'egg-hatch';
+        eggDiv.textContent = '🥚';
+        document.body.appendChild(eggDiv);
+        setTimeout(() => eggDiv.remove(), 2000);
+    }
+
+    feedAll() {
+        if (this.gold < 15) {
+            this.showNotification('金币不足！');
+            return;
+        }
+
+        this.gold -= 15;
+
+        for (let i = 0; i < 8; i++) {
+            this.foods.push({
+                x: random(50, width - 50),
+                y: -20 - i * 30,
+                speed: 2.5 + random(),
+                eaten: false
+            });
+        }
+
+        this.showNotification('🍞 投食成功！');
+        this.updateUI();
+    }
+
+    selectFish(fish) {
+        // Deselect previous
+        this.fishes.forEach(f => f.selected = false);
+
+        if (fish === this.selectedFish) {
+            this.selectedFish = null;
+            document.getElementById('fish-info-panel').classList.add('hidden');
+        } else {
+            fish.selected = true;
+            this.selectedFish = fish;
+            this.showFishInfo(fish);
+        }
+    }
+
+    showFishInfo(fish) {
+        const panel = document.getElementById('fish-info-panel');
+        const sellBtn = document.getElementById('sell-button');
+
+        panel.classList.remove('hidden');
+
+        if (fish.isBaby) {
+            document.getElementById('fish-name').textContent = '??? (幼鱼)';
+            document.getElementById('fish-rarity').textContent = '???';
+            const growthPercent = Math.floor((fish.growth / fish.growthTime) * 100);
+            document.getElementById('fish-growth').textContent = `${growthPercent}%`;
+            document.getElementById('fish-value').textContent = '???';
+            // Disable sell button for baby fish
+            if (sellBtn) {
+                sellBtn.disabled = true;
+                sellBtn.style.opacity = '0.5';
+                sellBtn.style.cursor = 'not-allowed';
+                sellBtn.textContent = '🚫 幼鱼不能卖出';
+            }
+        } else {
+            document.getElementById('fish-name').textContent = fish.type.name;
+            const rarityNames = { common: '普通', rare: '稀有', epic: '史诗', legendary: '传说' };
+            const rarityColors = { common: '#aaa', rare: '#64ff96', epic: '#ff96ff', legendary: '#ffd700' };
+            document.getElementById('fish-rarity').textContent = rarityNames[fish.type.rarity];
+            document.getElementById('fish-rarity').style.color = rarityColors[fish.type.rarity];
+            document.getElementById('fish-growth').textContent = '成年';
+            document.getElementById('fish-value').textContent = `🪙 ${fish.type.sellPrice}`;
+            // Enable sell button for adult fish
+            if (sellBtn) {
+                sellBtn.disabled = false;
+                sellBtn.style.opacity = '1';
+                sellBtn.style.cursor = 'pointer';
+                sellBtn.textContent = '💰 卖出';
+            }
+        }
+    }
+
+    sellSelectedFish() {
+        if (!this.selectedFish) {
+            this.showNotification('请先选择一条鱼！');
+            return;
+        }
+
+        if (this.selectedFish.isBaby) {
+            this.showNotification('只能卖出成年的鱼！');
+            return;
+        }
+
+        const fish = this.selectedFish;
+        const sellPrice = fish.type.sellPrice;
+        this.gold += sellPrice;
+
+        // Remove fish
+        this.fishes = this.fishes.filter(f => f !== fish);
+        this.selectedFish = null;
+
+        document.getElementById('fish-info-panel').classList.add('hidden');
+        this.showNotification(`💰 卖出成功！获得 ${sellPrice} 金币`);
+        this.updateUI();
+    }
+
+    addParticle(x, y, color) {
+        this.particles.push(new Particle(x, y, color));
+    }
+
+    updateUI() {
+        try {
+            const goldEl = document.getElementById('gold-display');
+            const diamondEl = document.getElementById('diamond-display');
+            const fishCountEl = document.getElementById('fish-count-display');
+
+            if (goldEl) goldEl.textContent = Math.floor(this.gold);
+            if (diamondEl) diamondEl.textContent = this.diamonds;
+            if (fishCountEl) fishCountEl.textContent = this.fishes.length;
+        } catch (e) {
+            console.error('Error updating UI:', e);
+        }
+    }
+
+    showNotification(message, rarity = 'common') {
+        const notification = document.createElement('div');
+        notification.className = 'notification';
+        notification.textContent = message;
+
+        const rarityColors = {
+            common: 'rgba(0,168,204,0.95)',
+            rare: 'rgba(100,255,150,0.95)',
+            epic: 'rgba(255,150,255,0.95)',
+            legendary: 'rgba(255,215,0,0.95)'
+        };
+
+        notification.style.background = `linear-gradient(135deg, ${rarityColors[rarity]} 0%, rgba(0,50,80,0.95) 100%)`;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 4000);
+    }
+
+    openShop() {
+        this.shopOpen = true;
+        document.getElementById('shop-panel').classList.remove('hidden');
+        this.renderShop();
+    }
+
+    closeShop() {
+        this.shopOpen = false;
+        document.getElementById('shop-panel').classList.add('hidden');
+    }
+
+    switchShopTab(tab) {
+        this.currentShopTab = tab;
+        document.querySelectorAll('.shop-tab').forEach(el => el.classList.remove('active'));
+        event.target.classList.add('active');
+        this.renderShop();
+    }
+
+    renderShop() {
+        const container = document.getElementById('shop-items');
+        container.innerHTML = '';
+
+        if (this.currentShopTab === 'decor') {
+            DECOR_TYPES.forEach(decor => {
+                const item = document.createElement('div');
+                item.className = 'shop-item';
+                item.innerHTML = `
+                    <div class="shop-item-icon">${decor.icon}</div>
+                    <div class="shop-item-name">${decor.name}</div>
+                    <div class="shop-item-price">🪙 ${decor.price}</div>
+                `;
+                item.onclick = () => this.buyDecor(decor);
+                container.appendChild(item);
+            });
+        } else if (this.currentShopTab === 'food') {
+            const foods = [
+                { name: '普通鱼食', icon: '🍞', price: 50, amount: 10 },
+                { name: '高级鱼食', icon: '🍖', price: 150, amount: 10 },
+                { name: '超级鱼食', icon: '🥩', price: 500, amount: 10 },
+            ];
+
+            foods.forEach(food => {
+                const item = document.createElement('div');
+                item.className = 'shop-item';
+                item.innerHTML = `
+                    <div class="shop-item-icon">${food.icon}</div>
+                    <div class="shop-item-name">${food.name}</div>
+                    <div class="shop-item-price">🪙 ${food.price}</div>
+                `;
+                item.onclick = () => this.showNotification('请使用"喂食"按钮投食！');
+                container.appendChild(item);
+            });
+        }
+    }
+
+    buyDecor(decor) {
+        if (this.gold >= decor.price) {
+            this.gold -= decor.price;
+            const x = random(50, width - 50);
+            const y = height - random(30, 60);
+            this.decorations.push(new Decoration(decor, x, y));
+            this.showNotification(`购买 ${decor.name} 成功！`);
+            this.updateUI();
+        } else {
+            this.showNotification('金币不足！');
+        }
+    }
+
+    openCollection() {
+        // Show collection in console for now
+        let collectionText = '📚 你的鱼类图鉴：\n\n';
+        const allFish = [
+            ...FISH_TYPES.common,
+            ...FISH_TYPES.rare,
+            ...FISH_TYPES.epic,
+            ...FISH_TYPES.legendary
+        ];
+
+        allFish.forEach(fish => {
+            const owned = this.collection[fish.name] || 0;
+            if (owned > 0) {
+                collectionText += `${fish.icon} ${fish.name}: ${owned}条\n`;
+            }
+        });
+
+        alert(collectionText || '还没有收集到任何鱼类！');
+    }
+
+    saveGame(manual = false) {
+        const saveData = {
+            gold: this.gold,
+            diamonds: this.diamonds,
+            collection: this.collection,
+            fishes: this.fishes.map(f => ({
+                typeIndex: FISH_TYPES[f.type.rarity].indexOf(f.type),
+                rarity: f.type.rarity,
+                x: f.x,
+                y: f.y,
+                isBaby: f.isBaby,
+                growth: f.growth,
+                hunger: f.hunger,
+                happiness: f.happiness,
+                age: f.age
+            })),
+            decorations: this.decorations.map(d => ({
+                typeIndex: DECOR_TYPES.indexOf(d.type),
+                x: d.x,
+                y: d.y
+            }))
+        };
+
+        localStorage.setItem('aquariumSave', JSON.stringify(saveData));
+
+        if (manual) {
+            this.showNotification('💾 游戏已保存！');
+        }
+    }
+
+    loadGame(silent = false) {
+        const saveData = localStorage.getItem('aquariumSave');
+        if (!saveData) {
+            if (!silent) this.showNotification('没有找到存档！');
+            // Keep the initial fish and decorations that were added in constructor
+            return;
+        }
+
+        try {
+            const data = JSON.parse(saveData);
+
+            // Only load if we have valid data
+            if (data.gold !== undefined) {
+                this.gold = data.gold;
+                this.diamonds = data.diamonds || 100;
+                this.collection = data.collection || {};
+                this.fishes = [];
+                this.decorations = [];
+
+                // Load fishes
+                if (data.fishes && Array.isArray(data.fishes)) {
+                    data.fishes.forEach(fishData => {
+                        try {
+                            const fishType = FISH_TYPES[fishData.rarity][fishData.typeIndex];
+                            const fish = new Fish(fishType, fishData.x, fishData.y, fishData.isBaby);
+                            fish.growth = fishData.growth || 0;
+                            fish.hunger = fishData.hunger || 100;
+                            fish.happiness = fishData.happiness || 100;
+                            fish.age = fishData.age || 0;
+
+                            if (!fish.isBaby && fish.growth >= fish.growthTime) {
+                                fish.isBaby = false;
+                                fish.isRevealed = true;
+                                this.revealFishInCollection(fish);
+                            }
+
+                            this.fishes.push(fish);
+                        } catch (e) {
+                            console.error('Error loading fish:', e);
+                        }
+                    });
+                }
+
+                // Load decorations
+                if (data.decorations && Array.isArray(data.decorations)) {
+                    data.decorations.forEach(decorData => {
+                        try {
+                            const decorType = DECOR_TYPES[decorData.typeIndex];
+                            this.decorations.push(new Decoration(decorType, decorData.x, decorData.y));
+                        } catch (e) {
+                            console.error('Error loading decoration:', e);
+                        }
+                    });
+                }
+
+                // Add initial decorations if none
+                if (this.decorations.length === 0) {
+                    this.decorations.push(new Decoration(DECOR_TYPES[0], 100, 550));
+                    this.decorations.push(new Decoration(DECOR_TYPES[0], 200, 560));
+                }
+
+                // Add initial fish if none
+                if (this.fishes.length === 0) {
+                    this.addFish(FISH_TYPES.common[0], true);
+                    this.addFish(FISH_TYPES.common[1], true);
+                }
+
+                this.updateUI();
+
+                if (!silent) {
+                    this.showNotification('📂 存档已读取！');
+                }
+            }
+        } catch (e) {
+            console.error('Failed to load save:', e);
+            if (!silent) this.showNotification('读取存档失败！');
+        }
+    }
+
+    update() {
+        // Auto save
+        if (millis() - this.lastAutoSave > this.autoSaveInterval) {
+            this.lastAutoSave = millis();
+            this.saveGame();
+        }
+
+        // Generate bubbles
+        if (random() < 0.05) {
+            this.bubbles.push(new Bubble(random(20, width - 20), height + 20));
+        }
+
+        // Update bubbles
+        this.bubbles = this.bubbles.filter(b => {
+            b.update();
+            return b.y > -20;
+        });
+
+        // Update particles
+        this.particles = this.particles.filter(p => {
+            p.update();
+            return p.life > 0;
+        });
+
+        // Update food
+        this.foods.forEach(food => {
+            food.y += food.speed;
+        });
+        this.foods = this.foods.filter(food => !food.eaten && food.y < height);
+
+        // Update fish
+        this.fishes.forEach(fish => fish.update(width, height, this.foods));
+
+        // Update selected fish info
+        if (this.selectedFish) {
+            this.showFishInfo(this.selectedFish);
+        }
+
+        // Income
+        if (millis() - this.lastIncomeTime > this.incomeInterval) {
+            this.lastIncomeTime = millis();
+            let totalIncome = 0;
+            this.fishes.forEach(fish => {
+                if (!fish.isBaby && fish.hunger > 50) {
+                    const income = floor(fish.currentSize / 8);
+                    totalIncome += income;
+                }
+            });
+            this.gold += totalIncome;
+
+            // Random diamond chance (higher for rare fish)
+            const diamondChance = this.fishes.filter(f => !f.isBaby).length * 0.03;
+            if (random() < diamondChance) {
+                this.diamonds++;
+                this.showNotification('💎 获得钻石！', 'rare');
+            }
+
+            this.updateUI();
+        }
+    }
+
+    draw() {
+        try {
+            // Background gradient with more depth
+            for (let y = 0; y < height; y++) {
+                const inter = map(y, 0, height, 0, 1);
+                const r1 = 0, g1 = 180, b1 = 230;
+                const r2 = 0, g2 = 30, b2 = 80;
+                const r = lerp(r1, r2, inter);
+                const g = lerp(g1, g2, inter);
+                const b = lerp(b1, b2, inter);
+                stroke(r, g, b);
+                line(0, y, width, y);
+            }
+        } catch (e) {
+            // Fallback solid background
+            background(0, 100, 150);
+        }
+
+        // Animated light rays
+        stroke(255, 255, 255, 15);
+        strokeWeight(3);
+        for (let i = 0; i < 7; i++) {
+            const x = 80 + i * 140;
+            const wobble = sin(millis() / 1500 + i) * 60;
+            line(x, 0, x + wobble, height);
+        }
+
+        // Caustic light effect
+        noStroke();
+        for (let i = 0; i < 3; i++) {
+            const x = (millis() / 50 + i * 400) % (width + 200) - 100;
+            const y = height * 0.3 + sin(millis() / 1000 + i) * 100;
+            fill(100, 200, 255, 5);
+            ellipse(x, y, 200, 150);
+        }
+
+        // Decorations
+        this.decorations.forEach(decor => decor.draw());
+
+        // Particles
+        this.particles.forEach(p => p.draw());
+
+        // Bubbles
+        this.bubbles.forEach(bubble => bubble.draw());
+
+        // Food
+        fill(255, 200, 100);
+        stroke(200, 150, 50);
+        strokeWeight(1);
+        this.foods.forEach(food => {
+            ellipse(food.x, food.y, 12, 10);
+        });
+
+        // Fish
+        this.fishes.forEach(fish => fish.draw());
+
+        // Tank frame with more detail
+        noFill();
+        stroke(139, 90, 43);
+        strokeWeight(12);
+        rect(0, 0, width, height);
+        stroke(180, 130, 80);
+        strokeWeight(6);
+        rect(3, 3, width - 6, height - 6);
+        stroke(200, 160, 110);
+        strokeWeight(2);
+        rect(6, 6, width - 12, height - 12);
+
+        // Corner decorations
+        stroke(255, 215, 0, 150);
+        strokeWeight(3);
+        const cornerSize = 30;
+        // Top-left
+        line(10, 10, 10 + cornerSize, 10);
+        line(10, 10, 10, 10 + cornerSize);
+        // Top-right
+        line(width - 10, 10, width - 10 - cornerSize, 10);
+        line(width - 10, 10, width - 10, 10 + cornerSize);
+        // Bottom-left
+        line(10, height - 10, 10 + cornerSize, height - 10);
+        line(10, height - 10, 10, height - 10 - cornerSize);
+        // Bottom-right
+        line(width - 10, height - 10, width - 10 - cornerSize, height - 10);
+        line(width - 10, height - 10, width - 10, height - 10 - cornerSize);
+    } catch (e) {
+        console.error('Error in game draw:', e);
+        // Fallback
+        background(0, 100, 150);
+    }
+}
+
+let game;
+let isSetup = false;
+
+function setup() {
+    const canvas = createCanvas(1000, 600);
+    canvas.parent('game-container');
+    game = new Game();
+    isSetup = true;
+}
+
+function draw() {
+    if (!isSetup || !game) return;
+    game.update();
+    game.draw();
+}
+
+function mousePressed() {
+    if (!isSetup || !game) return;
+
+    // Check if clicking on a fish
+    if (!game.shopOpen && mouseY > 0 && mouseY < height && mouseX > 0 && mouseX < width) {
+        let clickedFish = null;
+        for (let fish of game.fishes) {
+            const d = dist(mouseX, mouseY, fish.x, fish.y);
+            // Increase click detection area by 50%
+            if (d < fish.currentSize * 1.5) {
+                clickedFish = fish;
+                break;
+            }
+        }
+
+        if (clickedFish) {
+            game.selectFish(clickedFish);
+            // Show notification for feedback
+            if (clickedFish.isBaby) {
+                game.showNotification('🥚 选中了幼鱼（长大后才能卖出）');
+            } else {
+                game.showNotification(`🐠 选中了 ${clickedFish.type.name}`);
+            }
+        } else {
+            // Spawn bubbles at click location
+            for (let i = 0; i < 6; i++) {
+                game.bubbles.push(new Bubble(
+                    mouseX + random(-25, 25),
+                    mouseY + random(-25, 25)
+                ));
+            }
+            // Deselect fish
+            game.fishes.forEach(f => f.selected = false);
+            game.selectedFish = null;
+            const panel = document.getElementById('fish-info-panel');
+            if (panel) panel.classList.add('hidden');
+        }
+    }
+}
+    </script>
+</body>
+</html>

@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>超级马里奥 - 多关卡版</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        #saveMsg { position:fixed; top:60px; left:50%; transform:translateX(-50%);
+          color:#0f0; font-size:16px; pointer-events:none; opacity:0;
+          text-shadow:0 0 4px #0f0; font-family:monospace; z-index:9999;
+          transition:opacity 0.3s; }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Arial', sans-serif;
+        }
+
+        #gameContainer {
+            position: relative;
+            box-shadow: 0 10px 50px rgba(0, 0, 0, 0.5);
+        }
+
+        #gameCanvas {
+            display: block;
+            background: #5c94fc;
+        }
+
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        #gameOver, #winScreen, #levelComplete {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 40px;
+            border-radius: 10px;
+            text-align: center;
+            display: none;
+        }
+
+        #gameOver h1, #winScreen h1, #levelComplete h1 {
+            color: white;
+            margin-bottom: 20px;
+            font-size: 48px;
+        }
+
+        #gameOver p, #winScreen p, #levelComplete p {
+            color: white;
+            margin-bottom: 20px;
+            font-size: 20px;
+        }
+
+        button {
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 18px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+            margin: 5px;
+        }
+
+        button:hover {
+            background: #ff5252;
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 14px;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div id="saveMsg"></div>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <div id="ui">
+            <div>关卡: <span id="level">1</span> / 5</div>
+            <div>分数: <span id="score">0</span></div>
+            <div>生命: <span id="lives">3</span></div>
+        </div>
+        <div id="gameOver">
+            <h1>游戏结束</h1>
+            <p>最终分数: <span id="finalScore">0</span></p>
+            <button onclick="restartGame()">重新开始</button>
+        </div>
+        <div id="levelComplete">
+            <h1>关卡完成！</h1>
+            <p>准备进入下一关...</p>
+        </div>
+        <div id="winScreen">
+            <h1>恭喜通关！</h1>
+            <p>你完成了所有关卡！</p>
+            <p>最终分数: <span id="winScore">0</span></p>
+            <button onclick="restartGame()">再玩一次</button>
+        </div>
+        <div id="controls">
+            ← → 移动 | ↑ 或 空格 跳跃
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Save/Load system
+        function showSaveToast(msg) {
+            const sm = document.getElementById('saveMsg');
+            sm.textContent = msg; sm.style.opacity = 1;
+            setTimeout(() => sm.style.opacity = 0, 1500);
+        }
+        function saveGame() {
+            if (gameState !== 'playing') return;
+            try {
+                const data = {
+                    currentLevel, score, lives,
+                    mario: { x: mario.x, y: mario.y, velocityX: mario.velocityX, velocityY: mario.velocityY, direction: mario.direction, onGround: mario.onGround },
+                    coinsCollected: coins.map(c => c.collected),
+                    enemyCount: enemies.length
+                };
+                localStorage.setItem('superMario_save', JSON.stringify(data));
+                showSaveToast('已保存');
+            } catch (e) { showSaveToast('保存失败'); }
+        }
+        function loadGame() {
+            try {
+                const d = JSON.parse(localStorage.getItem('superMario_save'));
+                if (d && typeof d.currentLevel === 'number') {
+                    currentLevel = d.currentLevel;
+                    score = d.score || 0;
+                    lives = d.lives || 3;
+                    loadLevel(currentLevel);
+                    // 恢复马里奥位置
+                    if (d.mario) {
+                        mario.x = d.mario.x;
+                        mario.y = d.mario.y;
+                        mario.velocityX = d.mario.velocityX || 0;
+                        mario.velocityY = d.mario.velocityY || 0;
+                        mario.direction = d.mario.direction || 1;
+                        mario.onGround = d.mario.onGround || false;
+                    }
+                    // 恢复金币收集状态
+                    if (d.coinsCollected) {
+                        d.coinsCollected.forEach((collected, i) => { if (coins[i]) coins[i].collected = collected; });
+                    }
+                    // 恢复敌人数量（被消灭的敌人已从数组中移除）
+                    if (typeof d.enemyCount === 'number' && d.enemyCount < enemies.length) {
+                        enemies.length = d.enemyCount;
+                    }
+                    updateUI();
+                    showSaveToast('已加载');
+                }
+            } catch (e) { showSaveToast('加载失败'); }
+        }
+        document.addEventListener('keydown', e => {
+            if (e.code === 'F5') { e.preventDefault(); saveGame(); }
+            if (e.code === 'F9') { e.preventDefault(); loadGame(); }
+        });
+
+        // 游戏状态
+        let gameState = 'playing'; // playing, gameover, win, levelComplete
+        let score = 0;
+        let lives = 3;
+        let currentLevel = 1;
+        const totalLevels = 5;
+
+        // 马里奥对象
+        const mario = {
+            x: 50,
+            y: 400,
+            width: 40,
+            height: 50,
+            velocityX: 0,
+            velocityY: 0,
+            speed: 5,
+            jumpPower: -15,
+            gravity: 0.6,
+            onGround: false,
+            direction: 1,
+            jumping: false
+        };
+
+        // 按键状态
+        const keys = {
+            left: false,
+            right: false,
+            jump: false
+        };
+
+        // 关卡数据
+        const levels = [
+            // 关卡 1 - 入门
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 800, height: 50, type: 'ground' },
+                    { x: 200, y: 450, width: 150, height: 20, type: 'brick' },
+                    { x: 450, y: 400, width: 150, height: 20, type: 'brick' },
+                    { x: 650, y: 350, width: 150, height: 20, type: 'brick' },
+                    { x: 100, y: 350, width: 80, height: 20, type: 'question' },
+                    { x: 300, y: 280, width: 150, height: 20, type: 'brick' },
+                    { x: 550, y: 230, width: 100, height: 20, type: 'brick' },
+                    { x: 50, y: 200, width: 100, height: 20, type: 'question' },
+                ],
+                enemies: [
+                    { x: 300, y: 510, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 500, y: 510, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 650, y: 310, width: 40, height: 40, velocityX: -1.5, type: 'goomba' },
+                ],
+                coins: [
+                    { x: 220, y: 410, width: 20, height: 25 },
+                    { x: 500, y: 360, width: 20, height: 25 },
+                    { x: 700, y: 310, width: 20, height: 25 },
+                    { x: 130, y: 310, width: 20, height: 25 },
+                    { x: 350, y: 240, width: 20, height: 25 },
+                    { x: 80, y: 160, width: 20, height: 25 },
+                ],
+                flag: { x: 730, y: 150, width: 40, height: 100 },
+                background: '#5c94fc'
+            },
+            // 关卡 2 - 更多敌人
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 800, height: 50, type: 'ground' },
+                    { x: 150, y: 470, width: 100, height: 20, type: 'brick' },
+                    { x: 300, y: 400, width: 200, height: 20, type: 'brick' },
+                    { x: 100, y: 330, width: 150, height: 20, type: 'question' },
+                    { x: 300, y: 260, width: 100, height: 20, type: 'brick' },
+                    { x: 500, y: 330, width: 150, height: 20, type: 'brick' },
+                    { x: 650, y: 260, width: 120, height: 20, type: 'question' },
+                    { x: 650, y: 180, width: 100, height: 20, type: 'brick' },
+                ],
+                enemies: [
+                    { x: 250, y: 510, width: 40, height: 40, velocityX: -2.5, type: 'goomba' },
+                    { x: 400, y: 510, width: 40, height: 40, velocityX: -2.5, type: 'goomba' },
+                    { x: 550, y: 510, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 150, y: 290, width: 40, height: 40, velocityX: -1.5, type: 'goomba' },
+                    { x: 550, y: 290, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 680, y: 220, width: 40, height: 40, velocityX: -1.5, type: 'goomba' },
+                ],
+                coins: [
+                    { x: 180, y: 430, width: 20, height: 25 },
+                    { x: 350, y: 360, width: 20, height: 25 },
+                    { x: 420, y: 360, width: 20, height: 25 },
+                    { x: 140, y: 290, width: 20, height: 25 },
+                    { x: 200, y: 290, width: 20, height: 25 },
+                    { x: 340, y: 220, width: 20, height: 25 },
+                    { x: 550, y: 290, width: 20, height: 25 },
+                    { x: 700, y: 220, width: 20, height: 25 },
+                    { x: 700, y: 140, width: 20, height: 25 },
+                ],
+                flag: { x: 730, y: 80, width: 40, height: 100 },
+                background: '#4a7fc4'
+            },
+            // 关卡 3 - 跳跃挑战
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 250, height: 50, type: 'ground' },
+                    { x: 300, y: 500, width: 80, height: 20, type: 'brick' },
+                    { x: 430, y: 450, width: 80, height: 20, type: 'brick' },
+                    { x: 300, y: 380, width: 80, height: 20, type: 'question' },
+                    { x: 150, y: 320, width: 100, height: 20, type: 'brick' },
+                    { x: 300, y: 260, width: 80, height: 20, type: 'brick' },
+                    { x: 450, y: 200, width: 100, height: 20, type: 'question' },
+                    { x: 600, y: 280, width: 80, height: 20, type: 'brick' },
+                    { x: 700, y: 350, width: 100, height: 50, type: 'ground' },
+                    { x: 650, y: 200, width: 80, height: 20, type: 'brick' },
+                    { x: 700, y: 130, width: 80, height: 20, type: 'brick' },
+                ],
+                enemies: [
+                    { x: 100, y: 510, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 180, y: 510, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 460, y: 410, width: 40, height: 40, velocityX: -1.5, type: 'goomba' },
+                    { x: 630, y: 240, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 720, y: 310, width: 40, height: 40, velocityX: -2.5, type: 'goomba' },
+                ],
+                coins: [
+                    { x: 320, y: 460, width: 20, height: 25 },
+                    { x: 450, y: 410, width: 20, height: 25 },
+                    { x: 330, y: 340, width: 20, height: 25 },
+                    { x: 180, y: 280, width: 20, height: 25 },
+                    { x: 320, y: 220, width: 20, height: 25 },
+                    { x: 480, y: 160, width: 20, height: 25 },
+                    { x: 620, y: 240, width: 20, height: 25 },
+                    { x: 720, y: 80, width: 20, height: 25 },
+                ],
+                flag: { x: 730, y: 30, width: 40, height: 100 },
+                background: '#3d6aa3'
+            },
+            // 关卡 4 - 敌人密集
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 800, height: 50, type: 'ground' },
+                    { x: 100, y: 480, width: 100, height: 20, type: 'brick' },
+                    { x: 250, y: 420, width: 100, height: 20, type: 'brick' },
+                    { x: 400, y: 360, width: 100, height: 20, type: 'question' },
+                    { x: 550, y: 300, width: 100, height: 20, type: 'brick' },
+                    { x: 700, y: 240, width: 100, height: 20, type: 'brick' },
+                    { x: 100, y: 300, width: 80, height: 20, type: 'brick' },
+                    { x: 200, y: 220, width: 100, height: 20, type: 'question' },
+                    { x: 350, y: 160, width: 100, height: 20, type: 'brick' },
+                    { x: 550, y: 160, width: 80, height: 20, type: 'brick' },
+                    { x: 650, y: 100, width: 100, height: 20, type: 'brick' },
+                ],
+                enemies: [
+                    { x: 200, y: 510, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 350, y: 510, width: 40, height: 40, velocityX: -2.5, type: 'goomba' },
+                    { x: 500, y: 510, width: 40, height: 40, velocityX: -3, type: 'goomba' },
+                    { x: 650, y: 510, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 280, y: 390, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 430, y: 330, width: 40, height: 40, velocityX: -1.5, type: 'goomba' },
+                    { x: 580, y: 270, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 730, y: 210, width: 40, height: 40, velocityX: -2.5, type: 'goomba' },
+                    { x: 130, y: 270, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 230, y: 190, width: 40, height: 40, velocityX: -1.5, type: 'goomba' },
+                    { x: 580, y: 130, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                ],
+                coins: [
+                    { x: 130, y: 440, width: 20, height: 25 },
+                    { x: 280, y: 380, width: 20, height: 25 },
+                    { x: 430, y: 320, width: 20, height: 25 },
+                    { x: 580, y: 260, width: 20, height: 25 },
+                    { x: 730, y: 200, width: 20, height: 25 },
+                    { x: 130, y: 260, width: 20, height: 25 },
+                    { x: 230, y: 180, width: 20, height: 25 },
+                    { x: 380, y: 120, width: 20, height: 25 },
+                    { x: 580, y: 120, width: 20, height: 25 },
+                    { x: 680, y: 60, width: 20, height: 25 },
+                ],
+                flag: { x: 730, y: 0, width: 40, height: 100 },
+                background: '#5c94fc'
+            },
+            // 关卡 5 - 终极挑战
+            {
+                platforms: [
+                    { x: 0, y: 550, width: 150, height: 50, type: 'ground' },
+                    { x: 200, y: 520, width: 60, height: 20, type: 'brick' },
+                    { x: 320, y: 480, width: 60, height: 20, type: 'brick' },
+                    { x: 200, y: 420, width: 60, height: 20, type: 'question' },
+                    { x: 80, y: 360, width: 80, height: 20, type: 'brick' },
+                    { x: 200, y: 300, width: 60, height: 20, type: 'brick' },
+                    { x: 320, y: 240, width: 60, height: 20, type: 'question' },
+                    { x: 200, y: 180, width: 80, height: 20, type: 'brick' },
+                    { x: 350, y: 150, width: 60, height: 20, type: 'brick' },
+                    { x: 480, y: 200, width: 80, height: 20, type: 'brick' },
+                    { x: 600, y: 280, width: 60, height: 20, type: 'question' },
+                    { x: 700, y: 360, width: 80, height: 20, type: 'brick' },
+                    { x: 580, y: 420, width: 60, height: 20, type: 'brick' },
+                    { x: 480, y: 480, width: 60, height: 20, type: 'brick' },
+                    { x: 620, y: 500, width: 180, height: 50, type: 'ground' },
+                    { x: 700, y: 250, width: 60, height: 20, type: 'brick' },
+                    { x: 700, y: 150, width: 60, height: 20, type: 'question' },
+                    { x: 700, y: 50, width: 80, height: 20, type: 'brick' },
+                ],
+                enemies: [
+                    { x: 80, y: 510, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 220, y: 490, width: 40, height: 40, velocityX: -1.5, type: 'goomba' },
+                    { x: 340, y: 450, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 100, y: 330, width: 40, height: 40, velocityX: -2.5, type: 'goomba' },
+                    { x: 220, y: 270, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 340, y: 210, width: 40, height: 40, velocityX: -1.5, type: 'goomba' },
+                    { x: 500, y: 170, width: 40, height: 40, velocityX: -2.5, type: 'goomba' },
+                    { x: 620, y: 250, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 720, y: 330, width: 40, height: 40, velocityX: -3, type: 'goomba' },
+                    { x: 600, y: 390, width: 40, height: 40, velocityX: -2.5, type: 'goomba' },
+                    { x: 500, y: 450, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 720, y: 220, width: 40, height: 40, velocityX: -2, type: 'goomba' },
+                    { x: 720, y: 120, width: 40, height: 40, velocityX: -2.5, type: 'goomba' },
+                ],
+                coins: [
+                    { x: 220, y: 480, width: 20, height: 25 },
+                    { x: 340, y: 440, width: 20, height: 25 },
+                    { x: 220, y: 380, width: 20, height: 25 },
+                    { x: 110, y: 320, width: 20, height: 25 },
+                    { x: 220, y: 260, width: 20, height: 25 },
+                    { x: 340, y: 200, width: 20, height: 25 },
+                    { x: 220, y: 140, width: 20, height: 25 },
+                    { x: 370, y: 110, width: 20, height: 25 },
+                    { x: 500, y: 160, width: 20, height: 25 },
+                    { x: 620, y: 240, width: 20, height: 25 },
+                    { x: 720, y: 320, width: 20, height: 25 },
+                    { x: 600, y: 380, width: 20, height: 25 },
+                    { x: 500, y: 440, width: 20, height: 25 },
+                    { x: 720, y: 200, width: 20, height: 25 },
+                    { x: 720, y: 100, width: 20, height: 25 },
+                ],
+                flag: { x: 730, y: -50, width: 40, height: 100 },
+                background: '#4a7fc4'
+            }
+        ];
+
+        // 当前关卡数据
+        let platforms = [];
+        let enemies = [];
+        let coins = [];
+        let flag = {};
+
+        // 键盘事件监听
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
+            if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
+            if (e.key === 'ArrowUp' || e.key === 'w' || e.key === ' ') keys.jump = true;
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
+            if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
+            if (e.key === 'ArrowUp' || e.key === 'w' || e.key === ' ') keys.jump = false;
+        });
+
+        // 加载关卡
+        function loadLevel(levelNum) {
+            const level = levels[levelNum - 1];
+            platforms = JSON.parse(JSON.stringify(level.platforms));
+            enemies = JSON.parse(JSON.stringify(level.enemies));
+            coins = level.coins.map(c => ({ ...c, collected: false }));
+            flag = { ...level.flag };
+
+            // 重置马里奥位置
+            mario.x = 50;
+            mario.y = 400;
+            mario.velocityX = 0;
+            mario.velocityY = 0;
+
+            updateUI();
+        }
+
+        // 绘制马里奥
+        function drawMario() {
+            ctx.save();
+
+            // 身体
+            ctx.fillStyle = '#ff0000';
+            ctx.fillRect(mario.x, mario.y + 15, mario.width, 25);
+
+            // 头
+            ctx.fillStyle = '#ffcc99';
+            ctx.fillRect(mario.x + 5, mario.y, mario.width - 10, 15);
+
+            // 帽子
+            ctx.fillStyle = '#ff0000';
+            ctx.fillRect(mario.x, mario.y, mario.width, 8);
+            ctx.fillRect(mario.x - 5, mario.y + 5, mario.width + 10, 3);
+
+            // 裤子
+            ctx.fillStyle = '#0066cc';
+            ctx.fillRect(mario.x + 5, mario.y + 30, mario.width - 10, 10);
+
+            // 鞋子
+            ctx.fillStyle = '#996633';
+            if (mario.onGround) {
+                ctx.fillRect(mario.x, mario.y + 40, 15, 10);
+                ctx.fillRect(mario.x + 25, mario.y + 40, 15, 10);
+            } else {
+                ctx.fillRect(mario.x + 5, mario.y + 38, 12, 10);
+                ctx.fillRect(mario.x + 23, mario.y + 38, 12, 10);
+            }
+
+            ctx.restore();
+        }
+
+        // 绘制平台
+        function drawPlatforms() {
+            platforms.forEach(platform => {
+                if (platform.type === 'ground') {
+                    ctx.fillStyle = '#8b4513';
+                    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+                    ctx.fillStyle = '#228b22';
+                    ctx.fillRect(platform.x, platform.y, platform.width, 10);
+                } else if (platform.type === 'brick') {
+                    ctx.fillStyle = '#cd853f';
+                    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+                    ctx.strokeStyle = '#8b4513';
+                    ctx.lineWidth = 2;
+                    for (let i = 0; i < platform.width; i += 30) {
+                        ctx.strokeRect(platform.x + i, platform.y, 30, platform.height);
+                    }
+                } else if (platform.type === 'question') {
+                    ctx.fillStyle = '#ffd700';
+                    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+                    ctx.fillStyle = '#ff6600';
+                    ctx.font = 'bold 16px Arial';
+                    ctx.fillText('?', platform.x + platform.width / 2 - 5, platform.y + 15);
+                }
+            });
+        }
+
+        // 绘制敌人
+        function drawEnemies() {
+            enemies.forEach(enemy => {
+                ctx.fillStyle = '#996633';
+                ctx.beginPath();
+                ctx.ellipse(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2 + 10,
+                           enemy.width / 2, enemy.height / 2 - 5, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = 'white';
+                ctx.fillRect(enemy.x + 10, enemy.y + 10, 8, 8);
+                ctx.fillRect(enemy.x + 22, enemy.y + 10, 8, 8);
+                ctx.fillStyle = 'black';
+                ctx.fillRect(enemy.x + 13, enemy.y + 12, 4, 4);
+                ctx.fillRect(enemy.x + 25, enemy.y + 12, 4, 4);
+
+                ctx.fillStyle = '#ffcc99';
+                ctx.fillRect(enemy.x + 12, enemy.y + 25, 16, 5);
+            });
+        }
+
+        // 绘制金币
+        function drawCoins() {
+            coins.forEach(coin => {
+                if (!coin.collected) {
+                    ctx.fillStyle = '#ffd700';
+                    ctx.beginPath();
+                    ctx.ellipse(coin.x + coin.width / 2, coin.y + coin.height / 2,
+                               coin.width / 2, coin.height / 2, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#ff9900';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+
+                    ctx.fillStyle = '#ffff00';
+                    ctx.beginPath();
+                    ctx.arc(coin.x + coin.width / 2 - 3, coin.y + coin.height / 2 - 3, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+        }
+
+        // 绘制旗帜
+        function drawFlag() {
+            ctx.fillStyle = '#666666';
+            ctx.fillRect(flag.x + 15, flag.y, 10, flag.height);
+
+            ctx.fillStyle = '#00ff00';
+            ctx.beginPath();
+            ctx.moveTo(flag.x + 25, flag.y);
+            ctx.lineTo(flag.x + 25 + 40, flag.y + 25);
+            ctx.lineTo(flag.x + 25, flag.y + 50);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = '#ffff00';
+            ctx.font = 'bold 20px Arial';
+            ctx.fillText('★', flag.x + 32, flag.y + 35);
+        }
+
+        // 碰撞检测
+        function checkCollision(rect1, rect2) {
+            return rect1.x < rect2.x + rect2.width &&
+                   rect1.x + rect1.width > rect2.x &&
+                   rect1.y < rect2.y + rect2.height &&
+                   rect1.y + rect1.height > rect2.y;
+        }
+
+        // 更新马里奥位置
+        function updateMario() {
+            if (keys.left) {
+                mario.velocityX = -mario.speed;
+                mario.direction = -1;
+            } else if (keys.right) {
+                mario.velocityX = mario.speed;
+                mario.direction = 1;
+            } else {
+                mario.velocityX = 0;
+            }
+
+            if (keys.jump && mario.onGround) {
+                mario.velocityY = mario.jumpPower;
+                mario.onGround = false;
+                mario.jumping = true;
+            }
+
+            mario.velocityY += mario.gravity;
+            mario.x += mario.velocityX;
+            mario.y += mario.velocityY;
+
+            if (mario.x < 0) mario.x = 0;
+            if (mario.x + mario.width > canvas.width) mario.x = canvas.width - mario.width;
+
+            if (mario.y > canvas.height) {
+                loseLife();
+            }
+
+            mario.onGround = false;
+            platforms.forEach(platform => {
+                if (checkCollision(mario, platform)) {
+                    if (mario.velocityY > 0 && mario.y + mario.height - mario.velocityY <= platform.y) {
+                        mario.y = platform.y - mario.height;
+                        mario.velocityY = 0;
+                        mario.onGround = true;
+                        mario.jumping = false;
+                    } else if (mario.velocityY < 0 && mario.y - mario.velocityY >= platform.y + platform.height) {
+                        mario.y = platform.y + platform.height;
+                        mario.velocityY = 0;
+                    } else {
+                        if (mario.velocityX > 0) {
+                            mario.x = platform.x - mario.width;
+                        } else if (mario.velocityX < 0) {
+                            mario.x = platform.x + platform.width;
+                        }
+                    }
+                }
+            });
+        }
+
+        // 更新敌人
+        function updateEnemies() {
+            enemies.forEach(enemy => {
+                enemy.x += enemy.velocityX;
+
+                platforms.forEach(platform => {
+                    if (enemy.x <= platform.x || enemy.x + enemy.width >= platform.x + platform.width) {
+                        if (enemy.y + enemy.height === platform.y) {
+                            enemy.velocityX *= -1;
+                        }
+                    }
+                });
+
+                if (enemy.x < 0 || enemy.x + enemy.width > canvas.width) {
+                    enemy.velocityX *= -1;
+                }
+
+                if (checkCollision(mario, enemy)) {
+                    if (mario.velocityY > 0 && mario.y + mario.height < enemy.y + enemy.height / 2 + 10) {
+                        enemies = enemies.filter(e => e !== enemy);
+                        score += 100;
+                        updateUI();
+                        mario.velocityY = -8;
+                    } else {
+                        loseLife();
+                    }
+                }
+            });
+        }
+
+        // 收集金币
+        function collectCoins() {
+            coins.forEach(coin => {
+                if (!coin.collected && checkCollision(mario, coin)) {
+                    coin.collected = true;
+                    score += 50;
+                    updateUI();
+                }
+            });
+        }
+
+        // 检查是否到达终点
+        function checkWin() {
+            if (checkCollision(mario, flag)) {
+                if (currentLevel < totalLevels) {
+                    // 显示关卡完成
+                    gameState = 'levelComplete';
+                    document.getElementById('levelComplete').style.display = 'block';
+                    setTimeout(() => {
+                        currentLevel++;
+                        loadLevel(currentLevel);
+                        document.getElementById('levelComplete').style.display = 'none';
+                        gameState = 'playing';
+                    }, 2000);
+                } else {
+                    gameState = 'win';
+                    document.getElementById('winScreen').style.display = 'block';
+                    document.getElementById('winScore').textContent = score;
+                }
+            }
+        }
+
+        // 失去生命
+        function loseLife() {
+            lives--;
+            updateUI();
+
+            if (lives <= 0) {
+                gameState = 'gameover';
+                document.getElementById('gameOver').style.display = 'block';
+                document.getElementById('finalScore').textContent = score;
+            } else {
+                mario.x = 50;
+                mario.y = 400;
+                mario.velocityX = 0;
+                mario.velocityY = 0;
+            }
+        }
+
+        // 更新UI
+        function updateUI() {
+            document.getElementById('level').textContent = currentLevel;
+            document.getElementById('score').textContent = score;
+            document.getElementById('lives').textContent = lives;
+        }
+
+        // 重新开始游戏
+        function restartGame() {
+            gameState = 'playing';
+            score = 0;
+            lives = 3;
+            currentLevel = 1;
+            loadLevel(currentLevel);
+            document.getElementById('gameOver').style.display = 'none';
+            document.getElementById('winScreen').style.display = 'none';
+        }
+
+        // 游戏主循环
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 绘制背景
+            const level = levels[currentLevel - 1];
+            ctx.fillStyle = level.background;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 绘制云朵
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.beginPath();
+            ctx.arc(100, 80, 30, 0, Math.PI * 2);
+            ctx.arc(130, 80, 25, 0, Math.PI * 2);
+            ctx.arc(160, 80, 30, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(500, 60, 35, 0, Math.PI * 2);
+            ctx.arc(540, 60, 30, 0, Math.PI * 2);
+            ctx.arc(580, 60, 35, 0, Math.PI * 2);
+            ctx.fill();
+
+            if (gameState === 'playing') {
+                updateMario();
+                updateEnemies();
+                collectCoins();
+                checkWin();
+
+                drawPlatforms();
+                drawCoins();
+                drawEnemies();
+                drawFlag();
+                drawMario();
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // 初始化游戏
+        loadLevel(1);
+        gameLoop();
+    </script>
+</body>
+</html>

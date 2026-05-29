@@ -1,0 +1,1180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>星露谷物语</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; display:flex; justify-content:center; align-items:center; height:100vh; font-family:'Microsoft YaHei',sans-serif; user-select:none; }
+#gameCanvas { display:block; image-rendering:pixelated; cursor:crosshair; }
+
+/* HUD */
+#hud { position:fixed; top:12px; left:12px; color:#fff; font-size:14px; text-shadow:1px 1px 2px #000; z-index:10; pointer-events:none; }
+#hud .row { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+#hud .bar { width:160px; height:14px; background:rgba(0,0,0,0.5); border-radius:7px; overflow:hidden; border:1px solid rgba(255,255,255,0.3); }
+#hud .bar-fill { height:100%; border-radius:7px; transition:width 0.3s; }
+#energy-fill { background:linear-gradient(90deg,#4CAF50,#8BC34A); }
+#hud .gold { color:#FFD700; font-weight:bold; }
+
+/* Time display */
+#time-display { position:fixed; top:12px; right:12px; color:#fff; font-size:14px; text-shadow:1px 1px 2px #000; z-index:10; pointer-events:none; text-align:right; background:rgba(0,0,0,0.4); padding:8px 12px; border-radius:8px; }
+#time-display .clock { font-size:22px; font-weight:bold; }
+#time-display .date { font-size:13px; opacity:0.9; }
+#time-display .weather-icon { font-size:18px; }
+#time-display .season-name { color:#90EE90; }
+
+/* Toolbar */
+#toolbar { position:fixed; bottom:8px; left:50%; transform:translateX(-50%); display:flex; gap:3px; z-index:10; }
+.toolbar-slot { width:52px; height:52px; background:rgba(30,30,30,0.85); border:2px solid #555; border-radius:6px; display:flex; flex-direction:column; align-items:center; justify-content:center; position:relative; cursor:pointer; transition:border-color 0.15s; }
+.toolbar-slot.selected { border-color:#FFD700; box-shadow:0 0 8px rgba(255,215,0,0.5); }
+.toolbar-slot .icon { font-size:22px; line-height:1; }
+.toolbar-slot .count { position:absolute; bottom:2px; right:4px; font-size:10px; color:#ccc; text-shadow:1px 1px #000; }
+.toolbar-slot .key-hint { position:absolute; top:1px; left:3px; font-size:9px; color:#888; }
+
+/* Notification */
+#notification { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,0,0,0.8); color:#fff; padding:12px 28px; border-radius:10px; font-size:16px; z-index:100; pointer-events:none; opacity:0; transition:opacity 0.3s; }
+#notification.show { opacity:1; }
+
+/* Shop panel */
+#shop-panel { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:600px; max-height:500px; background:rgba(40,30,20,0.95); border:3px solid #8B4513; border-radius:12px; padding:20px; z-index:50; display:none; color:#fff; overflow-y:auto; }
+#shop-panel h2 { text-align:center; color:#FFD700; margin-bottom:12px; font-size:20px; }
+#shop-panel .shop-gold { text-align:center; color:#FFD700; font-size:16px; margin-bottom:12px; }
+#shop-panel .shop-section { margin-bottom:14px; }
+#shop-panel .shop-section h3 { color:#DEB887; margin-bottom:6px; font-size:14px; border-bottom:1px solid #5a3a1a; padding-bottom:4px; }
+.shop-item { display:flex; align-items:center; justify-content:space-between; padding:6px 10px; margin:3px 0; background:rgba(0,0,0,0.3); border-radius:6px; cursor:pointer; transition:background 0.15s; }
+.shop-item:hover { background:rgba(255,215,0,0.15); }
+.shop-item .item-info { display:flex; align-items:center; gap:8px; }
+.shop-item .item-icon { font-size:20px; }
+.shop-item .item-name { font-size:13px; }
+.shop-item .item-price { color:#FFD700; font-size:13px; }
+#shop-panel .close-btn { display:block; margin:10px auto 0; padding:6px 24px; background:#8B4513; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:14px; }
+#shop-panel .close-btn:hover { background:#A0522D; }
+#shop-tabs { display:flex; gap:4px; margin-bottom:10px; }
+#shop-tabs button { flex:1; padding:6px; background:#5a3a1a; color:#DEB887; border:1px solid #8B4513; border-radius:6px 6px 0 0; cursor:pointer; font-size:13px; }
+#shop-tabs button.active { background:#8B4513; color:#FFD700; }
+
+/* Backpack */
+#backpack-panel { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:440px; background:rgba(40,30,20,0.95); border:3px solid #8B4513; border-radius:12px; padding:16px; z-index:50; display:none; color:#fff; }
+#backpack-panel h2 { text-align:center; color:#FFD700; margin-bottom:10px; font-size:18px; }
+#backpack-grid { display:grid; grid-template-columns:repeat(10,1fr); gap:3px; }
+.bp-slot { width:40px; height:40px; background:rgba(0,0,0,0.3); border:1px solid #555; border-radius:4px; display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; position:relative; }
+.bp-slot:hover { border-color:#FFD700; }
+.bp-slot .icon { font-size:18px; }
+.bp-slot .count { position:absolute; bottom:1px; right:3px; font-size:9px; color:#ccc; }
+
+/* Sleep overlay */
+#sleep-overlay { position:fixed; top:0; left:0; width:100%; height:100%; background:#000; z-index:200; display:none; justify-content:center; align-items:center; color:#fff; font-size:24px; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+
+<div id="hud">
+  <div class="row"><span>能量</span><div class="bar"><div class="bar-fill" id="energy-fill" style="width:100%"></div></div><span id="energy-text">270/270</span></div>
+  <div class="row gold"><span id="gold-text">500 G</span></div>
+</div>
+
+<div id="time-display">
+  <div class="clock" id="clock-text">06:00</div>
+  <div class="date" id="date-text">春季 第1天</div>
+  <div class="season-name" id="season-text">第1年</div>
+  <div class="weather-icon" id="weather-text">☀️ 晴天</div>
+</div>
+
+<div id="toolbar"></div>
+<div id="notification"></div>
+<div id="sleep-overlay"><span id="sleep-msg">正在睡觉...</span></div>
+
+<div id="shop-panel">
+  <h2>🛒 皮埃尔杂货店</h2>
+  <div class="shop-gold">金币: <span id="shop-gold">500</span> G</div>
+  <div id="shop-tabs">
+    <button class="active" onclick="shopTab('buy')">购买</button>
+    <button onclick="shopTab('sell')">出售</button>
+  </div>
+  <div id="shop-content"></div>
+  <button class="close-btn" onclick="closeShop()">关闭 (Esc)</button>
+</div>
+
+<div id="backpack-panel">
+  <h2>🎒 背包</h2>
+  <div id="backpack-grid"></div>
+</div>
+
+<script>
+// ============================================================
+// CONSTANTS
+// ============================================================
+const TILE_SIZE = 48;
+const MAP_W = 50;
+const MAP_H = 40;
+const SAVE_KEY = 'stardewFarm_save';
+
+const TILE = { GRASS:0, DIRT:1, PATH:2, WATER:3, FENCE:4, HOUSE:5, SHOP:6, SHIPPING:7, TREE:8, STONE:9, WOOD_LOG:10, FLOWER:11, DOOR_FARM:12, BRIDGE:13, TILLED_DIRT:14 };
+const SOLID_TILES = new Set([TILE.WATER, TILE.FENCE, TILE.HOUSE, TILE.SHOP, TILE.TREE, TILE.STONE, TILE.WOOD_LOG, TILE.SHIPPING]);
+
+const SEASONS = ['春','夏','秋','冬'];
+const SEASON_COLORS = {
+  grass: ['#5B8C3E','#4A7A2E','#8B7530','#B8C4D0'],
+  treeLeaf: ['#3A7D28','#2D6B1A','#CC7722','#8899AA'],
+};
+
+const CROPS = {
+  potato:       { name:'土豆',    seasons:[0], stages:4, daysPerStage:[2,3,3,2], sellPrice:80,  seedPrice:30,  color:'#DAA520' },
+  strawberry:   { name:'草莓',    seasons:[0], stages:4, daysPerStage:[3,3,3,2], sellPrice:120, seedPrice:50,  color:'#FF6B6B' },
+  cauliflower:  { name:'花椰菜',  seasons:[0], stages:4, daysPerStage:[3,4,4,3], sellPrice:175, seedPrice:60,  color:'#F0F0DC' },
+  tomato:       { name:'番茄',    seasons:[1], stages:4, daysPerStage:[2,2,3,2], sellPrice:70,  seedPrice:25,  color:'#FF4500' },
+  melon:        { name:'甜瓜',    seasons:[1], stages:4, daysPerStage:[3,3,4,3], sellPrice:150, seedPrice:50,  color:'#90EE90' },
+  corn:         { name:'玉米',    seasons:[1,2], stages:4, daysPerStage:[3,3,4,3], sellPrice:130, seedPrice:75, color:'#FFD700' },
+  pumpkin:      { name:'南瓜',    seasons:[2], stages:4, daysPerStage:[3,4,4,3], sellPrice:200, seedPrice:70,  color:'#FF8C00' },
+  carrot:       { name:'胡萝卜',  seasons:[2], stages:3, daysPerStage:[2,2,2],   sellPrice:65,  seedPrice:20,  color:'#FFA07A' },
+};
+
+const TOOLS_DEF = {
+  hoe:         { name:'锄头',   icon:'⛏️', color:'#8B4513', energyCost:4 },
+  wateringCan: { name:'水壶',   icon:'💧', color:'#4682B4', energyCost:2 },
+  axe:         { name:'斧头',   icon:'🪓', color:'#A0522D', energyCost:6 },
+  pickaxe:     { name:'镐',     icon:'⛏',  color:'#808080', energyCost:6 },
+  scythe:      { name:'镰刀',   icon:'🌾', color:'#B8860B', energyCost:2 },
+};
+
+const ITEMS = {
+  hoe:{ name:'锄头', type:'tool', icon:'⛏️' },
+  wateringCan:{ name:'水壶', type:'tool', icon:'💧' },
+  axe:{ name:'斧头', type:'tool', icon:'🪓' },
+  pickaxe:{ name:'镐', type:'tool', icon:'⛏' },
+  scythe:{ name:'镰刀', type:'tool', icon:'🌾' },
+  potato_seed:      { name:'土豆种子',    type:'seed', cropId:'potato',      buyPrice:30,  sellPrice:15, icon:'🥔' },
+  strawberry_seed:  { name:'草莓种子',    type:'seed', cropId:'strawberry',  buyPrice:50,  sellPrice:25, icon:'🍓' },
+  cauliflower_seed: { name:'花椰菜种子',  type:'seed', cropId:'cauliflower', buyPrice:60,  sellPrice:30, icon:'🥦' },
+  tomato_seed:      { name:'番茄种子',    type:'seed', cropId:'tomato',      buyPrice:25,  sellPrice:12, icon:'🍅' },
+  melon_seed:       { name:'甜瓜种子',    type:'seed', cropId:'melon',       buyPrice:50,  sellPrice:25, icon:'🍈' },
+  corn_seed:        { name:'玉米种子',    type:'seed', cropId:'corn',        buyPrice:75,  sellPrice:37, icon:'🌽' },
+  pumpkin_seed:     { name:'南瓜种子',    type:'seed', cropId:'pumpkin',     buyPrice:70,  sellPrice:35, icon:'🎃' },
+  carrot_seed:      { name:'胡萝卜种子',  type:'seed', cropId:'carrot',      buyPrice:20,  sellPrice:10, icon:'🥕' },
+  potato:      { name:'土豆',    type:'crop', cropId:'potato',      sellPrice:80,  icon:'🥔' },
+  strawberry:  { name:'草莓',    type:'crop', cropId:'strawberry',  sellPrice:120, icon:'🍓' },
+  cauliflower: { name:'花椰菜',  type:'crop', cropId:'cauliflower', sellPrice:175, icon:'🥦' },
+  tomato:      { name:'番茄',    type:'crop', cropId:'tomato',      sellPrice:70,  icon:'🍅' },
+  melon:       { name:'甜瓜',    type:'crop', cropId:'melon',       sellPrice:150, icon:'🍈' },
+  corn:        { name:'玉米',    type:'crop', cropId:'corn',        sellPrice:130, icon:'🌽' },
+  pumpkin:     { name:'南瓜',    type:'crop', cropId:'pumpkin',     sellPrice:200, icon:'🎃' },
+  carrot:      { name:'胡萝卜',  type:'crop', cropId:'carrot',      sellPrice:65,  icon:'🥕' },
+  wood:  { name:'木材', type:'resource', sellPrice:10, icon:'🪵' },
+  stone: { name:'石头', type:'resource', sellPrice:5,  icon:'🪨' },
+};
+
+// ============================================================
+// GAME STATE
+// ============================================================
+let GS = null;
+function newGameState() {
+  return {
+    version: 1,
+    time: { day:1, season:0, year:1, hour:6, minute:0, timeAccum:0 },
+    player: { x:25*TILE_SIZE, y:20*TILE_SIZE, direction:0, speed:3, energy:270, maxEnergy:270, gold:500, selectedSlot:0 },
+    currentScene: 'farm',
+    inventory: new Array(32).fill(null),
+    farmMap: [],
+    weather: 'sunny',
+    shipped: {},
+    flags: { tutorialDone:false, firstHarvest:false },
+  };
+}
+
+// ============================================================
+// MAP GENERATION
+// ============================================================
+function makeTile(type) { return { type, tilled:false, watered:false, crop:null }; }
+
+function generateFarmMap() {
+  const map = [];
+  for (let y = 0; y < MAP_H; y++) {
+    map[y] = [];
+    for (let x = 0; x < MAP_W; x++) {
+      map[y][x] = makeTile(TILE.GRASS);
+    }
+  }
+
+  // Border fence
+  for (let x = 0; x < MAP_W; x++) { map[0][x].type = TILE.FENCE; map[MAP_H-1][x].type = TILE.FENCE; }
+  for (let y = 0; y < MAP_H; y++) { map[y][0].type = TILE.FENCE; map[y][MAP_W-1].type = TILE.FENCE; }
+
+  // Path from house to farm area
+  for (let y = 16; y < 32; y++) { map[y][15].type = TILE.PATH; map[y][16].type = TILE.PATH; }
+  for (let x = 10; x < 20; x++) { map[16][x].type = TILE.PATH; }
+
+  // House (top-left area)
+  for (let y = 3; y < 8; y++) for (let x = 3; x < 11; x++) map[y][x].type = TILE.HOUSE;
+  map[8][6].type = TILE.PATH; map[8][7].type = TILE.PATH;
+
+  // Shop (top-right area)
+  for (let y = 3; y < 7; y++) for (let x = 35; x < 43; x++) map[y][x].type = TILE.SHOP;
+  map[7][38].type = TILE.PATH; map[7][39].type = TILE.PATH;
+
+  // Shipping bin
+  for (let y = 10; y < 12; y++) for (let x = 10; x < 12; x++) map[y][x].type = TILE.SHIPPING;
+
+  // Pond (bottom-left)
+  for (let y = 30; y < 37; y++) for (let x = 3; x < 12; x++) {
+    if (Math.abs(x-7.5)**2/20 + Math.abs(y-33.5)**2/12 <= 1) map[y][x].type = TILE.WATER;
+  }
+
+  // Scatter trees
+  const rng = mulberry32(42);
+  for (let i = 0; i < 40; i++) {
+    const x = 2 + Math.floor(rng() * (MAP_W-4));
+    const y = 2 + Math.floor(rng() * (MAP_H-4));
+    if (map[y][x].type === TILE.GRASS && !(y >= 17 && y < 32 && x >= 17 && x < 47)) map[y][x].type = TILE.TREE;
+  }
+
+  // Scatter stones
+  for (let i = 0; i < 20; i++) {
+    const x = 2 + Math.floor(rng() * (MAP_W-4));
+    const y = 2 + Math.floor(rng() * (MAP_H-4));
+    if (map[y][x].type === TILE.GRASS && !(y >= 17 && y < 32 && x >= 17 && x < 47)) map[y][x].type = TILE.STONE;
+  }
+
+  // Flowers
+  for (let i = 0; i < 15; i++) {
+    const x = 2 + Math.floor(rng() * (MAP_W-4));
+    const y = 2 + Math.floor(rng() * (MAP_H-4));
+    if (map[y][x].type === TILE.GRASS) map[y][x].type = TILE.FLOWER;
+  }
+
+  return map;
+}
+
+function mulberry32(a) { return function() { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// ============================================================
+// CANVAS & CAMERA
+// ============================================================
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+canvas.width = 1200; canvas.height = 672;
+
+const camera = { x:0, y:0 };
+function updateCamera() {
+  const tx = GS.player.x - canvas.width/2 + TILE_SIZE/2;
+  const ty = GS.player.y - canvas.height/2 + TILE_SIZE/2;
+  camera.x += (tx - camera.x) * 0.12;
+  camera.y += (ty - camera.y) * 0.12;
+  camera.x = Math.max(0, Math.min(camera.x, MAP_W*TILE_SIZE - canvas.width));
+  camera.y = Math.max(0, Math.min(camera.y, MAP_H*TILE_SIZE - canvas.height));
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+const keys = {};
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'KeyE') {
+    if (shopOpen) { closeShop(); return; }
+    if (isNearShop()) { openShop(); return; }
+    if (isNearShipping()) { openShop('sell'); return; }
+  }
+  if (e.code === 'Tab') { e.preventDefault(); toggleBackpack(); }
+  if (e.code === 'Escape') { if (shopOpen) closeShop(); if (backpackOpen) toggleBackpack(); }
+  if (e.code >= 'Digit1' && e.code <= 'Digit9') { GS.player.selectedSlot = parseInt(e.code[5])-1; updateToolbar(); }
+  if (e.code === 'Digit0') { GS.player.selectedSlot = 9; updateToolbar(); }
+  if (e.key === 'F2') { e.preventDefault(); saveGame(); if (window.electronAPI) window.electronAPI.backToLauncher(); }
+  if (e.key === 'F5') { e.preventDefault(); saveGame(); notify('游戏已保存'); }
+  if (e.key === 'F9') { e.preventDefault(); loadGame(); notify('游戏已加载'); }
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+canvas.addEventListener('click', e => {
+  if (shopOpen || backpackOpen) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+  const worldX = mx + camera.x, worldY = my + camera.y;
+  const tx = Math.floor(worldX / TILE_SIZE), ty = Math.floor(worldY / TILE_SIZE);
+  const px = Math.floor(GS.player.x / TILE_SIZE), py = Math.floor(GS.player.y / TILE_SIZE);
+  if (Math.abs(tx-px) <= 2 && Math.abs(ty-py) <= 2) interactWithTile(tx, ty);
+});
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  GS.player.selectedSlot = ((GS.player.selectedSlot + (e.deltaY>0?1:-1)) % 12 + 12) % 12;
+  updateToolbar();
+}, { passive:false });
+
+// ============================================================
+// INVENTORY
+// ============================================================
+function initInventory() {
+  GS.inventory[0] = { id:'hoe', count:1 };
+  GS.inventory[1] = { id:'wateringCan', count:1 };
+  GS.inventory[2] = { id:'axe', count:1 };
+  GS.inventory[3] = { id:'pickaxe', count:1 };
+  GS.inventory[4] = { id:'scythe', count:1 };
+  GS.inventory[5] = { id:'potato_seed', count:15 };
+  GS.inventory[6] = { id:'strawberry_seed', count:5 };
+}
+
+function addToInventory(itemId, count) {
+  count = count || 1;
+  // Stack onto existing slot
+  for (let i = 0; i < 32; i++) {
+    if (GS.inventory[i] && GS.inventory[i].id === itemId) {
+      GS.inventory[i].count += count;
+      updateToolbar(); return true;
+    }
+  }
+  // Find empty slot
+  for (let i = 0; i < 32; i++) {
+    if (!GS.inventory[i]) {
+      GS.inventory[i] = { id:itemId, count };
+      updateToolbar(); return true;
+    }
+  }
+  notify('背包已满！');
+  return false;
+}
+
+function removeFromSlot(slot, count) {
+  if (!GS.inventory[slot]) return;
+  GS.inventory[slot].count -= count;
+  if (GS.inventory[slot].count <= 0) GS.inventory[slot] = null;
+  updateToolbar();
+}
+
+function getEquipped() { return GS.inventory[GS.player.selectedSlot]; }
+
+// ============================================================
+// TOOL INTERACTION
+// ============================================================
+function interactWithTile(tx, ty) {
+  if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= MAP_H) return;
+  const tile = GS.farmMap[ty][tx];
+  const eq = getEquipped();
+  if (!eq || GS.player.energy <= 0) {
+    if (GS.player.energy <= 0) notify('体力不足，需要休息！');
+    return;
+  }
+
+  const itemDef = ITEMS[eq.id];
+
+  if (eq.id === 'hoe') {
+    if (tile.type === TILE.GRASS || tile.type === TILE.FLOWER) {
+      tile.type = TILE.TILLED_DIRT; tile.tilled = true; tile.watered = false;
+      GS.player.energy = Math.max(0, GS.player.energy - TOOLS_DEF.hoe.energyCost);
+    }
+  } else if (eq.id === 'wateringCan') {
+    if ((tile.tilled || tile.type === TILE.TILLED_DIRT) && tile.crop && !tile.watered) {
+      tile.watered = true;
+      tile.crop.wateredToday = true;
+      GS.player.energy = Math.max(0, GS.player.energy - TOOLS_DEF.wateringCan.energyCost);
+    }
+  } else if (eq.id === 'scythe') {
+    if (tile.crop && !tile.crop.dead && isCropReady(tile.crop)) {
+      const cropDef = CROPS[tile.crop.id];
+      addToInventory(tile.crop.id, 1 + Math.floor(Math.random()*2));
+      tile.crop = null; tile.watered = false;
+      GS.player.energy = Math.max(0, GS.player.energy - TOOLS_DEF.scythe.energyCost);
+      notify('收获了' + cropDef.name + '！');
+      GS.flags.firstHarvest = true;
+    }
+  } else if (eq.id === 'axe') {
+    if (tile.type === TILE.TREE) {
+      tile.type = TILE.GRASS; tile.tilled = false;
+      addToInventory('wood', 2 + Math.floor(Math.random()*2));
+      GS.player.energy = Math.max(0, GS.player.energy - TOOLS_DEF.axe.energyCost);
+    }
+  } else if (eq.id === 'pickaxe') {
+    if (tile.type === TILE.STONE) {
+      tile.type = TILE.GRASS; tile.tilled = false;
+      addToInventory('stone', 2 + Math.floor(Math.random()*2));
+      GS.player.energy = Math.max(0, GS.player.energy - TOOLS_DEF.pickaxe.energyCost);
+    }
+  } else if (itemDef && itemDef.type === 'seed') {
+    if ((tile.tilled || tile.type === TILE.TILLED_DIRT) && !tile.crop) {
+      const cropId = itemDef.cropId;
+      const cropDef = CROPS[cropId];
+      if (!cropDef.seasons.includes(GS.time.season)) { notify('这个季节不能种这个！'); return; }
+      tile.crop = { id:cropId, stage:0, growDaysSinceStage:0, wateredToday:false, dead:false };
+      removeFromSlot(GS.player.selectedSlot, 1);
+      GS.player.energy = Math.max(0, GS.player.energy - 2);
+    }
+  }
+}
+
+function isCropReady(crop) {
+  const def = CROPS[crop.id];
+  return crop.stage >= def.stages - 1;
+}
+
+// ============================================================
+// CROP GROWTH
+// ============================================================
+function updateCrops() {
+  for (let y = 0; y < MAP_H; y++) {
+    for (let x = 0; x < MAP_W; x++) {
+      const tile = GS.farmMap[y][x];
+      if (!tile.crop || tile.crop.dead) continue;
+      const def = CROPS[tile.crop.id];
+      if (!def.seasons.includes(GS.time.season)) { tile.crop.dead = true; continue; }
+      if (tile.crop.wateredToday) {
+        tile.crop.growDaysSinceStage++;
+        if (tile.crop.growDaysSinceStage >= def.daysPerStage[tile.crop.stage]) {
+          tile.crop.growDaysSinceStage = 0;
+          tile.crop.stage = Math.min(tile.crop.stage + 1, def.stages - 1);
+        }
+      }
+    }
+  }
+}
+
+function waterAllCrops() {
+  for (let y = 0; y < MAP_H; y++) for (let x = 0; x < MAP_W; x++) {
+    const tile = GS.farmMap[y][x];
+    if (tile.crop && !tile.crop.dead) { tile.watered = true; tile.crop.wateredToday = true; }
+  }
+}
+
+// ============================================================
+// TIME SYSTEM
+// ============================================================
+function updateTime(dt) {
+  GS.time.timeAccum += dt;
+  if (GS.time.timeAccum >= 100) {
+    GS.time.timeAccum -= 100;
+    GS.time.minute++;
+    if (GS.time.minute >= 60) { GS.time.minute = 0; GS.time.hour++; }
+    if (GS.time.hour >= 26) forceSleep();
+  }
+}
+
+function advanceDay() {
+  GS.time.hour = 6; GS.time.minute = 0; GS.time.timeAccum = 0;
+  GS.time.day++; GS.player.energy = GS.player.maxEnergy;
+
+  // Reset watered
+  for (let y = 0; y < MAP_H; y++) for (let x = 0; x < MAP_W; x++) {
+    const tile = GS.farmMap[y][x];
+    tile.watered = false;
+    if (tile.crop) tile.crop.wateredToday = false;
+  }
+
+  // Weather
+  GS.weather = genWeather();
+  if (GS.weather === 'rainy' || GS.weather === 'stormy') waterAllCrops();
+
+  updateCrops();
+
+  if (GS.time.day > 28) {
+    GS.time.day = 1; GS.time.season++;
+    if (GS.time.season > 3) { GS.time.season = 0; GS.time.year++; }
+    notify(SEASONS[GS.time.season] + '季来了！');
+    // Kill off-season crops
+    for (let y = 0; y < MAP_H; y++) for (let x = 0; x < MAP_W; x++) {
+      const tile = GS.farmMap[y][x];
+      if (tile.crop && !CROPS[tile.crop.id].seasons.includes(GS.time.season)) tile.crop.dead = true;
+    }
+  }
+}
+
+function forceSleep() {
+  const overlay = document.getElementById('sleep-overlay');
+  const msg = document.getElementById('sleep-msg');
+  overlay.style.display = 'flex';
+  msg.textContent = '一天结束了...';
+  setTimeout(() => { advanceDay(); overlay.style.display = 'none'; }, 1500);
+}
+
+function genWeather() {
+  const r = Math.random();
+  if (GS.time.season === 3) return r < 0.3 ? 'snowy' : 'sunny'; // winter
+  if (r < 0.6) return 'sunny';
+  if (r < 0.85) return 'rainy';
+  return 'stormy';
+}
+
+// ============================================================
+// SHOP
+// ============================================================
+let shopOpen = false, shopMode = 'buy';
+let backpackOpen = false;
+
+function isNearShop() {
+  const px = GS.player.x, py = GS.player.y;
+  for (let y = 3; y < 7; y++) for (let x = 35; x < 43; x++) {
+    if (Math.abs(px - x*TILE_SIZE) < TILE_SIZE*2 && Math.abs(py - y*TILE_SIZE) < TILE_SIZE*2) return true;
+  }
+  return false;
+}
+
+function isNearShipping() {
+  const px = GS.player.x, py = GS.player.y;
+  for (let y = 10; y < 12; y++) for (let x = 10; x < 12; x++) {
+    if (Math.abs(px - x*TILE_SIZE) < TILE_SIZE*2 && Math.abs(py - y*TILE_SIZE) < TILE_SIZE*2) return true;
+  }
+  return false;
+}
+
+function openShop(mode) {
+  shopOpen = true; shopMode = mode || 'buy';
+  document.getElementById('shop-panel').style.display = 'block';
+  document.getElementById('shop-gold').textContent = GS.player.gold;
+  shopTab(shopMode);
+}
+
+function closeShop() { shopOpen = false; document.getElementById('shop-panel').style.display = 'none'; }
+
+function shopTab(mode) {
+  shopMode = mode;
+  document.querySelectorAll('#shop-tabs button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#shop-tabs button')[mode==='buy'?0:1].classList.add('active');
+  renderShopContent();
+}
+
+function renderShopContent() {
+  const container = document.getElementById('shop-content');
+  container.innerHTML = '';
+  if (shopMode === 'buy') {
+    // Show seeds for current season
+    const section = document.createElement('div');
+    section.className = 'shop-section';
+    section.innerHTML = '<h3>种子（当前季节：' + SEASONS[GS.time.season] + '季）</h3>';
+    for (const [id, def] of Object.entries(ITEMS)) {
+      if (def.type !== 'seed') continue;
+      const cropDef = CROPS[def.cropId];
+      if (!cropDef.seasons.includes(GS.time.season)) continue;
+      const item = document.createElement('div');
+      item.className = 'shop-item';
+      item.innerHTML = `<div class="item-info"><span class="item-icon">${def.icon}</span><span class="item-name">${def.name}</span></div><span class="item-price">${def.buyPrice} G</span>`;
+      item.onclick = () => buyItem(id);
+      section.appendChild(item);
+    }
+    container.appendChild(section);
+  } else {
+    const section = document.createElement('div');
+    section.className = 'shop-section';
+    section.innerHTML = '<h3>出售物品</h3>';
+    for (let i = 0; i < 32; i++) {
+      const slot = GS.inventory[i];
+      if (!slot) continue;
+      const def = ITEMS[slot.id];
+      if (!def || !def.sellPrice) continue;
+      if (def.type === 'tool') continue;
+      const item = document.createElement('div');
+      item.className = 'shop-item';
+      item.innerHTML = `<div class="item-info"><span class="item-icon">${def.icon}</span><span class="item-name">${def.name} x${slot.count}</span></div><span class="item-price">${def.sellPrice} G</span>`;
+      item.onclick = () => sellItem(i);
+      section.appendChild(item);
+    }
+    container.appendChild(section);
+  }
+  document.getElementById('shop-gold').textContent = GS.player.gold;
+}
+
+function buyItem(id) {
+  const def = ITEMS[id];
+  if (GS.player.gold < def.buyPrice) { notify('金币不足！'); return; }
+  if (addToInventory(id, 1)) {
+    GS.player.gold -= def.buyPrice;
+    renderShopContent();
+    notify('购买了' + def.name);
+  }
+}
+
+function sellItem(slot) {
+  const slotData = GS.inventory[slot];
+  if (!slotData) return;
+  const def = ITEMS[slotData.id];
+  GS.player.gold += def.sellPrice;
+  removeFromSlot(slot, 1);
+  renderShopContent();
+  notify('卖出了' + def.name + ' +' + def.sellPrice + 'G');
+}
+
+// ============================================================
+// BACKPACK
+// ============================================================
+function toggleBackpack() {
+  backpackOpen = !backpackOpen;
+  document.getElementById('backpack-panel').style.display = backpackOpen ? 'block' : 'none';
+  if (backpackOpen) renderBackpack();
+}
+
+function renderBackpack() {
+  const grid = document.getElementById('backpack-grid');
+  grid.innerHTML = '';
+  for (let i = 12; i < 32; i++) {
+    const div = document.createElement('div');
+    div.className = 'bp-slot';
+    if (GS.inventory[i]) {
+      const def = ITEMS[GS.inventory[i].id];
+      div.innerHTML = `<span class="icon">${def.icon}</span><span class="count">${GS.inventory[i].count}</span>`;
+      div.title = def.name;
+    }
+    const si = i;
+    div.onclick = () => {
+      // Swap with toolbar selected slot
+      const ts = GS.player.selectedSlot;
+      const tmp = GS.inventory[ts];
+      GS.inventory[ts] = GS.inventory[si];
+      GS.inventory[si] = tmp;
+      updateToolbar(); renderBackpack();
+    };
+    grid.appendChild(div);
+  }
+}
+
+// ============================================================
+// RENDERING
+// ============================================================
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const sx = Math.floor(camera.x / TILE_SIZE);
+  const ex = Math.ceil((camera.x + canvas.width) / TILE_SIZE);
+  const sy = Math.floor(camera.y / TILE_SIZE);
+  const ey = Math.ceil((camera.y + canvas.height) / TILE_SIZE);
+
+  // Ground layer
+  for (let y = sy; y <= ey && y < MAP_H; y++) {
+    for (let x = sx; x <= ex && x < MAP_W; x++) {
+      const tile = GS.farmMap[y] && GS.farmMap[y][x];
+      if (!tile) continue;
+      const dx = x*TILE_SIZE - camera.x, dy = y*TILE_SIZE - camera.y;
+      drawTile(tile, dx, dy, x, y);
+    }
+  }
+
+  // Player
+  drawPlayer();
+
+  // Day/night overlay
+  drawDayNight();
+
+  // Rain
+  if (GS.weather === 'rainy' || GS.weather === 'stormy') drawRain();
+}
+
+function drawTile(tile, dx, dy, wx, wy) {
+  const s = TILE_SIZE;
+  const si = GS.time.season;
+
+  switch(tile.type) {
+    case TILE.GRASS:
+      ctx.fillStyle = SEASON_COLORS.grass[si];
+      ctx.fillRect(dx, dy, s, s);
+      // Grass detail
+      ctx.fillStyle = shadeColor(SEASON_COLORS.grass[si], -15);
+      for (let i = 0; i < 3; i++) {
+        const gx = dx + ((wx*7+i*17)%40)+4, gy = dy + ((wy*11+i*13)%36)+6;
+        ctx.fillRect(gx, gy, 2, 6);
+        ctx.fillRect(gx+2, gy+2, 2, 4);
+      }
+      break;
+    case TILE.TILLED_DIRT:
+      ctx.fillStyle = '#8B6914';
+      ctx.fillRect(dx, dy, s, s);
+      // Tilled rows
+      ctx.fillStyle = '#7A5C10';
+      for (let i = 0; i < 5; i++) ctx.fillRect(dx+2, dy+i*10+2, s-4, 6);
+      if (tile.watered) {
+        ctx.fillStyle = 'rgba(70,130,180,0.25)';
+        ctx.fillRect(dx, dy, s, s);
+      }
+      break;
+    case TILE.DIRT:
+      ctx.fillStyle = '#A0784C';
+      ctx.fillRect(dx, dy, s, s);
+      break;
+    case TILE.PATH:
+      ctx.fillStyle = '#C4A56E';
+      ctx.fillRect(dx, dy, s, s);
+      ctx.fillStyle = '#B09558';
+      ctx.fillRect(dx+4, dy+4, s-8, s-8);
+      break;
+    case TILE.WATER:
+      ctx.fillStyle = '#3A7BD5';
+      ctx.fillRect(dx, dy, s, s);
+      ctx.fillStyle = 'rgba(100,180,255,0.4)';
+      const waveOff = Math.sin(Date.now()/600 + wx + wy) * 3;
+      ctx.fillRect(dx+4+waveOff, dy+10, s-8, 3);
+      ctx.fillRect(dx+8-waveOff, dy+28, s-16, 2);
+      break;
+    case TILE.FENCE:
+      ctx.fillStyle = '#4A7A2E';
+      ctx.fillRect(dx, dy, s, s);
+      ctx.fillStyle = '#8B5E3C';
+      ctx.fillRect(dx+s/2-3, dy, 6, s);
+      ctx.fillRect(dx, dy+s/2-3, s, 6);
+      break;
+    case TILE.HOUSE:
+      ctx.fillStyle = '#8B4513';
+      ctx.fillRect(dx, dy, s, s);
+      ctx.fillStyle = '#A0522D';
+      ctx.fillRect(dx+2, dy+2, s-4, s-4);
+      // Roof
+      if (wy === 3) {
+        ctx.fillStyle = '#CD5C5C';
+        ctx.beginPath();
+        ctx.moveTo(dx-4, dy+s); ctx.lineTo(dx+s/2, dy-8); ctx.lineTo(dx+s+4, dy+s);
+        ctx.fill();
+      }
+      // Door
+      if (wy === 7 && wx >= 6 && wx <= 7) {
+        ctx.fillStyle = '#5C3317';
+        ctx.fillRect(dx+12, dy+8, s-24, s-8);
+        ctx.fillStyle = '#FFD700';
+        ctx.fillRect(dx+s-16, dy+s/2, 3, 3);
+      }
+      // Window
+      if ((wy === 5 || wy === 6) && (wx === 4 || wx === 8 || wx === 37 || wx === 40)) {
+        ctx.fillStyle = '#87CEEB';
+        ctx.fillRect(dx+10, dy+10, s-20, s-20);
+        ctx.fillStyle = '#5C3317';
+        ctx.fillRect(dx+s/2-1, dy+10, 2, s-20);
+        ctx.fillRect(dx+10, dy+s/2-1, s-20, 2);
+      }
+      break;
+    case TILE.SHOP:
+      ctx.fillStyle = '#D2B48C';
+      ctx.fillRect(dx, dy, s, s);
+      ctx.fillStyle = '#C4A070';
+      ctx.fillRect(dx+2, dy+2, s-4, s-4);
+      if (wy === 3) {
+        ctx.fillStyle = '#2E8B57';
+        ctx.beginPath();
+        ctx.moveTo(dx-4, dy+s); ctx.lineTo(dx+s/2, dy-8); ctx.lineTo(dx+s+4, dy+s);
+        ctx.fill();
+      }
+      // Sign
+      if (wy === 6 && (wx === 38 || wx === 39)) {
+        ctx.fillStyle = '#5C3317';
+        ctx.fillRect(dx+10, dy, s-20, s);
+        ctx.fillStyle = '#FFD700';
+        ctx.font = '10px sans-serif';
+        ctx.fillText('店', dx+s/2-5, dy+s/2+4);
+      }
+      break;
+    case TILE.SHIPPING:
+      ctx.fillStyle = '#6B4226';
+      ctx.fillRect(dx, dy, s, s);
+      ctx.fillStyle = '#8B6914';
+      ctx.fillRect(dx+3, dy+3, s-6, s-6);
+      ctx.fillStyle = '#5C3317';
+      ctx.fillRect(dx+8, dy+8, s-16, s-12);
+      ctx.fillStyle = '#FFD700';
+      ctx.font = '9px sans-serif';
+      ctx.fillText('出', dx+s/2-5, dy+s/2);
+      ctx.fillText('货', dx+s/2-5, dy+s/2+10);
+      break;
+    case TILE.TREE:
+      ctx.fillStyle = SEASON_COLORS.grass[si];
+      ctx.fillRect(dx, dy, s, s);
+      // Trunk
+      ctx.fillStyle = '#6B4226';
+      ctx.fillRect(dx+s/2-5, dy+s/2, 10, s/2);
+      // Leaves
+      ctx.fillStyle = SEASON_COLORS.treeLeaf[si];
+      ctx.beginPath();
+      ctx.arc(dx+s/2, dy+s/3, s/2.5, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = shadeColor(SEASON_COLORS.treeLeaf[si], 15);
+      ctx.beginPath();
+      ctx.arc(dx+s/2-5, dy+s/3-3, s/4, 0, Math.PI*2);
+      ctx.fill();
+      break;
+    case TILE.STONE:
+      ctx.fillStyle = SEASON_COLORS.grass[si];
+      ctx.fillRect(dx, dy, s, s);
+      ctx.fillStyle = '#888';
+      ctx.beginPath();
+      ctx.ellipse(dx+s/2, dy+s/2+4, s/2.5, s/3, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#999';
+      ctx.beginPath();
+      ctx.ellipse(dx+s/2-2, dy+s/2, s/3, s/4, -0.2, 0, Math.PI*2);
+      ctx.fill();
+      break;
+    case TILE.FLOWER:
+      ctx.fillStyle = SEASON_COLORS.grass[si];
+      ctx.fillRect(dx, dy, s, s);
+      const fcolors = ['#FF69B4','#FF6347','#FFD700','#9370DB','#FF4500'];
+      const fc = fcolors[(wx*3+wy*7)%fcolors.length];
+      ctx.fillStyle = '#228B22';
+      ctx.fillRect(dx+s/2-1, dy+s/2, 2, s/3);
+      ctx.fillStyle = fc;
+      ctx.beginPath();
+      ctx.arc(dx+s/2, dy+s/2-2, 6, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#FFD700';
+      ctx.beginPath();
+      ctx.arc(dx+s/2, dy+s/2-2, 2, 0, Math.PI*2);
+      ctx.fill();
+      break;
+  }
+
+  // Crop drawing
+  if (tile.crop) drawCrop(tile.crop, dx, dy);
+}
+
+function drawCrop(crop, dx, dy) {
+  const s = TILE_SIZE;
+  const def = CROPS[crop.id];
+  if (crop.dead) {
+    ctx.fillStyle = '#5C4033';
+    ctx.fillRect(dx+s/2-3, dy+s/2, 6, s/3);
+    ctx.fillRect(dx+s/2-6, dy+s/2-3, 12, 4);
+    return;
+  }
+  const stage = crop.stage;
+  const maxStage = def.stages - 1;
+  const progress = stage / maxStage;
+
+  // Stem
+  const stemH = 6 + progress * 18;
+  ctx.fillStyle = '#228B22';
+  ctx.fillRect(dx+s/2-2, dy+s-stemH-4, 4, stemH);
+
+  // Leaves
+  if (stage >= 1) {
+    ctx.fillStyle = '#32CD32';
+    ctx.fillRect(dx+s/2-8, dy+s-stemH+2, 6, 4);
+    ctx.fillRect(dx+s/2+2, dy+s-stemH+5, 6, 4);
+  }
+  if (stage >= 2) {
+    ctx.fillStyle = '#2E8B57';
+    ctx.fillRect(dx+s/2-10, dy+s-stemH-2, 5, 5);
+    ctx.fillRect(dx+s/2+5, dy+s-stemH+1, 5, 5);
+  }
+
+  // Fruit/produce
+  if (stage >= maxStage) {
+    ctx.fillStyle = def.color;
+    ctx.beginPath();
+    ctx.arc(dx+s/2, dy+s-stemH-8, 8, 0, Math.PI*2);
+    ctx.fill();
+    // Highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.beginPath();
+    ctx.arc(dx+s/2-3, dy+s-stemH-10, 3, 0, Math.PI*2);
+    ctx.fill();
+    // Sparkle
+    const sparkle = Math.sin(Date.now()/300) * 0.5 + 0.5;
+    ctx.fillStyle = `rgba(255,255,200,${sparkle*0.6})`;
+    ctx.beginPath();
+    ctx.arc(dx+s/2+6, dy+s-stemH-12, 2, 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
+function drawPlayer() {
+  const px = GS.player.x - camera.x;
+  const py = GS.player.y - camera.y;
+  const s = TILE_SIZE;
+  const dir = GS.player.direction; // 0=down,1=up,2=left,3=right
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath();
+  ctx.ellipse(px+s/2, py+s-2, s/3, 4, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Body
+  ctx.fillStyle = '#4169E1'; // blue shirt
+  ctx.fillRect(px+10, py+16, s-20, s-22);
+
+  // Head
+  ctx.fillStyle = '#FFDAB9'; // skin
+  ctx.fillRect(px+12, py+4, s-24, 14);
+
+  // Hair
+  ctx.fillStyle = '#8B4513';
+  ctx.fillRect(px+10, py+2, s-20, 8);
+  if (dir === 0) { // down - show face
+    ctx.fillRect(px+10, py+2, 4, 10);
+    ctx.fillRect(px+s-14, py+2, 4, 10);
+  }
+
+  // Eyes
+  ctx.fillStyle = '#000';
+  if (dir === 0) {
+    ctx.fillRect(px+16, py+10, 3, 3);
+    ctx.fillRect(px+s-19, py+10, 3, 3);
+  } else if (dir === 1) {
+    // looking up, no eyes visible
+  } else if (dir === 2) {
+    ctx.fillRect(px+14, py+10, 3, 3);
+  } else {
+    ctx.fillRect(px+s-17, py+10, 3, 3);
+  }
+
+  // Legs
+  ctx.fillStyle = '#8B6914'; // brown pants
+  const walkCycle = GS.player.moving ? Math.sin(Date.now()/120) * 3 : 0;
+  ctx.fillRect(px+14, py+s-10+walkCycle, 7, 10);
+  ctx.fillRect(px+s-21, py+s-10-walkCycle, 7, 10);
+
+  // Tool in hand indicator
+  const eq = getEquipped();
+  if (eq) {
+    const def = ITEMS[eq.id];
+    if (def) {
+      ctx.font = '14px sans-serif';
+      ctx.fillText(def.icon, px+s-8, py+20);
+    }
+  }
+}
+
+function drawDayNight() {
+  const hour = GS.time.hour + GS.time.minute / 60;
+  let alpha = 0;
+  if (hour < 7) alpha = 0.45;
+  else if (hour < 8) alpha = 0.45 * (8 - hour);
+  else if (hour < 18) alpha = 0;
+  else if (hour < 20) alpha = 0.3 * (hour - 18) / 2;
+  else alpha = 0.3 + 0.2 * Math.min((hour - 20) / 6, 1);
+
+  if (alpha > 0) {
+    ctx.fillStyle = `rgba(15,10,50,${alpha})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+}
+
+function drawRain() {
+  ctx.strokeStyle = 'rgba(150,200,255,0.5)';
+  ctx.lineWidth = 1;
+  const t = Date.now();
+  for (let i = 0; i < 80; i++) {
+    const rx = (i * 97 + t/10) % canvas.width;
+    const ry = (i * 53 + t*2) % canvas.height;
+    ctx.beginPath();
+    ctx.moveTo(rx, ry);
+    ctx.lineTo(rx - 2, ry + 12);
+    ctx.stroke();
+  }
+}
+
+function shadeColor(hex, amt) {
+  let r = parseInt(hex.slice(1,3),16) + amt;
+  let g = parseInt(hex.slice(3,5),16) + amt;
+  let b = parseInt(hex.slice(5,7),16) + amt;
+  r = Math.max(0, Math.min(255, r));
+  g = Math.max(0, Math.min(255, g));
+  b = Math.max(0, Math.min(255, b));
+  return `rgb(${r},${g},${b})`;
+}
+
+// ============================================================
+// PLAYER MOVEMENT
+// ============================================================
+function updatePlayer(dt) {
+  let dx = 0, dy = 0;
+  if (keys['KeyW'] || keys['ArrowUp'])    { dy = -1; GS.player.direction = 1; }
+  if (keys['KeyS'] || keys['ArrowDown'])  { dy = 1;  GS.player.direction = 0; }
+  if (keys['KeyA'] || keys['ArrowLeft'])  { dx = -1; GS.player.direction = 2; }
+  if (keys['KeyD'] || keys['ArrowRight']) { dx = 1;  GS.player.direction = 3; }
+
+  GS.player.moving = dx !== 0 || dy !== 0;
+
+  if (GS.player.moving) {
+    // Normalize diagonal
+    if (dx !== 0 && dy !== 0) { dx *= 0.707; dy *= 0.707; }
+    const spd = GS.player.speed;
+    const nx = GS.player.x + dx * spd;
+    const ny = GS.player.y + dy * spd;
+
+    // Collision check
+    const margin = 6;
+    const checkPoints = [
+      [nx + margin, ny + margin],
+      [nx + TILE_SIZE - margin, ny + margin],
+      [nx + margin, ny + TILE_SIZE - margin],
+      [nx + TILE_SIZE - margin, ny + TILE_SIZE - margin],
+    ];
+
+    let canMoveX = true, canMoveY = true;
+    for (const [px, py] of checkPoints) {
+      const tx = Math.floor(px / TILE_SIZE), ty = Math.floor(py / TILE_SIZE);
+      if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= MAP_H) { canMoveX = canMoveY = false; break; }
+      if (SOLID_TILES.has(GS.farmMap[ty][tx].type)) {
+        // Check if it's X or Y collision
+        const otx = Math.floor(GS.player.x / TILE_SIZE);
+        if (tx !== otx) canMoveX = false;
+        const oty = Math.floor(GS.player.y / TILE_SIZE);
+        if (ty !== oty) canMoveY = false;
+      }
+    }
+
+    if (canMoveX) GS.player.x = nx;
+    if (canMoveY) GS.player.y = ny;
+
+    // Clamp to map
+    GS.player.x = Math.max(TILE_SIZE, Math.min(GS.player.x, (MAP_W-2)*TILE_SIZE));
+    GS.player.y = Math.max(TILE_SIZE, Math.min(GS.player.y, (MAP_H-2)*TILE_SIZE));
+  }
+}
+
+// ============================================================
+// HUD UPDATE
+// ============================================================
+function updateHUD() {
+  const p = GS.player;
+  document.getElementById('energy-fill').style.width = (p.energy / p.maxEnergy * 100) + '%';
+  document.getElementById('energy-text').textContent = Math.floor(p.energy) + '/' + p.maxEnergy;
+  document.getElementById('gold-text').textContent = p.gold + ' G';
+
+  const h = GS.time.hour, m = GS.time.minute;
+  const hh = h >= 24 ? h - 24 : h;
+  const ampm = h >= 24 ? 'AM' : (h >= 12 ? 'PM' : 'AM');
+  const dispH = hh === 0 ? 12 : (hh > 12 ? hh - 12 : hh);
+  document.getElementById('clock-text').textContent = String(dispH).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ' ' + ampm;
+  document.getElementById('date-text').textContent = SEASONS[GS.time.season] + '季 第' + GS.time.day + '天';
+  document.getElementById('season-text').textContent = '第' + GS.time.year + '年';
+
+  const weatherMap = { sunny:'☀️ 晴天', rainy:'🌧️ 雨天', stormy:'⛈️ 暴风雨', snowy:'❄️ 下雪' };
+  document.getElementById('weather-text').textContent = weatherMap[GS.weather] || '☀️ 晴天';
+}
+
+function updateToolbar() {
+  const toolbar = document.getElementById('toolbar');
+  toolbar.innerHTML = '';
+  for (let i = 0; i < 12; i++) {
+    const div = document.createElement('div');
+    div.className = 'toolbar-slot' + (i === GS.player.selectedSlot ? ' selected' : '');
+    const hint = document.createElement('span');
+    hint.className = 'key-hint';
+    hint.textContent = i === 9 ? '0' : String(i+1);
+    div.appendChild(hint);
+
+    if (GS.inventory[i]) {
+      const def = ITEMS[GS.inventory[i].id];
+      const icon = document.createElement('span');
+      icon.className = 'icon';
+      icon.textContent = def.icon;
+      div.appendChild(icon);
+      if (GS.inventory[i].count > 1) {
+        const count = document.createElement('span');
+        count.className = 'count';
+        count.textContent = GS.inventory[i].count;
+        div.appendChild(count);
+      }
+      div.title = def.name;
+    }
+    const si = i;
+    div.onclick = () => { GS.player.selectedSlot = si; updateToolbar(); };
+    toolbar.appendChild(div);
+  }
+}
+
+// ============================================================
+// NOTIFICATION
+// ============================================================
+let notifyTimeout = null;
+function notify(msg) {
+  const el = document.getElementById('notification');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(notifyTimeout);
+  notifyTimeout = setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+// ============================================================
+// SAVE / LOAD
+// ============================================================
+function saveGame() {
+  try {
+    const data = {
+      version: 1,
+      time: {...GS.time},
+      player: {...GS.player},
+      currentScene: GS.currentScene,
+      inventory: GS.inventory.map(s => s ? {...s} : null),
+      farmMap: GS.farmMap.map(row => row.map(t => ({
+        type: t.type, tilled: t.tilled, watered: t.watered,
+        crop: t.crop ? {...t.crop} : null
+      }))),
+      weather: GS.weather,
+      shipped: {...GS.shipped},
+      flags: {...GS.flags},
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch(e) { console.error('保存失败:', e); }
+}
+
+function loadGame() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    GS.time = data.time;
+    GS.player = data.player;
+    GS.currentScene = data.currentScene || 'farm';
+    GS.inventory = data.inventory.map(s => s ? {...s} : null);
+    GS.farmMap = data.farmMap.map(row => row.map(t => ({
+      type: t.type, tilled: t.tilled || false, watered: t.watered || false,
+      crop: t.crop ? {...t.crop} : null
+    })));
+    GS.weather = data.weather || 'sunny';
+    GS.shipped = data.shipped || {};
+    GS.flags = data.flags || {};
+    return true;
+  } catch(e) { console.error('加载失败:', e); return false; }
+}
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+let lastTime = 0;
+
+function gameLoop(timestamp) {
+  const dt = Math.min(timestamp - lastTime, 100);
+  lastTime = timestamp;
+
+  if (!shopOpen && !backpackOpen) {
+    updateTime(dt);
+    updatePlayer(dt);
+    updateCamera();
+  }
+
+  render();
+  updateHUD();
+  requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+// INIT
+// ============================================================
+function init() {
+  GS = newGameState();
+  GS.farmMap = generateFarmMap();
+  initInventory();
+  GS.weather = genWeather();
+
+  loadGame();
+
+  // Setup camera
+  camera.x = GS.player.x - canvas.width/2;
+  camera.y = GS.player.y - canvas.height/2;
+
+  updateToolbar();
+  updateHUD();
+  requestAnimationFrame(gameLoop);
+
+  // Auto-save every 60 seconds
+  setInterval(() => { try { saveGame(); } catch(e){} }, 60000);
+}
+
+// Resize canvas to fit window
+function resizeCanvas() {
+  const ratio = canvas.width / canvas.height;
+  let w = window.innerWidth, h = window.innerHeight;
+  if (w / h > ratio) { w = h * ratio; } else { h = w / ratio; }
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>游戏中心</title>
+  <link rel="stylesheet" href="launcher.css">
+</head>
+<body>
+  <!-- 启动动画 -->
+  <div id="splashScreen" class="splash">
+    <div class="splash-inner">
+      <div class="splash-logo">
+        <svg viewBox="0 0 120 120" width="100" height="100" class="splash-icon">
+          <defs>
+            <linearGradient id="sg" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#667eea"/>
+              <stop offset="100%" stop-color="#a855f7"/>
+            </linearGradient>
+          </defs>
+          <!-- Controller body -->
+          <path d="M36,42 L84,42 Q96,42 97,54 L98,65 Q99,76 90,82 Q81,88 77,97 Q73,106 70,106 Q67,106 65,98 L62,88 L60,85 L58,88 L55,98 Q53,106 50,106 Q47,106 43,97 Q39,88 30,82 Q21,76 22,65 L23,54 Q24,42 36,42 Z"
+                fill="none" stroke="url(#sg)" stroke-width="2.5" class="splash-body"/>
+          <!-- Left stick -->
+          <circle cx="42" cy="64" r="8" fill="none" stroke="url(#sg)" stroke-width="2" class="splash-stick-l"/>
+          <circle cx="42" cy="63" r="3" fill="url(#sg)" opacity="0.5" class="splash-stick-l"/>
+          <!-- D-pad -->
+          <rect x="73" y="56" width="3" height="16" rx="1.5" fill="url(#sg)" class="splash-dpad"/>
+          <rect x="66.5" y="62.5" width="16" height="3" rx="1.5" fill="url(#sg)" class="splash-dpad"/>
+          <!-- Buttons -->
+          <circle cx="60" cy="54" r="4" fill="none" stroke="#ef4444" stroke-width="1.8" class="splash-btn splash-btn-y"/>
+          <circle cx="68" cy="62" r="4" fill="none" stroke="#22c55e" stroke-width="1.8" class="splash-btn splash-btn-b"/>
+          <circle cx="60" cy="70" r="4" fill="none" stroke="#3b82f6" stroke-width="1.8" class="splash-btn splash-btn-a"/>
+          <circle cx="52" cy="62" r="4" fill="none" stroke="#f59e0b" stroke-width="1.8" class="splash-btn splash-btn-x"/>
+        </svg>
+      </div>
+      <div class="splash-text">
+        <span class="splash-title">游戏中心</span>
+      </div>
+      <div class="splash-bar-track">
+        <div class="splash-bar" id="splashBar"></div>
+      </div>
+    </div>
+    <div class="splash-particles" id="splashParticles"></div>
+  </div>
+
+  <!-- 顶部导航栏 -->
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <svg class="brand-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="2" y="6" width="20" height="12" rx="4"/>
+        <circle cx="8" cy="12" r="2"/>
+        <circle cx="16" cy="12" r="2"/>
+        <line x1="6" y1="9" x2="10" y2="9"/>
+        <line x1="14" y1="9" x2="18" y2="9"/>
+        <line x1="6" y1="15" x2="10" y2="15"/>
+        <line x1="14" y1="15" x2="18" y2="15"/>
+      </svg>
+      <span class="brand-text">游戏中心</span>
+    </div>
+    <div class="navbar-search">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" class="search-icon">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input type="text" id="searchInput" placeholder="搜索游戏..." autocomplete="off">
+    </div>
+  </nav>
+
+  <div class="app-body">
+    <!-- 左侧游戏列表 -->
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <!-- 右侧详情区 -->
+    <main class="content">
+      <div class="welcome-screen" id="welcomeScreen">
+        <div class="welcome-icon">
+          <svg viewBox="0 0 512 512" width="120" height="120">
+            <defs>
+              <linearGradient id="wg" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#667eea"/>
+                <stop offset="100%" stop-color="#764ba2"/>
+              </linearGradient>
+            </defs>
+            <rect width="512" height="512" rx="108" fill="url(#wg)" opacity="0.15"/>
+            <path d="M160,175 L352,175 Q390,175 395,210 L398,250 Q400,280 380,298 Q360,316 352,340 Q344,364 338,382 Q328,405 310,405 Q292,405 285,388 L275,360 L268,342 L256,336 L244,342 L237,360 L227,388 Q220,405 202,405 Q184,405 174,382 Q168,364 160,340 Q152,316 132,298 Q112,280 114,250 L117,210 Q122,175 160,175 Z"
+                  fill="url(#wg)" opacity="0.6"/>
+            <circle cx="180" cy="250" r="18" fill="none" stroke="white" stroke-width="3" opacity="0.5"/>
+            <circle cx="180" cy="248" r="8" fill="white" opacity="0.3"/>
+            <rect x="326" y="235" width="10" height="32" rx="3" fill="white" opacity="0.5"/>
+            <rect x="315" y="246" width="32" height="10" rx="3" fill="white" opacity="0.5"/>
+            <circle cx="256" cy="225" r="9" fill="none" stroke="#ef4444" stroke-width="2.5" opacity="0.7"/>
+            <circle cx="278" cy="248" r="9" fill="none" stroke="#22c55e" stroke-width="2.5" opacity="0.7"/>
+            <circle cx="256" cy="271" r="9" fill="none" stroke="#3b82f6" stroke-width="2.5" opacity="0.7"/>
+            <circle cx="234" cy="248" r="9" fill="none" stroke="#f59e0b" stroke-width="2.5" opacity="0.7"/>
+          </svg>
+        </div>
+        <h1>选择一个游戏开始游玩</h1>
+        <p>从左侧列表选择游戏，或使用搜索栏快速查找</p>
+        <div class="welcome-stats" id="welcomeStats"></div>
+      </div>
+
+      <div class="game-detail" id="gameDetail" style="display:none">
+        <div class="detail-hero" id="detailHero">
+          <div class="hero-overlay"></div>
+          <div class="hero-content">
+            <div class="hero-icon" id="heroIcon"></div>
+            <div class="hero-info">
+              <h1 id="detailName"></h1>
+              <div class="hero-tags" id="detailTags"></div>
+            </div>
+          </div>
+        </div>
+        <div class="detail-body">
+          <div class="detail-actions">
+            <button class="play-btn" id="playBtn">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                <polygon points="5,3 19,12 5,21"/>
+              </svg>
+              <span>开始游戏 ▶</span>
+            </button>
+            <button class="mp-btn" id="mpBtn">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+              </svg>
+              联机游戏
+            </button>
+            <button class="fullscreen-btn" id="fullscreenBtn">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 3 21 3 21 9"/>
+                <polyline points="9 21 3 21 3 15"/>
+                <line x1="21" y1="3" x2="14" y2="10"/>
+                <line x1="3" y1="21" x2="10" y2="14"/>
+              </svg>
+              全屏
+            </button>
+          </div>
+
+          <!-- 联机面板 -->
+          <div class="mp-panel" id="mpPanel" style="display:none">
+            <div class="mp-panel-header">
+              <h3>联机游戏</h3>
+              <button class="mp-close-btn" id="mpCloseBtn">&times;</button>
+            </div>
+            <div class="mp-tabs">
+              <button class="mp-tab active" data-tab="host">创建房间</button>
+              <button class="mp-tab" data-tab="join">加入房间</button>
+            </div>
+
+            <!-- 创建房间 -->
+            <div class="mp-tab-content active" id="mpHostTab">
+              <div class="mp-host-info" id="mpHostInfo" style="display:none">
+                <div class="mp-room-code">
+                  <div id="mpCreateTip" style="display:none;opacity:0;transition:opacity 0.4s;background:rgba(34,197,94,0.15);color:#22c55e;padding:8px 12px;border-radius:6px;font-size:13px;margin-bottom:10px;border:1px solid rgba(34,197,94,0.3);"></div>
+                  <div style="display:flex;gap:12px;">
+                    <div style="flex:1;">
+                      <span class="mp-label">主机 IP 地址</span>
+                      <div class="mp-code-box">
+                        <code id="mpRoomIP">--</code>
+                        <button class="mp-copy-btn" id="mpCopyIpBtn" title="复制">
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        </button>
+                      </div>
+                    </div>
+                    <div style="flex:1;">
+                      <span class="mp-label">端口</span>
+                      <div class="mp-code-box">
+                        <code id="mpRoomPort">--</code>
+                        <button class="mp-copy-btn" id="mpCopyPortBtn" title="复制">
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="mp-players">
+                  <span class="mp-label">玩家列表</span>
+                  <div class="mp-player-list" id="mpPlayerList">
+                    <div class="mp-player-item"><span class="mp-player-dot host"></span> 你 (主机)</div>
+                  </div>
+                </div>
+                <button class="mp-start-btn" id="mpStartBtn">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+                  开始联机游戏
+                </button>
+                <button class="mp-stop-btn" id="mpHostStopBtn">关闭房间</button>
+                <button class="mp-stop-btn" id="mpFirewallBtn" style="margin-top:8px;background:#e67e22;color:#fff;display:none;">修复防火墙（管理员）</button>
+              </div>
+              <div class="mp-host-setup" id="mpHostSetup">
+                <div class="mp-field">
+                  <label>你的昵称</label>
+                  <input type="text" id="mpHostName" placeholder="输入昵称" maxlength="16" value="玩家1">
+                </div>
+                <div class="mp-field">
+                  <label>选择队伍</label>
+                  <div style="display:flex;gap:10px;">
+                    <button id="mpHostTeamRed" class="mp-action-btn" style="flex:1;background:rgba(239,68,68,0.25);border:2px solid #ef4444;color:#ef4444;padding:8px 0;border-radius:8px;font-size:14px;cursor:pointer;" onclick="selectMpTeam('host','red')">红队</button>
+                    <button id="mpHostTeamBlue" class="mp-action-btn" style="flex:1;background:rgba(59,130,246,0.1);border:2px solid #3b82f6;color:#3b82f6;padding:8px 0;border-radius:8px;font-size:14px;cursor:pointer;" onclick="selectMpTeam('host','blue')">蓝队</button>
+                  </div>
+                </div>
+                <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+                  <input type="checkbox" id="mpPvPCheck" style="width:16px;height:16px;accent-color:#ef4444;cursor:pointer;flex-shrink:0;">
+                  <label for="mpPvPCheck" style="margin:0;cursor:pointer;color:#ef4444;font-size:14px;font-weight:500;">PvP 玩家对打</label>
+                </div>
+                <button class="mp-action-btn" id="mpCreateBtn">创建房间</button>
+              </div>
+            </div>
+
+            <!-- 加入房间 -->
+            <div class="mp-tab-content" id="mpJoinTab">
+              <div class="mp-join-connected" id="mpJoinConnected" style="display:none">
+                <div class="mp-players">
+                  <span class="mp-label">已连接到房间</span>
+                  <div class="mp-player-list" id="mpJoinPlayerList"></div>
+                </div>
+                <button class="mp-stop-btn" id="mpJoinStopBtn">断开连接</button>
+              </div>
+              <div class="mp-join-form" id="mpJoinForm">
+                <div class="mp-field">
+                  <label>你的昵称</label>
+                  <input type="text" id="mpJoinName" placeholder="输入昵称" maxlength="16" value="玩家2">
+                </div>
+                <div class="mp-field">
+                  <label>选择队伍</label>
+                  <div style="display:flex;gap:10px;">
+                    <button id="mpJoinTeamRed" class="mp-action-btn" style="flex:1;background:rgba(239,68,68,0.25);border:2px solid #ef4444;color:#ef4444;padding:8px 0;border-radius:8px;font-size:14px;cursor:pointer;" onclick="selectMpTeam('join','red')">红队</button>
+                    <button id="mpJoinTeamBlue" class="mp-action-btn" style="flex:1;background:rgba(59,130,246,0.1);border:2px solid #3b82f6;color:#3b82f6;padding:8px 0;border-radius:8px;font-size:14px;cursor:pointer;" onclick="selectMpTeam('join','blue')">蓝队</button>
+                  </div>
+                </div>
+                <div class="mp-field">
+                  <label>局域网房间</label>
+                  <div id="mpRoomList" style="max-height:220px;overflow-y:auto;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:4px;">
+                    <div style="color:#888;text-align:center;padding:12px;font-size:13px;">正在扫描局域网房间...</div>
+                  </div>
+                </div>
+                <details style="margin-top:4px;text-align:left;">
+                  <summary style="color:#666;cursor:pointer;font-size:12px;">手动输入IP</summary>
+                  <div style="margin-top:6px;display:flex;gap:8px;align-items:end;">
+                    <div class="mp-field" style="flex:1;margin:0;"><input type="text" id="mpJoinIp" placeholder="IP地址"></div>
+                    <div class="mp-field" style="width:80px;margin:0;"><input type="text" id="mpJoinPort" placeholder="端口"></div>
+                    <button class="mp-action-btn" id="mpJoinBtn" style="padding:8px 16px;">加入</button>
+                  </div>
+                  <div class="mp-join-status" id="mpJoinStatus" style="margin-top:4px;"></div>
+                </details>
+              </div>
+            </div>
+          </div>
+          <div class="detail-section">
+            <h3>关于游戏</h3>
+            <p id="detailDesc"></p>
+          </div>
+          <div class="detail-section" id="detailInfoSection">
+            <h3>游戏信息</h3>
+            <div class="info-grid" id="detailInfo"></div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const games = [
+      { id:'狩猎游戏', name:'狩猎游戏', desc:'3D第一人称射击狩猎游戏，在广袤的自然场景中追踪猎物，体验真实的射击手感和沉浸式狩猎体验。', icon:'🎯', file:'index.html', tags:['射击','3D','第一人称'], genre:'射击游戏' },
+      { id:'3D我的世界', name:'3D 我的世界', desc:'3D方块世界建造游戏，自由探索无限世界，采集资源，建造属于自己的建筑奇迹。', icon:'🧱', file:'3D我的世界.html', tags:['沙盒','3D','建造'], genre:'沙盒游戏' },
+      { id:'2D我的世界', name:'2D 我的世界', desc:'2D像素方块世界，经典横版沙盒体验，挖掘、建造、生存。', icon:'⬛', file:'2D我的世界.html', tags:['沙盒','2D','像素'], genre:'沙盒游戏' },
+      { id:'3D开车', name:'3D 开车', desc:'3D驾驶模拟，真实物理引擎，多款车辆可选，自由驰骋在开放道路上。', icon:'🚗', file:'3D开车.html', tags:['驾驶','3D','模拟'], genre:'模拟游戏' },
+      { id:'3D战斗机', name:'3D 战斗机', desc:'3D空战飞行模拟，驾驶战斗机翱翔天际，执行空战任务击落敌机。', icon:'✈️', file:'3D战斗机.html', tags:['飞行','3D','战斗'], genre:'飞行游戏' },
+      { id:'飞船', name:'飞船', desc:'3D太空飞船，驾驶飞船穿越星际，探索浩瀚宇宙。', icon:'🛰️', file:'飞船.html', tags:['太空','3D','探索'], genre:'太空游戏' },
+{ id:'火箭发射', name:'火箭发射', desc:'自由组装火箭，2D真实轨道物理！引力、大气阻力、级间分离，在侧视视角中体验从组装到入轨的完整航天过程。', icon:'🚀', file:'index.html', tags:['太空','2D','物理','组装'], genre:'太空游戏' },
+      { id:'太空发射', name:'太空发射', desc:'自由组装火箭，真实轨道物理！引力弹弓、大气层阻力、级间分离，在真实太阳系中规划航线，飞向月球或更远！', icon:'🪐', file:'index.html', tags:['太空','3D','物理','组装'], genre:'太空游戏' },
+      { id:'天业太空计划', name:'天业太空计划', desc:'坎巴拉太空计划风格3D航天模拟！火箭组装、分级系统、真实轨道力学、地图视图，在类Kerbin星球上实现你的太空梦想！', icon:'🚀', file:'index.html', tags:['太空','3D','物理','组装','模拟'], genre:'太空游戏' },
+      { id:'三体战舰', name:'三体战舰', desc:'三体主题战舰游戏，基于刘慈欣科幻小说改编，指挥人类舰队对抗三体文明。', icon:'🌌', file:'三体战舰.html', tags:['科幻','策略','战斗'], genre:'策略游戏' },
+      { id:'三体战舰大战', name:'三体战舰大战', desc:'三体主题舰队大战，指挥人类舰队与三体文明展开史诗级太空决战，运用策略击败强敌。', icon:'⚔️', file:'index.html', tags:['科幻','策略','对战'], genre:'策略游戏' },
+      { id:'三体战舰大战3D', name:'三体战舰大战 3D', desc:'三体舰队大战3D版，沉浸式3D太空战场，指挥舰队在浩瀚宇宙中与三体文明决一死战。', icon:'🛸', file:'index.html', tags:['科幻','3D','对战'], genre:'策略游戏' },
+      { id:'后室游戏', name:'后室', desc:'3D恐怖迷宫探索，你跌入了无限延伸的黄色走廊，寻找出口，躲避未知的存在。', icon:'🚪', file:'index.html', tags:['恐怖','3D','探索'], genre:'恐怖游戏' },
+      { id:'坦克大战', name:'坦克大战', desc:'经典坦克对战，保卫基地，消灭敌方坦克，重温FC时代的经典回忆。', icon:'🔫', file:'坦克大战.html', tags:['射击','经典','对战'], genre:'射击游戏' },
+      { id:'植物大战僵尸', name:'植物大战僵尸', desc:'经典塔防策略游戏，种植各种植物抵御僵尸入侵，保卫你的花园。', icon:'🌻', file:'index.html', tags:['塔防','策略','经典'], genre:'策略游戏' },
+      { id:'模拟山羊', name:'模拟山羊', desc:'搞怪物理模拟游戏，扮演一只山羊在开放世界中搞破坏，充满欢乐和惊喜。', icon:'🐐', file:'模拟山羊.html', tags:['搞笑','模拟','物理'], genre:'休闲游戏' },
+      { id:'超级马里奥', name:'超级马里奥', desc:'经典平台跳跃冒险，操控马里奥穿越重重关卡，拯救蘑菇王国。', icon:'🍄', file:'超级马里奥.html', tags:['平台','经典','冒险'], genre:'平台游戏' },
+      { id:'LevelDevil', name:'Level Devil', desc:'高难度平台跳跃挑战，每一关都暗藏陷阱，考验你的反应速度和耐心。', icon:'😈', file:'level-devil.html', tags:['平台','挑战','高难度'], genre:'平台游戏' },
+      { id:'轻松水族馆', name:'轻松水族馆', desc:'放松养鱼水族馆，打造属于你的水下世界，观赏美丽的鱼群悠游。', icon:'🐠', file:'轻松水族馆.html', tags:['休闲','放松','模拟'], genre:'休闲游戏' },
+      { id:'超级钟表', name:'超级钟表', desc:'创意时钟互动，独特的时钟展示与互动体验。', icon:'⏰', file:'超级钟表.html', tags:['创意','互动','工具'], genre:'创意工具' },
+      { id:'音乐生成器', name:'音乐生成器', desc:'创意音乐制作工具，自由组合音符和节拍，创作属于你的音乐作品。', icon:'🎵', file:'音乐生成器.html', tags:['音乐','创意','工具'], genre:'创意工具' },
+      { id:'CS对战', name:'CS 对战', desc:'反恐精英FPS对战，经典5v5爆破模式，精准射击、团队协作，体验极致枪战快感。', icon:'💣', file:'index.html', tags:['FPS','射击','对战','联机'], genre:'射击游戏' },
+      { id:'废品机械师', name:'废品机械师', desc:'创意建造游戏，使用各种零件组装车辆、飞机和火箭，自定义连接和动力系统，驾驶你的发明探索世界。', icon:'🔧', file:'index.html', tags:['建造','3D','物理','创意'], genre:'建造游戏' },
+      { id:'FPV练习', name:'FPV 穿越机', desc:'FPV穿越机模拟器，支持DJI遥控器3，真实Acro物理引擎，赛道竞速与悬停训练。', icon:'🚁', file:'FPV练习.html', tags:['模拟','3D','FPV','飞行'], genre:'模拟游戏' },
+      { id:'沙雕赛车', name:'沙雕赛车', desc:'爆笑3D赛车游戏，你的车会不断掉零件、方向盘飞走、油门卡死，看看你能不能开着只剩底盘的破车冲过终点线！', icon:'🏎️', file:'index.html', tags:['赛车','3D','搞笑','休闲'], genre:'休闲游戏' },
+      { id:'地平线', name:'地平线', desc:'开放世界驾驶，山路漂移、海岸公路、测速挑战，体验自由驰骋的速度与激情。', icon:'🏁', file:'index.html', tags:['赛车','3D','开放世界','驾驶'], genre:'赛车游戏' },
+      { id:'physics_ammo_break', name:'物理破碎', desc:'Ammo.js物理引擎演示，投掷球体击碎场景中的物体，体验真实的凸体破碎效果。', icon:'💥', file:'index.html', tags:['物理','3D','演示'], genre:'休闲游戏' },
+      { id:'钓鱼游戏', name:'俄罗斯钓鱼', desc:'3D钓鱼模拟游戏，在湖畔、河流、码头等多个场景中体验真实钓鱼。收集图鉴，升级装备，钓到传说中的大鱼！', icon:'🎣', file:'index.html', tags:['模拟','3D','钓鱼','休闲'], genre:'模拟游戏' },
+      { id:'星露谷物语', name:'星露谷物语', desc:'像素风农场模拟RPG，种植作物、浇水施肥、收获出售，体验悠闲的田园生活！支持四季更替、天气系统和商店经济。', icon:'🌾', file:'星露谷物语.html', tags:['模拟','农场','像素','RPG'], genre:'模拟游戏' }
+    ];
+
+    const sidebar = document.getElementById('sidebar');
+    const welcomeScreen = document.getElementById('welcomeScreen');
+    const gameDetail = document.getElementById('gameDetail');
+    const searchInput = document.getElementById('searchInput');
+    const welcomeStats = document.getElementById('welcomeStats');
+
+    // 统计标签
+    const allTags = [...new Set(games.flatMap(g => g.tags))].sort();
+    welcomeStats.innerHTML = `<span class="stat">${games.length} 款游戏</span><span class="stat-divider">|</span><span class="stat">${allTags.length} 个分类</span>`;
+
+    // 游玩时长
+    function getPlayTimes() {
+      if (window.electronAPI && window.electronAPI.getPlayTimes) {
+        try { return window.electronAPI.getPlayTimes(); } catch(e) {}
+      }
+      return {};
+    }
+
+    function formatPlayTime(seconds) {
+      if (!seconds) return '';
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      if (h > 0) return h + '小时' + (m > 0 ? m + '分钟' : '');
+      if (m > 0) return m + '分钟' + (s > 0 ? s + '秒' : '');
+      return s + '秒';
+    }
+
+    let selectedGame = null;
+
+    function renderSidebar(filter = '') {
+      sidebar.innerHTML = '';
+      const filtered = games.filter(g =>
+        g.name.toLowerCase().includes(filter.toLowerCase()) ||
+        g.tags.some(t => t.includes(filter))
+      );
+
+      if (filtered.length === 0) {
+        sidebar.innerHTML = '<div class="sidebar-empty">未找到游戏</div>';
+        return;
+      }
+
+      const playTimes = getPlayTimes();
+
+      filtered.forEach(game => {
+        const pt = formatPlayTime(playTimes[game.id] || 0);
+        const item = document.createElement('div');
+        item.className = 'sidebar-item' + (selectedGame && selectedGame.id === game.id ? ' active' : '');
+        item.innerHTML = `
+          <div class="sidebar-icon">${game.icon}</div>
+          <div class="sidebar-info">
+            <span class="sidebar-name">${game.name}</span>
+            <span class="sidebar-genre">${game.genre}${pt ? ' · ' + pt : ''}</span>
+          </div>
+          <svg class="sidebar-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="9,6 15,12 9,18"/>
+          </svg>
+        `;
+        item.addEventListener('click', () => selectGame(game));
+        sidebar.appendChild(item);
+      });
+    }
+
+    function selectGame(game) {
+      selectedGame = game;
+      // 更新侧边栏高亮
+      document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+      event.currentTarget.classList.add('active');
+
+      // 隐藏欢迎屏，显示详情
+      welcomeScreen.style.display = 'none';
+      gameDetail.style.display = 'flex';
+      gameDetail.style.flexDirection = 'column';
+
+      // 填充内容
+      document.getElementById('detailName').textContent = game.name;
+      document.getElementById('heroIcon').textContent = game.icon;
+      document.getElementById('detailDesc').textContent = game.desc;
+
+      // 标签
+      const tagsEl = document.getElementById('detailTags');
+      tagsEl.innerHTML = game.tags.map(t => `<span class="tag">${t}</span>`).join('');
+
+      // 游戏信息
+      const pt = getPlayTimes();
+      const playTimeStr = formatPlayTime(pt[game.id] || 0) || '未游玩';
+      const infoEl = document.getElementById('detailInfo');
+      infoEl.innerHTML = `
+        <div class="info-item"><span class="info-label">类型</span><span class="info-value">${game.genre}</span></div>
+        <div class="info-item"><span class="info-label">视角</span><span class="info-value">${game.tags[1] || '—'}</span></div>
+        <div class="info-item"><span class="info-label">标签</span><span class="info-value">${game.tags.join(' / ')}</span></div>
+        <div class="info-item"><span class="info-label">游玩时长</span><span class="info-value">${playTimeStr}</span></div>
+        <div class="info-item"><span class="info-label">状态</span><span class="info-value status-ready">就绪</span></div>
+      `;
+
+      // 播放按钮
+      document.getElementById('playBtn').onclick = () => {
+        const pvp = document.getElementById('mpPvPCheck')?.checked;
+        const sep = game.file.includes('?') ? '&' : '?';
+        const gamePath = `games/${game.id}/${game.file}${pvp ? sep + 'pvp=1' : ''}`;
+        if (window.electronAPI && window.electronAPI.launchGame) {
+          window.electronAPI.launchGame(gamePath);
+        } else {
+          window.open(gamePath, '_blank');
+        }
+      };
+
+      // 动画
+      gameDetail.classList.remove('fade-in');
+      void gameDetail.offsetWidth;
+      gameDetail.classList.add('fade-in');
+    }
+
+    // 搜索
+    searchInput.addEventListener('input', (e) => {
+      renderSidebar(e.target.value);
+    });
+
+    // ===== 联机系统 =====
+    const mpPanel = document.getElementById('mpPanel');
+    const mpBtn = document.getElementById('mpBtn');
+    const mpCloseBtn = document.getElementById('mpCloseBtn');
+    let mpState = 'idle'; // idle | hosting | joined
+    let mpHostInfo = null; // { ip, port }
+    let mpPlayers = [];
+    let mpTeam = { host: 'red', join: 'red' };
+
+    function selectMpTeam(panel, team) {
+      mpTeam[panel] = team;
+      const redBtn = document.getElementById(panel === 'host' ? 'mpHostTeamRed' : 'mpJoinTeamRed');
+      const blueBtn = document.getElementById(panel === 'host' ? 'mpHostTeamBlue' : 'mpJoinTeamBlue');
+      if (team === 'red') {
+        redBtn.style.background = 'rgba(239,68,68,0.25)';
+        blueBtn.style.background = 'rgba(59,130,246,0.1)';
+      } else {
+        blueBtn.style.background = 'rgba(59,130,246,0.25)';
+        redBtn.style.background = 'rgba(239,68,68,0.1)';
+      }
+    }
+
+    mpBtn.addEventListener('click', () => {
+      mpPanel.style.display = mpPanel.style.display === 'none' ? 'block' : 'none';
+    });
+    mpCloseBtn.addEventListener('click', () => { mpPanel.style.display = 'none'; });
+
+    // 全屏按钮
+    document.getElementById('fullscreenBtn').addEventListener('click', () => {
+      if (window.electronAPI && window.electronAPI.toggleFullScreen) {
+        window.electronAPI.toggleFullScreen();
+      }
+    });
+
+    // Tab 切换
+    let roomScanTimer = null;
+    document.querySelectorAll('.mp-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        if (mpState !== 'idle') return;
+        document.querySelectorAll('.mp-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.mp-tab-content').forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById(tab.dataset.tab === 'host' ? 'mpHostTab' : 'mpJoinTab').classList.add('active');
+        // 切换到加入房间时开始扫描
+        if (tab.dataset.tab === 'join') {
+          scanRooms();
+          roomScanTimer = setInterval(scanRooms, 4000);
+        } else {
+          if (roomScanTimer) { clearInterval(roomScanTimer); roomScanTimer = null; }
+        }
+      });
+    });
+
+    async function scanRooms() {
+      const list = document.getElementById('mpRoomList');
+      if (!list) return;
+      if (!list.querySelector('.mp-room-item') && !list.querySelector('.scanning')) {
+        list.innerHTML = '<div class="scanning" style="color:#888;text-align:center;padding:12px;font-size:13px;">正在扫描局域网...</div>';
+      }
+      let myIP = '';
+      try {
+        if (window.electronAPI && window.electronAPI.mpGetIP) myIP = await window.electronAPI.mpGetIP();
+      } catch (e) {}
+      if (!myIP || myIP === '127.0.0.1') {
+        list.innerHTML = '<div style="color:#f44;text-align:center;padding:12px;font-size:13px;">无法获取本机局域网IP</div>';
+        return;
+      }
+      const parts = myIP.split('.');
+      if (parts.length !== 4) return;
+      const subnet = parts[0] + '.' + parts[1] + '.' + parts[2] + '.';
+      const found = [];
+      const promises = [];
+      for (let i = 1; i <= 254; i++) {
+        const ip = subnet + i;
+        promises.push(
+          fetch('http://' + ip + ':18765/mp-host-info', { signal: AbortSignal.timeout(1200) })
+            .then(r => r.json())
+            .then(data => { if (data && data.name) found.push(data); })
+            .catch(() => {})
+        );
+      }
+      await Promise.allSettled(promises);
+      renderRoomList(found, myIP);
+    }
+
+    function renderRoomList(rooms, myIP) {
+      const list = document.getElementById('mpRoomList');
+      if (!list) return;
+      if (rooms.length === 0) {
+        list.innerHTML = '<div style="color:#888;text-align:center;padding:12px;font-size:13px;">未发现房间<br><span style="color:#666;font-size:11px;">本机IP: ' + (myIP || '') + ' | 自动刷新中...</span></div>';
+        return;
+      }
+      list.innerHTML = rooms.map(r =>
+        `<div class="mp-room-item" data-ip="${r.ip}" data-port="${r.port}" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;margin:3px 0;background:rgba(102,126,234,0.1);border:1px solid rgba(102,126,234,0.25);border-radius:6px;cursor:pointer;transition:background 0.2s;" onmouseover="this.style.background='rgba(102,126,234,0.2)'" onmouseout="this.style.background='rgba(102,126,234,0.1)'">
+          <div><span style="color:#a855f7;font-weight:600;">${r.name}</span>${r.game ? '<span style="color:#888;font-size:12px;margin-left:8px;">' + r.game + '</span>' : ''}</div>
+          <span style="color:#666;font-size:12px;">${r.ip}</span>
+        </div>`
+      ).join('');
+      list.querySelectorAll('.mp-room-item').forEach(el => {
+        el.addEventListener('click', () => joinRoom(el.dataset.ip, parseInt(el.dataset.port)));
+      });
+    }
+
+    async function joinRoom(ip, port) {
+      if (!window.electronAPI || !window.electronAPI.mpJoin) {
+        alert('联机功能仅在 Electron 环境下可用');
+        return;
+      }
+      const name = document.getElementById('mpJoinName').value.trim() || '玩家2';
+      if (roomScanTimer) { clearInterval(roomScanTimer); roomScanTimer = null; }
+      try {
+        await window.electronAPI.mpJoin(ip, port, name);
+        mpState = 'joined';
+        mpPlayers = [];
+        document.getElementById('mpJoinForm').style.display = 'none';
+        document.getElementById('mpJoinConnected').style.display = 'block';
+        renderPlayerList();
+      } catch (e) {
+        alert('连接失败: ' + e.message);
+      }
+    }
+
+    // 监听消息
+    if (window.electronAPI && window.electronAPI.onMpMessage) {
+      window.electronAPI.onMpMessage((msg) => {
+        if (msg.type === 'player-list') {
+          // 一次性接收完整玩家列表，替换已有数据
+          mpPlayers = msg.players.map(p => ({ id: p.id, name: p.name }));
+          renderPlayerList();
+        } else if (msg.type === 'player-join') {
+          if (!mpPlayers.some(p => p.id === msg.id)) {
+            mpPlayers.push({ id: msg.id, name: msg.name });
+          }
+          renderPlayerList();
+        } else if (msg.type === 'player-leave') {
+          mpPlayers = mpPlayers.filter(p => p.id !== msg.id);
+          renderPlayerList();
+        } else if (msg.type === 'disconnected') {
+          mpState = 'idle';
+          mpPlayers = [];
+          showJoinForm();
+        } else if (msg.type === 'game-start' && mpState === 'joined' && selectedGame) {
+          // Host 开始了游戏，自动跳转
+          const team = mpTeam.join;
+          const sep = selectedGame.file.includes('?') ? '&' : '?';
+          let params = '';
+          if (team) params += 'team=' + team;
+          const gamePath = `games/${selectedGame.id}/${selectedGame.file}${params ? sep + params : ''}`;
+          if (window.electronAPI && window.electronAPI.launchGame) {
+            window.electronAPI.launchGame(gamePath);
+          }
+        }
+      });
+    }
+
+    function renderPlayerList() {
+      const list = document.getElementById(mpState === 'hosting' ? 'mpPlayerList' : 'mpJoinPlayerList');
+      if (!list) return;
+      let html = '';
+      if (mpState === 'hosting') {
+        html += '<div class="mp-player-item"><span class="mp-player-dot host"></span> 你 (主机)</div>';
+      }
+      mpPlayers.forEach(p => {
+        html += `<div class="mp-player-item"><span class="mp-player-dot"></span> ${p.name || 'Player ' + p.id}</div>`;
+      });
+      list.innerHTML = html;
+    }
+
+    // 创建房间
+    document.getElementById('mpCreateBtn').addEventListener('click', async () => {
+      if (!window.electronAPI || !window.electronAPI.mpHost) {
+        alert('联机功能仅在 Electron 环境下可用');
+        return;
+      }
+      try {
+        const name = document.getElementById('mpHostName').value.trim() || '玩家1';
+        mpHostInfo = await window.electronAPI.mpHost({ name });
+        mpState = 'hosting';
+        mpPlayers = [];
+        document.getElementById('mpHostSetup').style.display = 'none';
+        document.getElementById('mpHostInfo').style.display = 'block';
+        document.getElementById('mpRoomIP').textContent = mpHostInfo.ip;
+        document.getElementById('mpRoomPort').textContent = mpHostInfo.port;
+        // 创建成功提示
+        const tip = document.getElementById('mpCreateTip');
+        tip.textContent = '房间创建成功！将地址分享给好友即可加入';
+        tip.style.display = 'block';
+        tip.style.opacity = '1';
+        setTimeout(() => { tip.style.opacity = '0'; setTimeout(() => tip.style.display = 'none', 400); }, 3000);
+      } catch (e) {
+        alert('创建房间失败: ' + e.message);
+      }
+    });
+
+    // 复制 IP
+    document.getElementById('mpCopyIpBtn').addEventListener('click', () => {
+      const text = document.getElementById('mpRoomIP').textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        document.getElementById('mpCopyIpBtn').classList.add('copied');
+        setTimeout(() => document.getElementById('mpCopyIpBtn').classList.remove('copied'), 1500);
+      });
+    });
+    // 复制端口
+    document.getElementById('mpCopyPortBtn').addEventListener('click', () => {
+      const text = document.getElementById('mpRoomPort').textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        document.getElementById('mpCopyPortBtn').classList.add('copied');
+        setTimeout(() => document.getElementById('mpCopyPortBtn').classList.remove('copied'), 1500);
+      });
+    });
+
+    // 主机开始联机游戏
+    document.getElementById('mpStartBtn').addEventListener('click', () => {
+      if (!selectedGame) return;
+      const pvp = document.getElementById('mpPvPCheck').checked;
+      const team = mpTeam.host;
+      const sep = selectedGame.file.includes('?') ? '&' : '?';
+      let params = '';
+      if (pvp) params += 'pvp=1';
+      if (team) params += (params ? '&' : '') + 'team=' + team;
+      const gamePath = `games/${selectedGame.id}/${selectedGame.file}${params ? sep + params : ''}`;
+      if (window.electronAPI && window.electronAPI.launchGame) {
+        window.electronAPI.launchGame(gamePath);
+      }
+    });
+
+    // 主机关闭房间
+    document.getElementById('mpHostStopBtn').addEventListener('click', async () => {
+      if (window.electronAPI && window.electronAPI.mpStop) {
+        await window.electronAPI.mpStop();
+      }
+      mpState = 'idle';
+      mpPlayers = [];
+      document.getElementById('mpHostSetup').style.display = 'block';
+      document.getElementById('mpHostInfo').style.display = 'none';
+    });
+
+    // 修复防火墙按钮（仅 Windows 显示）
+    document.getElementById('mpFirewallBtn').addEventListener('click', async () => {
+      if (window.electronAPI && window.electronAPI.mpAddFirewall) {
+        const result = await window.electronAPI.mpAddFirewall();
+        alert(result.ok ? (result.msg || '防火墙规则已添加！其他玩家现在可以连接了。') : result.msg);
+      } else {
+        alert('请在防火墙中允许此应用通过网络。');
+      }
+    });
+
+    // 防火墙按钮：仅 Windows 显示
+    if (navigator.platform && navigator.platform.startsWith('Win')) {
+      document.getElementById('mpFirewallBtn').style.display = '';
+    }
+
+    // 加入房间
+    document.getElementById('mpJoinBtn').addEventListener('click', async () => {
+      if (!window.electronAPI || !window.electronAPI.mpJoin) {
+        alert('联机功能仅在 Electron 环境下可用');
+        return;
+      }
+      const ip = document.getElementById('mpJoinIp').value.trim();
+      const port = document.getElementById('mpJoinPort').value.trim();
+      const name = document.getElementById('mpJoinName').value.trim() || '玩家2';
+      const statusEl = document.getElementById('mpJoinStatus');
+
+      if (!ip || !port) {
+        statusEl.textContent = '请输入主机 IP 和端口';
+        statusEl.style.color = 'var(--red)';
+        return;
+      }
+      statusEl.textContent = '连接中...';
+      statusEl.style.color = 'var(--yellow)';
+
+      try {
+        await window.electronAPI.mpJoin(ip, parseInt(port), name);
+        mpState = 'joined';
+        mpPlayers = [];
+        document.getElementById('mpJoinForm').style.display = 'none';
+        document.getElementById('mpJoinConnected').style.display = 'block';
+        renderPlayerList();
+        statusEl.textContent = '已成功加入房间！';
+        statusEl.style.color = 'var(--green)';
+      } catch (e) {
+        statusEl.textContent = '连接失败: ' + e.message;
+        statusEl.style.color = 'var(--red)';
+      }
+    });
+
+    function showJoinForm() {
+      document.getElementById('mpJoinForm').style.display = 'block';
+      document.getElementById('mpJoinConnected').style.display = 'none';
+      document.getElementById('mpJoinStatus').textContent = '';
+    }
+
+    // 加入者断开
+    document.getElementById('mpJoinStopBtn').addEventListener('click', async () => {
+      if (window.electronAPI && window.electronAPI.mpStop) {
+        await window.electronAPI.mpStop();
+      }
+      mpState = 'idle';
+      mpPlayers = [];
+      showJoinForm();
+    });
+
+    // 初始化
+    renderSidebar();
+
+    // ===== 启动动画 =====
+    (function() {
+      const splash = document.getElementById('splashScreen');
+      // 非首次加载（从游戏返回）直接跳过动画
+      if (window.electronAPI && !window.electronAPI.isFirstLoad()) {
+        splash.remove();
+        return;
+      }
+      const bar = document.getElementById('splashBar');
+      const particles = document.getElementById('splashParticles');
+
+      // 粒子效果
+      for (let i = 0; i < 40; i++) {
+        const p = document.createElement('div');
+        p.className = 'splash-particle';
+        p.style.left = Math.random() * 100 + '%';
+        p.style.top = Math.random() * 100 + '%';
+        p.style.animationDelay = (Math.random() * 4) + 's';
+        p.style.animationDuration = (3 + Math.random() * 4) + 's';
+        p.style.width = p.style.height = (1 + Math.random() * 3) + 'px';
+        particles.appendChild(p);
+      }
+
+      // 进度条动画（约4秒完成）
+      let progress = 0;
+      const interval = setInterval(() => {
+        progress += Math.random() * 6 + 2;
+        if (progress >= 100) {
+          progress = 100;
+          bar.style.width = '100%';
+          clearInterval(interval);
+          // 完成，停留后淡出
+          setTimeout(() => {
+            splash.classList.add('splash-exit');
+            setTimeout(() => splash.remove(), 800);
+          }, 500);
+        } else {
+          bar.style.width = progress + '%';
+        }
+      }, 150);
+    })();
+  </script>
+</body>
+</html>

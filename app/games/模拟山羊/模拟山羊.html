@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模拟山羊 - Goat Simulator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+            background: #000;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #hud {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        #score {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 28px;
+            color: #FFD700;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8), 0 0 20px rgba(255,215,0,0.5);
+            font-weight: bold;
+        }
+
+        #combo {
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            font-size: 20px;
+            color: #FF6B6B;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        #speed {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            font-size: 18px;
+            color: #4ECDC4;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            font-size: 14px;
+            color: rgba(255,255,255,0.7);
+            text-align: right;
+            line-height: 1.6;
+        }
+
+        #message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 48px;
+            color: #FFD700;
+            text-shadow: 3px 3px 6px rgba(0,0,0,0.8);
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+
+        #stamina-bar {
+            position: absolute;
+            bottom: 60px;
+            left: 20px;
+            width: 200px;
+            height: 15px;
+            background: rgba(0,0,0,0.5);
+            border-radius: 10px;
+            overflow: hidden;
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+
+        #stamina-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #8BC34A);
+            width: 100%;
+            transition: width 0.1s;
+        }
+
+        .damage-popup {
+            position: absolute;
+            font-size: 24px;
+            font-weight: bold;
+            color: #FF6B6B;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            pointer-events: none;
+            animation: floatUp 1s ease-out forwards;
+        }
+
+        @keyframes floatUp {
+            0% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+            100% {
+                opacity: 0;
+                transform: translateY(-50px) scale(1.5);
+            }
+        }
+
+        #start-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 200;
+            pointer-events: auto;
+        }
+
+        #start-screen h1 {
+            font-size: 64px;
+            color: #FFD700;
+            text-shadow: 4px 4px 8px rgba(0,0,0,0.8), 0 0 30px rgba(255,215,0,0.3);
+            margin-bottom: 20px;
+        }
+
+        #start-screen p {
+            font-size: 20px;
+            color: rgba(255,255,255,0.7);
+            margin-bottom: 40px;
+        }
+
+        #start-btn {
+            padding: 15px 50px;
+            font-size: 24px;
+            background: linear-gradient(135deg, #FFD700, #FFA500);
+            border: none;
+            border-radius: 30px;
+            color: #1a1a2e;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.3s, box-shadow 0.3s;
+            pointer-events: auto;
+        }
+
+        #start-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 0 30px rgba(255,215,0,0.5);
+        }
+
+        .goat-icon {
+            font-size: 100px;
+            margin-bottom: 20px;
+        }
+        #saveMsg { position:fixed; top:60px; left:50%; transform:translateX(-50%);
+          color:#0f0; font-size:16px; pointer-events:none; opacity:0;
+          text-shadow:0 0 4px #0f0; font-family:monospace; z-index:9999;
+          transition:opacity 0.3s; }
+    </style>
+</head>
+<body>
+    <div id="saveMsg"></div>
+    <div id="start-screen">
+        <div class="goat-icon">🐐</div>
+        <h1>模拟山羊</h1>
+        <p>在城市中尽情破坏吧！</p>
+        <button id="start-btn">开始游戏</button>
+    </div>
+
+    <div id="hud">
+        <div id="score">分数: <span id="score-value">0</span></div>
+        <div id="combo"></div>
+        <div id="speed">速度: <span id="speed-value">0</span> km/h</div>
+        <div id="stamina-bar">
+            <div id="stamina-fill"></div>
+        </div>
+        <div id="controls">
+            WASD - 移动<br>
+            空格 - 跳跃/冲撞<br>
+            Shift - 冲刺<br>
+            鼠标 - 视角
+        </div>
+        <div id="message"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <script>
+        // 游戏配置
+        const CONFIG = {
+            goat: {
+                size: { width: 1.2, height: 1, depth: 2 },
+                moveSpeed: 15,
+                sprintMultiplier: 2,
+                jumpForce: 12,
+                chargeForce: 50,
+                mass: 80
+            },
+            physics: {
+                gravity: -30,
+                friction: 0.3,
+                restitution: 0.2
+            },
+            world: {
+                size: 200,
+                buildingCount: 30
+            },
+            camera: {
+                distance: 8,
+                height: 4,
+                smoothing: 0.1
+            }
+        };
+
+        // 游戏状态
+        let score = 0;
+        let highScore = parseInt(localStorage.getItem('goatSim_save')) || 0;
+        function showSaveToast(msg) {
+            const sm = document.getElementById('saveMsg');
+            sm.textContent = msg; sm.style.opacity = 1;
+            setTimeout(() => sm.style.opacity = 0, 1500);
+        }
+        function saveGameGoat() {
+            if (score > highScore) highScore = score;
+            try { localStorage.setItem('goatSim_save', highScore); showSaveToast('已保存 最高分: ' + highScore); } catch(e){}
+        }
+        function loadGameGoat() { showSaveToast('最高分: ' + highScore); }
+        document.addEventListener('keydown', e => {
+            if (e.code === 'F5') { e.preventDefault(); saveGameGoat(); }
+            if (e.code === 'F9') { e.preventDefault(); loadGameGoat(); }
+        });
+        let combo = 0;
+        let comboTimer = null;
+        let stamina = 100;
+        let isCharging = false;
+        let gameStarted = false;
+
+        // Three.js 变量
+        let scene, camera, renderer;
+        let goatMesh, goatGroup;
+        let clock = new THREE.Clock();
+
+        // Cannon.js 变量
+        let world;
+        let goatBody;
+        let physicsBodies = [];
+        let meshes = [];
+
+        // 输入状态
+        const keys = {};
+        let mouseX = 0, mouseY = 0;
+        let cameraAngleY = 0;
+        let cameraAngleX = 0.3;
+
+        // 可破坏物体
+        let destructibles = [];
+
+        // 初始化游戏
+        function init() {
+            // 创建Three.js场景
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.Fog(0x87CEEB, 50, 200);
+
+            // 创建相机
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 500);
+            camera.position.set(0, 10, 15);
+
+            // 创建渲染器
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.body.appendChild(renderer.domElement);
+
+            // 添加光照
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(50, 100, 50);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 500;
+            directionalLight.shadow.camera.left = -100;
+            directionalLight.shadow.camera.right = 100;
+            directionalLight.shadow.camera.top = 100;
+            directionalLight.shadow.camera.bottom = -100;
+            scene.add(directionalLight);
+
+            // 初始化物理世界
+            initPhysics();
+
+            // 创建地面
+            createGround();
+
+            // 创建山羊
+            createGoat();
+
+            // 创建城市
+            createCity();
+
+            // 添加装饰物
+            createDecorations();
+
+            // 事件监听
+            setupEventListeners();
+
+            // 开始按钮
+            document.getElementById('start-btn').addEventListener('click', startGame);
+        }
+
+        function initPhysics() {
+            world = new CANNON.World();
+            world.gravity.set(0, CONFIG.physics.gravity, 0);
+            world.broadphase = new CANNON.NaiveBroadphase();
+            world.solver.iterations = 10;
+
+            // 添加默认材质
+            const defaultMaterial = new CANNON.Material('default');
+            const defaultContactMaterial = new CANNON.ContactMaterial(
+                defaultMaterial,
+                defaultMaterial,
+                {
+                    friction: CONFIG.physics.friction,
+                    restitution: CONFIG.physics.restitution
+                }
+            );
+            world.addContactMaterial(defaultContactMaterial);
+            world.defaultContactMaterial = defaultContactMaterial;
+        }
+
+        function createGround() {
+            // Three.js地面
+            const groundGeometry = new THREE.PlaneGeometry(CONFIG.world.size * 2, CONFIG.world.size * 2);
+            const groundMaterial = new THREE.MeshStandardMaterial({
+                color: 0x3d5c3d,
+                roughness: 0.8
+            });
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // 添加道路纹理
+            createRoads();
+
+            // Cannon.js地面
+            const groundShape = new CANNON.Plane();
+            const groundBody = new CANNON.Body({ mass: 0 });
+            groundBody.addShape(groundShape);
+            groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+            world.addBody(groundBody);
+        }
+
+        function createRoads() {
+            const roadMaterial = new THREE.MeshStandardMaterial({
+                color: 0x333333,
+                roughness: 0.9
+            });
+
+            // 主道路
+            for (let i = -3; i <= 3; i++) {
+                // 横向道路
+                const roadH = new THREE.Mesh(
+                    new THREE.PlaneGeometry(CONFIG.world.size * 2, 8),
+                    roadMaterial
+                );
+                roadH.rotation.x = -Math.PI / 2;
+                roadH.position.set(0, 0.01, i * 25);
+                scene.add(roadH);
+
+                // 纵向道路
+                const roadV = new THREE.Mesh(
+                    new THREE.PlaneGeometry(8, CONFIG.world.size * 2),
+                    roadMaterial
+                );
+                roadV.rotation.x = -Math.PI / 2;
+                roadV.position.set(i * 25, 0.01, 0);
+                scene.add(roadV);
+            }
+        }
+
+        function createGoat() {
+            goatGroup = new THREE.Group();
+
+            // 身体
+            const bodyGeometry = new THREE.BoxGeometry(
+                CONFIG.goat.size.width,
+                CONFIG.goat.size.height,
+                CONFIG.goat.size.depth
+            );
+            const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xF5F5DC });
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.position.y = CONFIG.goat.size.height / 2;
+            body.castShadow = true;
+            goatGroup.add(body);
+
+            // 头部
+            const headGeometry = new THREE.BoxGeometry(0.6, 0.6, 0.8);
+            const head = new THREE.Mesh(headGeometry, bodyMaterial);
+            head.position.set(0, 1, 1.2);
+            head.castShadow = true;
+            goatGroup.add(head);
+
+            // 角
+            const hornGeometry = new THREE.ConeGeometry(0.1, 0.5, 8);
+            const hornMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+
+            const leftHorn = new THREE.Mesh(hornGeometry, hornMaterial);
+            leftHorn.position.set(-0.25, 1.4, 1.1);
+            leftHorn.rotation.z = -0.3;
+            goatGroup.add(leftHorn);
+
+            const rightHorn = new THREE.Mesh(hornGeometry, hornMaterial);
+            rightHorn.position.set(0.25, 1.4, 1.1);
+            rightHorn.rotation.z = 0.3;
+            goatGroup.add(rightHorn);
+
+            // 耳朵
+            const earGeometry = new THREE.BoxGeometry(0.15, 0.3, 0.1);
+            const leftEar = new THREE.Mesh(earGeometry, bodyMaterial);
+            leftEar.position.set(-0.35, 1.2, 1);
+            leftEar.rotation.z = -0.5;
+            goatGroup.add(leftEar);
+
+            const rightEar = new THREE.Mesh(earGeometry, bodyMaterial);
+            rightEar.position.set(0.35, 1.2, 1);
+            rightEar.rotation.z = 0.5;
+            goatGroup.add(rightEar);
+
+            // 腿
+            const legGeometry = new THREE.BoxGeometry(0.2, 0.6, 0.2);
+            const legPositions = [
+                [-0.4, 0.3, 0.6],   // 前左
+                [0.4, 0.3, 0.6],    // 前右
+                [-0.4, 0.3, -0.6],  // 后左
+                [0.4, 0.3, -0.6]    // 后右
+            ];
+
+            legPositions.forEach(pos => {
+                const leg = new THREE.Mesh(legGeometry, bodyMaterial);
+                leg.position.set(...pos);
+                leg.castShadow = true;
+                goatGroup.add(leg);
+            });
+
+            // 尾巴
+            const tailGeometry = new THREE.BoxGeometry(0.15, 0.4, 0.15);
+            const tail = new THREE.Mesh(tailGeometry, bodyMaterial);
+            tail.position.set(0, 1, -1.2);
+            tail.rotation.x = 0.5;
+            goatGroup.add(tail);
+
+            scene.add(goatGroup);
+
+            // Cannon.js物理体
+            const goatShape = new CANNON.Box(new CANNON.Vec3(
+                CONFIG.goat.size.width / 2,
+                CONFIG.goat.size.height / 2,
+                CONFIG.goat.size.depth / 2
+            ));
+            goatBody = new CANNON.Body({
+                mass: CONFIG.goat.mass,
+                position: new CANNON.Vec3(0, 3, 0),
+                angularDamping: 0.9,
+                linearDamping: 0.5
+            });
+            goatBody.addShape(goatShape);
+            world.addBody(goatBody);
+
+            // 碰撞事件
+            goatBody.addEventListener('collide', handleGoatCollision);
+        }
+
+        function createCity() {
+            const buildingMaterials = [
+                new THREE.MeshStandardMaterial({ color: 0x808080 }),
+                new THREE.MeshStandardMaterial({ color: 0x696969 }),
+                new THREE.MeshStandardMaterial({ color: 0xA9A9A9 }),
+                new THREE.MeshStandardMaterial({ color: 0x778899 })
+            ];
+
+            // 在道路交叉口之外创建建筑
+            for (let i = 0; i < CONFIG.world.buildingCount; i++) {
+                let x, z;
+                do {
+                    x = (Math.random() - 0.5) * CONFIG.world.size * 1.5;
+                    z = (Math.random() - 0.5) * CONFIG.world.size * 1.5;
+                } while (Math.abs(x % 25) < 8 || Math.abs(z % 25) < 8); // 避开道路
+
+                const width = 3 + Math.random() * 5;
+                const height = 3 + Math.random() * 15;
+                const depth = 3 + Math.random() * 5;
+
+                createBuilding(x, z, width, height, depth, buildingMaterials);
+            }
+
+            // 创建可破坏物体
+            createDestructibles();
+        }
+
+        function createBuilding(x, z, width, height, depth, materials) {
+            const geometry = new THREE.BoxGeometry(width, height, depth);
+            const material = materials[Math.floor(Math.random() * materials.length)].clone();
+            const building = new THREE.Mesh(geometry, material);
+            building.position.set(x, height / 2, z);
+            building.castShadow = true;
+            building.receiveShadow = true;
+
+            // 添加窗户
+            addWindows(building, width, height, depth);
+
+            scene.add(building);
+
+            // 静态物理体
+            const shape = new CANNON.Box(new CANNON.Vec3(width / 2, height / 2, depth / 2));
+            const body = new CANNON.Body({ mass: 0 });
+            body.addShape(shape);
+            body.position.set(x, height / 2, z);
+            world.addBody(body);
+        }
+
+        function addWindows(building, width, height, depth) {
+            const windowMaterial = new THREE.MeshStandardMaterial({
+                color: 0x87CEEB,
+                emissive: 0x222244,
+                emissiveIntensity: 0.3
+            });
+
+            const windowSize = 0.8;
+            const spacing = 2;
+
+            // 前后面窗户
+            for (let y = 1; y < height - 1; y += spacing) {
+                for (let x = -width / 2 + 1; x < width / 2 - 0.5; x += spacing) {
+                    // 前面
+                    const windowFront = new THREE.Mesh(
+                        new THREE.PlaneGeometry(windowSize, windowSize),
+                        windowMaterial
+                    );
+                    windowFront.position.set(x, y - height / 2, depth / 2 + 0.01);
+                    building.add(windowFront);
+
+                    // 后面
+                    const windowBack = new THREE.Mesh(
+                        new THREE.PlaneGeometry(windowSize, windowSize),
+                        windowMaterial
+                    );
+                    windowBack.position.set(x, y - height / 2, -depth / 2 - 0.01);
+                    windowBack.rotation.y = Math.PI;
+                    building.add(windowBack);
+                }
+            }
+        }
+
+        function createDestructibles() {
+            // 创建各种可破坏物体
+            const types = [
+                { type: 'barrel', color: 0x8B4513, size: { r: 0.5, h: 1 }, mass: 30 },
+                { type: 'crate', color: 0xDEB887, size: { w: 1, h: 1, d: 1 }, mass: 20 },
+                { type: 'car', color: 0xFF0000, size: { w: 2, h: 1, d: 4 }, mass: 1000 },
+                { type: 'fence', color: 0x8B4513, size: { w: 0.1, h: 1.2, d: 2 }, mass: 15 },
+                { type: 'trashcan', color: 0x2F4F4F, size: { r: 0.4, h: 0.8 }, mass: 10 },
+                { type: 'haybale', color: 0xDAA520, size: { r: 0.6, h: 0.8 }, mass: 50 }
+            ];
+
+            for (let i = 0; i < 100; i++) {
+                const typeData = types[Math.floor(Math.random() * types.length)];
+                let x, z;
+                do {
+                    x = (Math.random() - 0.5) * CONFIG.world.size * 1.5;
+                    z = (Math.random() - 0.5) * CONFIG.world.size * 1.5;
+                } while (Math.abs(x % 25) < 5 && Math.abs(z % 25) < 5);
+
+                createDestructible(typeData, x, z);
+            }
+        }
+
+        function createDestructible(typeData, x, z) {
+            let mesh, shape;
+
+            switch (typeData.type) {
+                case 'barrel':
+                case 'trashcan':
+                case 'haybale':
+                    mesh = new THREE.Mesh(
+                        new THREE.CylinderGeometry(typeData.size.r, typeData.size.r, typeData.size.h, 16),
+                        new THREE.MeshStandardMaterial({ color: typeData.color })
+                    );
+                    shape = new CANNON.Cylinder(
+                        typeData.size.r, typeData.size.r, typeData.size.h, 16
+                    );
+                    break;
+
+                case 'car':
+                    mesh = new THREE.Group();
+                    // 车身
+                    const bodyMesh = new THREE.Mesh(
+                        new THREE.BoxGeometry(typeData.size.w, typeData.size.h * 0.6, typeData.size.d),
+                        new THREE.MeshStandardMaterial({ color: typeData.color })
+                    );
+                    bodyMesh.position.y = typeData.size.h * 0.3;
+                    mesh.add(bodyMesh);
+                    // 车顶
+                    const topMesh = new THREE.Mesh(
+                        new THREE.BoxGeometry(typeData.size.w * 0.8, typeData.size.h * 0.4, typeData.size.d * 0.5),
+                        new THREE.MeshStandardMaterial({ color: typeData.color })
+                    );
+                    topMesh.position.y = typeData.size.h * 0.7;
+                    topMesh.position.z = -typeData.size.d * 0.1;
+                    mesh.add(topMesh);
+                    // 轮子
+                    const wheelGeom = new THREE.CylinderGeometry(0.3, 0.3, 0.2, 16);
+                    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+                    [[-0.8, 0.3, 1.2], [0.8, 0.3, 1.2], [-0.8, 0.3, -1.2], [0.8, 0.3, -1.2]].forEach(pos => {
+                        const wheel = new THREE.Mesh(wheelGeom, wheelMat);
+                        wheel.rotation.z = Math.PI / 2;
+                        wheel.position.set(...pos);
+                        mesh.add(wheel);
+                    });
+                    shape = new CANNON.Box(new CANNON.Vec3(
+                        typeData.size.w / 2, typeData.size.h / 2, typeData.size.d / 2
+                    ));
+                    break;
+
+                default: // crate, fence
+                    mesh = new THREE.Mesh(
+                        new THREE.BoxGeometry(typeData.size.w, typeData.size.h, typeData.size.d),
+                        new THREE.MeshStandardMaterial({ color: typeData.color })
+                    );
+                    shape = new CANNON.Box(new CANNON.Vec3(
+                        typeData.size.w / 2, typeData.size.h / 2, typeData.size.d / 2
+                    ));
+            }
+
+            mesh.position.set(x, typeData.size.h / 2 + 0.1, z);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.userData = {
+                type: typeData.type,
+                points: typeData.mass,
+                originalColor: typeData.color
+            };
+            scene.add(mesh);
+
+            const body = new CANNON.Body({
+                mass: typeData.mass,
+                position: new CANNON.Vec3(x, typeData.size.h / 2 + 0.1, z),
+                angularDamping: 0.5,
+                linearDamping: 0.3
+            });
+            body.addShape(shape);
+            world.addBody(body);
+
+            destructibles.push({ mesh, body, hit: false });
+        }
+
+        function createDecorations() {
+            // 树木
+            for (let i = 0; i < 30; i++) {
+                let x, z;
+                do {
+                    x = (Math.random() - 0.5) * CONFIG.world.size * 1.8;
+                    z = (Math.random() - 0.5) * CONFIG.world.size * 1.8;
+                } while (Math.abs(x % 25) < 8 || Math.abs(z % 25) < 8);
+
+                createTree(x, z);
+            }
+
+            // 路灯
+            for (let i = -3; i <= 3; i++) {
+                for (let j = -3; j <= 3; j++) {
+                    createStreetLight(i * 25 + 5, j * 25 + 5);
+                    createStreetLight(i * 25 - 5, j * 25 - 5);
+                }
+            }
+        }
+
+        function createTree(x, z) {
+            const tree = new THREE.Group();
+
+            // 树干
+            const trunk = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.3, 0.4, 3, 8),
+                new THREE.MeshStandardMaterial({ color: 0x8B4513 })
+            );
+            trunk.position.y = 1.5;
+            trunk.castShadow = true;
+            tree.add(trunk);
+
+            // 树冠
+            const leaves = new THREE.Mesh(
+                new THREE.ConeGeometry(2, 4, 8),
+                new THREE.MeshStandardMaterial({ color: 0x228B22 })
+            );
+            leaves.position.y = 5;
+            leaves.castShadow = true;
+            tree.add(leaves);
+
+            tree.position.set(x, 0, z);
+            scene.add(tree);
+
+            // 树干碰撞体
+            const shape = new CANNON.Cylinder(0.4, 0.4, 3, 8);
+            const body = new CANNON.Body({ mass: 0 });
+            body.addShape(shape);
+            body.position.set(x, 1.5, z);
+            world.addBody(body);
+        }
+
+        function createStreetLight(x, z) {
+            const lamp = new THREE.Group();
+
+            // 灯杆
+            const pole = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.1, 0.15, 6, 8),
+                new THREE.MeshStandardMaterial({ color: 0x333333 })
+            );
+            pole.position.y = 3;
+            lamp.add(pole);
+
+            // 灯头
+            const light = new THREE.Mesh(
+                new THREE.SphereGeometry(0.3, 16, 16),
+                new THREE.MeshStandardMaterial({
+                    color: 0xFFFF00,
+                    emissive: 0xFFFF00,
+                    emissiveIntensity: 0.5
+                })
+            );
+            light.position.y = 6;
+            lamp.add(light);
+
+            lamp.position.set(x, 0, z);
+            scene.add(lamp);
+        }
+
+        function setupEventListeners() {
+            // 键盘事件
+            document.addEventListener('keydown', (e) => {
+                keys[e.code] = true;
+                if (e.code === 'Space' && gameStarted) {
+                    e.preventDefault();
+                    if (goatBody.position.y < 1.5) {
+                        jump();
+                    }
+                }
+            });
+
+            document.addEventListener('keyup', (e) => {
+                keys[e.code] = false;
+            });
+
+            // 鼠标事件
+            document.addEventListener('mousemove', (e) => {
+                if (document.pointerLockElement === renderer.domElement) {
+                    cameraAngleY -= e.movementX * 0.003;
+                    cameraAngleX -= e.movementY * 0.003;
+                    cameraAngleX = Math.max(0.1, Math.min(1.2, cameraAngleX));
+                }
+            });
+
+            renderer.domElement.addEventListener('click', () => {
+                if (gameStarted) {
+                    renderer.domElement.requestPointerLock();
+                }
+            });
+
+            // 窗口调整
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        function startGame() {
+            document.getElementById('start-screen').style.display = 'none';
+            gameStarted = true;
+            renderer.domElement.requestPointerLock();
+            animate();
+        }
+
+        function jump() {
+            if (stamina >= 10) {
+                goatBody.velocity.y = CONFIG.goat.jumpForce;
+                stamina -= 10;
+                updateStaminaBar();
+            }
+        }
+
+        function handleGoatCollision(event) {
+            const velocity = goatBody.velocity;
+            const speed = Math.sqrt(velocity.x ** 2 + velocity.z ** 2);
+
+            if (speed > 5 || isCharging) {
+                // 检测碰撞的可破坏物体
+                destructibles.forEach(obj => {
+                    if (!obj.hit) {
+                        const dist = goatBody.position.distanceTo(obj.body.position);
+                        if (dist < 3) {
+                            obj.hit = true;
+                            hitDestructible(obj);
+                        }
+                    }
+                });
+            }
+        }
+
+        function hitDestructible(obj) {
+            const velocity = goatBody.velocity;
+            const impactForce = Math.sqrt(velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2);
+
+            // 计算分数
+            const points = Math.floor(obj.mesh.userData.points * (1 + impactForce / 10));
+            addScore(points, obj.mesh.position);
+
+            // 施加冲击力
+            const force = new CANNON.Vec3(
+                velocity.x * 5,
+                impactForce * 2,
+                velocity.z * 5
+            );
+            obj.body.applyImpulse(force, obj.body.position);
+
+            // 视觉效果
+            obj.mesh.material = obj.mesh.material.clone();
+            obj.mesh.material.emissive = new THREE.Color(0xFF6600);
+            obj.mesh.material.emissiveIntensity = 0.5;
+
+            setTimeout(() => {
+                if (obj.mesh.material) {
+                    obj.mesh.material.emissiveIntensity = 0;
+                }
+            }, 200);
+
+            // 创建粒子效果
+            createImpactParticles(obj.mesh.position);
+
+            // 重置hit状态
+            setTimeout(() => {
+                obj.hit = false;
+            }, 500);
+        }
+
+        function createImpactParticles(position) {
+            const particleCount = 15;
+            const particles = [];
+
+            for (let i = 0; i < particleCount; i++) {
+                const particle = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.1 + Math.random() * 0.1, 8, 8),
+                    new THREE.MeshBasicMaterial({
+                        color: Math.random() > 0.5 ? 0xFF6600 : 0xFFFF00,
+                        transparent: true
+                    })
+                );
+
+                particle.position.copy(position);
+                particle.userData = {
+                    velocity: new THREE.Vector3(
+                        (Math.random() - 0.5) * 10,
+                        Math.random() * 8,
+                        (Math.random() - 0.5) * 10
+                    ),
+                    life: 1.0
+                };
+
+                scene.add(particle);
+                particles.push(particle);
+            }
+
+            // 动画粒子
+            function animateParticles() {
+                particles.forEach((p, index) => {
+                    p.position.add(p.userData.velocity.clone().multiplyScalar(0.02));
+                    p.userData.velocity.y -= 0.3;
+                    p.userData.life -= 0.03;
+                    p.material.opacity = p.userData.life;
+
+                    if (p.userData.life <= 0) {
+                        scene.remove(p);
+                        particles.splice(index, 1);
+                    }
+                });
+
+                if (particles.length > 0) {
+                    requestAnimationFrame(animateParticles);
+                }
+            }
+            animateParticles();
+        }
+
+        function addScore(points, position) {
+            score += points;
+            document.getElementById('score-value').textContent = score;
+
+            // 连击系统
+            combo++;
+            clearTimeout(comboTimer);
+            comboTimer = setTimeout(() => {
+                combo = 0;
+                document.getElementById('combo').style.opacity = 0;
+            }, 2000);
+
+            if (combo > 1) {
+                document.getElementById('combo').textContent = `${combo}x 连击!`;
+                document.getElementById('combo').style.opacity = 1;
+            }
+
+            // 显示分数弹出
+            showDamagePopup(points, position);
+
+            // 特殊消息
+            if (points > 100) {
+                showMessage('太棒了!');
+            } else if (points > 50) {
+                showMessage('漂亮!');
+            }
+        }
+
+        function showDamagePopup(points, position) {
+            const popup = document.createElement('div');
+            popup.className = 'damage-popup';
+            popup.textContent = `+${points}`;
+
+            // 3D位置转2D屏幕位置
+            const vector = position.clone();
+            vector.project(camera);
+            popup.style.left = ((vector.x + 1) / 2 * window.innerWidth) + 'px';
+            popup.style.top = ((-vector.y + 1) / 2 * window.innerHeight) + 'px';
+
+            document.getElementById('hud').appendChild(popup);
+
+            setTimeout(() => popup.remove(), 1000);
+        }
+
+        function showMessage(text) {
+            const msg = document.getElementById('message');
+            msg.textContent = text;
+            msg.style.opacity = 1;
+            setTimeout(() => {
+                msg.style.opacity = 0;
+            }, 1000);
+        }
+
+        function updateStaminaBar() {
+            document.getElementById('stamina-fill').style.width = stamina + '%';
+        }
+
+        function updateGoat(delta) {
+            if (!gameStarted) return;
+
+            // 计算移动方向
+            const moveDirection = new THREE.Vector3();
+
+            if (keys['KeyW']) moveDirection.z -= 1;
+            if (keys['KeyS']) moveDirection.z += 1;
+            if (keys['KeyA']) moveDirection.x -= 1;
+            if (keys['KeyD']) moveDirection.x += 1;
+
+            if (moveDirection.length() > 0) {
+                moveDirection.normalize();
+
+                // 根据相机方向旋转移动
+                moveDirection.applyAxisAngle(new THREE.Vector3(0, 1, 0), cameraAngleY);
+
+                // 检查冲刺
+                let speed = CONFIG.goat.moveSpeed;
+                if (keys['ShiftLeft'] && stamina > 0) {
+                    speed *= CONFIG.goat.sprintMultiplier;
+                    stamina = Math.max(0, stamina - 30 * delta);
+                    updateStaminaBar();
+                } else {
+                    stamina = Math.min(100, stamina + 10 * delta);
+                    updateStaminaBar();
+                }
+
+                // 应用力
+                goatBody.velocity.x = moveDirection.x * speed;
+                goatBody.velocity.z = moveDirection.z * speed;
+
+                // 旋转山羊朝向移动方向
+                const targetRotation = Math.atan2(moveDirection.x, moveDirection.z);
+                const currentRotation = goatGroup.rotation.y;
+                goatGroup.rotation.y = currentRotation + (targetRotation - currentRotation) * 0.1;
+            }
+
+            // 冲撞
+            isCharging = keys['Space'] && stamina >= 20;
+            if (isCharging) {
+                const chargeDir = new THREE.Vector3(0, 0, -1);
+                chargeDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), goatGroup.rotation.y);
+
+                goatBody.velocity.x += chargeDir.x * CONFIG.goat.chargeForce * delta;
+                goatBody.velocity.z += chargeDir.z * CONFIG.goat.chargeForce * delta;
+
+                stamina = Math.max(0, stamina - 50 * delta);
+                updateStaminaBar();
+            }
+
+            // 更新速度显示
+            const speed = Math.sqrt(goatBody.velocity.x ** 2 + goatBody.velocity.z ** 2);
+            document.getElementById('speed-value').textContent = Math.floor(speed * 3.6);
+
+            // 同步Three.js和Cannon.js
+            goatGroup.position.copy(goatBody.position);
+            goatGroup.position.y -= CONFIG.goat.size.height / 2;
+
+            // 保持山羊直立
+            goatBody.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), goatGroup.rotation.y);
+        }
+
+        function updateCamera() {
+            const cameraOffset = new THREE.Vector3(
+                Math.sin(cameraAngleY) * CONFIG.camera.distance * Math.cos(cameraAngleX),
+                CONFIG.camera.distance * Math.sin(cameraAngleX),
+                Math.cos(cameraAngleY) * CONFIG.camera.distance * Math.cos(cameraAngleX)
+            );
+
+            const targetPosition = goatGroup.position.clone().add(cameraOffset);
+            camera.position.lerp(targetPosition, CONFIG.camera.smoothing);
+
+            const lookTarget = goatGroup.position.clone();
+            lookTarget.y += 1;
+            camera.lookAt(lookTarget);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = Math.min(clock.getDelta(), 0.1);
+
+            // 更新物理
+            world.step(1 / 60, delta, 3);
+
+            // 更新游戏对象
+            updateGoat(delta);
+            updateCamera();
+
+            // 更新可破坏物体位置
+            destructibles.forEach(obj => {
+                obj.mesh.position.copy(obj.body.position);
+                obj.mesh.quaternion.copy(obj.body.quaternion);
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        // 初始化
+        init();
+    </script>
+</body>
+</html>

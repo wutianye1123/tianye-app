@@ -1,0 +1,52 @@
+{
+  "name": "game-center",
+  "version": "2.0.0",
+  "description": "游戏中心 - 全部游戏合集",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win",
+    "build:mac": "electron-builder --mac"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.game.center",
+    "productName": "游戏中心",
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["universal"]
+        },
+        {
+          "target": "zip",
+          "arch": ["universal"]
+        }
+      ],
+      "category": "public.app-category.games",
+      "artifactName": "${productName}-${version}-Mac.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "launcher.html",
+      "launcher.css",
+      "games/**/*"
+    ]
+  },
+  "dependencies": {
+    "ws": "^8.20.0"
+  }
+}

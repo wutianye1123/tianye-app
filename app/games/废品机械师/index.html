@@ -1,0 +1,2906 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>废品机械师</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #1a1a2e; font-family: 'Microsoft YaHei', sans-serif; color: #eee; user-select: none; cursor: none; }
+canvas { display: block; cursor: none; }
+body.show-cursor, body.show-cursor canvas { cursor: default; }
+
+#toolbar {
+  position: fixed; top: 0; left: 0; right: 0; height: 48px;
+  background: rgba(20,20,40,0.92); display: flex; align-items: center;
+  padding: 0 12px; gap: 6px; z-index: 10; border-bottom: 1px solid #333;
+}
+.tool-btn, .part-btn, .side-btn, .cat-tab { outline: none; }
+.tool-btn:focus, .part-btn:focus, .side-btn:focus, .cat-tab:focus { outline: none; }
+  padding: 6px 16px; border: 1px solid #555; border-radius: 6px;
+  background: rgba(50,50,80,0.7); color: #ccc; cursor: pointer;
+  font-size: 13px; transition: all 0.15s;
+}
+.tool-btn:hover { background: rgba(80,80,120,0.8); color: #fff; }
+.tool-btn.active { background: rgba(100,140,255,0.5); border-color: #6688ff; color: #fff; }
+#fps { margin-left: auto; font-size: 12px; color: #888; }
+#mode-label { font-size: 12px; color: #88aaff; margin-right: 8px; }
+
+#sidebar {
+  position: fixed; top: 48px; left: 0; width: 148px; bottom: 32px;
+  background: rgba(20,20,40,0.92); z-index: 10; padding: 6px;
+  display: flex; flex-direction: column; gap: 4px; overflow-y: auto;
+  border-right: 1px solid #333;
+}
+#cat-tabs {
+  display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 4px;
+}
+.cat-tab {
+  padding: 3px 8px; border: 1px solid #444; border-radius: 4px;
+  background: rgba(50,50,80,0.5); color: #999; cursor: pointer;
+  font-size: 11px; transition: all 0.15s;
+}
+.cat-tab:hover { background: rgba(80,80,120,0.6); color: #fff; }
+.cat-tab.active { background: rgba(100,140,255,0.5); border-color: #6688ff; color: #fff; }
+#part-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
+}
+.part-btn {
+  height: 54px; border: 1px solid #444; border-radius: 6px;
+  background: rgba(50,50,80,0.5); cursor: pointer; display: flex;
+  flex-direction: column; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.part-btn:hover { background: rgba(80,80,120,0.6); }
+.part-btn.active { background: rgba(100,140,255,0.4); border-color: #6688ff; }
+.part-btn canvas { width: 32px; height: 28px; pointer-events: none; }
+.part-btn span { font-size: 10px; color: #aaa; margin-top: 2px; }
+
+.side-sep { height: 1px; background: #444; margin: 4px 0; }
+.side-btn {
+  width: 60px; height: 32px; border: 1px solid #444; border-radius: 6px;
+  background: rgba(50,50,80,0.5); cursor: pointer; color: #aaa;
+  font-size: 11px; transition: all 0.15s; display: flex;
+  align-items: center; justify-content: center;
+}
+.side-btn:hover { background: rgba(80,80,120,0.6); color: #fff; }
+
+#helpbar {
+  position: fixed; bottom: 0; left: 0; right: 0; height: 32px;
+  background: rgba(20,20,40,0.92); display: flex; align-items: center;
+  padding: 0 12px; gap: 16px; z-index: 10; font-size: 11px; color: #777;
+  border-top: 1px solid #333;
+}
+#helpbar kbd { background: #333; padding: 1px 5px; border-radius: 3px; color: #aaa; font-size: 10px; }
+
+#notification {
+  position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+  background: rgba(40,80,200,0.85); padding: 8px 20px; border-radius: 8px;
+  font-size: 13px; z-index: 20; display: none; pointer-events: none;
+  animation: fadeInOut 2s ease;
+}
+@keyframes fadeInOut { 0%{opacity:0;transform:translateX(-50%) translateY(-10px)} 15%{opacity:1;transform:translateX(-50%) translateY(0)} 80%{opacity:1} 100%{opacity:0} }
+
+#drive-hud {
+  position: fixed; bottom: 40px; right: 12px; z-index: 10;
+  background: rgba(20,20,40,0.85); padding: 10px 16px; border-radius: 8px;
+  font-size: 12px; display: none; border: 1px solid #444;
+}
+#drive-hud div { margin: 3px 0; }
+#drive-hud .val { color: #88ccff; }
+
+#crosshair {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  width: 20px; height: 20px; z-index: 15; display: none; pointer-events: none;
+}
+#crosshair::before, #crosshair::after {
+  content: ''; position: absolute; background: rgba(255,255,255,0.6);
+}
+#crosshair::before { width: 2px; height: 20px; left: 9px; top: 0; }
+#crosshair::after { width: 20px; height: 2px; top: 9px; left: 0; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <span id="mode-label">建造模式</span>
+  <button class="tool-btn active" data-tool="build">1 建造</button>
+  <button class="tool-btn" data-tool="weld">2 焊枪</button>
+  <button class="tool-btn" data-tool="connect">3 连接</button>
+  <button class="tool-btn" data-tool="paint">4 涂色</button>
+  <button class="tool-btn" data-tool="erase">5 删除</button>
+  <button class="tool-btn" data-tool="lift">6 升降台</button>
+  <button class="tool-btn" data-tool="drive">7 驾驶</button>
+  <span id="fps">0 FPS</span>
+</div>
+
+<div id="sidebar">
+  <div id="cat-tabs">
+    <div class="cat-tab active" data-cat="block">基础</div>
+    <div class="cat-tab" data-cat="power">动力</div>
+    <div class="cat-tab" data-cat="control">控制</div>
+    <div class="cat-tab" data-cat="movement">运动</div>
+    <div class="cat-tab" data-cat="function">功能</div>
+  </div>
+  <div id="part-grid"></div>
+  <div class="side-sep"></div>
+  <button class="side-btn" id="btn-save">F5 保存</button>
+  <button class="side-btn" id="btn-load">F6 读取</button>
+  <button class="side-btn" id="btn-reset">F7 重置</button>
+  <button class="side-btn" id="btn-clear">F8 清空</button>
+</div>
+
+<div id="helpbar">
+  <span><kbd>WASD</kbd> 行走/驾驶</span>
+  <span><kbd>鼠标</kbd> 转视角</span>
+  <span><kbd>左键/回车</kbd> 放置</span>
+  <span><kbd>1-7</kbd> 切工具</span>
+  <span><kbd>↑↓</kbd> 选零件</span>
+  <span><kbd>←→</kbd> 切分类</span>
+  <span><kbd>Esc</kbd> 鼠标</span>
+  <span><kbd>F5-8</kbd> 存/取/复位/清</span>
+  <span><kbd>F2</kbd> 返回</span>
+</div>
+
+<div id="notification"></div>
+<div id="attach-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(20,20,40,0.95);padding:20px 30px;border-radius:12px;z-index:100;border:2px solid #4488ff;text-align:center;min-width:280px;">
+  <div id="attach-msg" style="font-size:14px;margin-bottom:16px;color:#ccc;"></div>
+  <button id="attach-yes" style="padding:8px 24px;margin:0 8px;background:#3388cc;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">确定安装</button>
+  <button id="attach-no" style="padding:8px 24px;margin:0 8px;background:#555;color:#ccc;border:none;border-radius:6px;cursor:pointer;font-size:13px;">取消</button>
+</div>
+<div id="drive-hud">
+  <div>速度: <span class="val" id="hud-speed">0</span></div>
+  <div>高度: <span class="val" id="hud-alt">0</span></div>
+  <div>悬挂: <span class="val" id="hud-ride">0</span></div>
+  <div><kbd>Space</kbd> 推进 <kbd>PgUp/Dn</kbd> 悬挂高度</div>
+</div>
+<div id="crosshair"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script>if(typeof THREE==='undefined')document.write('<script src="./three.min.js"><\/script>')</script>
+<script>
+// ============ CONFIG ============
+const CFG = {
+  grid: 1.0,
+  worldSize: 200,
+  gravity: -35,
+  maxVel: 50,
+  friction: 0.95,
+  bearingSpeed: 4.0,
+  enginePower: 20,
+  gasEngineTorque: [100, 200, 300, 400, 500],
+  gasEngineRPM: 3.0,
+  electricEngineTorque: 200,
+  electricEngineRPM: [1, 2, 3, 4, 5],
+  thrusterPower: 40,
+  liftCoeff: 0.015,
+  wheelRadius: 0.45,
+  brakeForce: 0.92,
+  turnRate: 2.5,
+  camOrbitDist: 18,
+  camFollowDist: 14,
+  camFollowH: 7,
+  camSmooth: 0.08,
+  playerEyeH: 1.6,
+  playerSpeed: 5.0,
+  playerTurnSpeed: 0.003,
+  // Realistic physics params
+  airDrag: 0.008,         // quadratic air resistance coefficient
+  rollingResist: 0.015,   // tire rolling resistance
+  lateralGrip: 0.85,      // tire lateral grip (0-1, higher = more grip, lower = drift)
+  bounceRestitution: 0.3, // bounce energy retention on collision
+  angularDamping: 0.92,   // angular velocity damping per frame
+  subSteps: 3             // physics substeps per frame for stability
+};
+
+// Material definitions for blocks
+const MATERIAL_DEFS = {
+  wood:     { color: 0xc4a366, durability: 50,  friction: 0.6, buoyancy: 0.5,  flammable: true,  mass: 0.8, name: '木' },
+  metal:    { color: 0x8899aa, durability: 200, friction: 0.4, buoyancy: -0.5, flammable: false, mass: 2.0, name: '金属' },
+  cardboard:{ color: 0xd4b896, durability: 10,  friction: 0.5, buoyancy: 0.3,  flammable: true,  mass: 0.3, name: '纸板' },
+  glass:    { color: 0xaaddff, durability: 20,  friction: 0.3, buoyancy: -0.3, flammable: false, mass: 1.5, transparent: true, name: '玻璃' },
+  concrete: { color: 0x888888, durability: 500, friction: 0.7, buoyancy: -1.0, flammable: false, mass: 3.0, name: '混凝土' },
+};
+
+const PART_DEFS = {
+  // Blocks (per material)
+  block_wood:     { w:1, h:1, d:1, color:0xc4a366, mass:0.8,  name:'木方块',    category:'block', material:'wood',     durability:50,  friction:0.6, buoyancy:0.5,  flammable:true },
+  block_metal:    { w:1, h:1, d:1, color:0x8899aa, mass:2.0,  name:'金属方块',  category:'block', material:'metal',    durability:200, friction:0.4, buoyancy:-0.5, flammable:false },
+  block_cardboard:{ w:1, h:1, d:1, color:0xd4b896, mass:0.3,  name:'纸板方块',  category:'block', material:'cardboard',durability:10,  friction:0.5, buoyancy:0.3,  flammable:true },
+  block_glass:    { w:1, h:1, d:1, color:0xaaddff, mass:1.5,  name:'玻璃方块',  category:'block', material:'glass',    durability:20,  friction:0.3, buoyancy:-0.3, flammable:false, transparent:true },
+  block_concrete: { w:1, h:1, d:1, color:0x888888, mass:3.0,  name:'混凝土方块',category:'block', material:'concrete', durability:500, friction:0.7, buoyancy:-1.0, flammable:false },
+  // Power
+  gas_engine:     { w:1, h:0.8, d:1, color:0xcc3333, mass:2,   name:'燃气引擎', category:'power', durability:100, friction:0.5, buoyancy:-0.3, flammable:false, engineType:'gas',     fixedSpeed:3.0, powerGears:[1,2,3,4,5], fuelType:'gas' },
+  electric_engine:{ w:0.9, h:0.7, d:0.9, color:0x33aacc, mass:1.5,name:'电动引擎',category:'power', durability:80,  friction:0.5, buoyancy:-0.2, flammable:false, engineType:'electric', fixedPower:20,  speedGears:[1,2,3,4,5], fuelType:'battery' },
+  thruster:{ r:0.3, h:0.5,    color:0xff6600, mass:1.0, name:'推进器',category:'power', durability:80,  friction:0.3, buoyancy:0,    flammable:false },
+  // Control
+  driver_seat:    { w:0.8, h:0.6, d:0.8, color:0x3366cc, mass:0.5, name:'驾驶座', category:'control', durability:60, friction:0.5, buoyancy:0.2, flammable:true },
+  passenger_seat: { w:0.8, h:0.5, d:0.8, color:0x33aa66, mass:0.4, name:'乘客座', category:'control', durability:50, friction:0.5, buoyancy:0.2, flammable:true },
+  switch:  { w:0.4, h:0.4, d:0.2, color:0xffcc00, mass:0.2, name:'开关', category:'control', durability:40, friction:0.5, buoyancy:0,   flammable:false },
+  logic_gate: { w:0.6, h:0.5, d:0.3, color:0x8844cc, mass:0.3, name:'逻辑门', category:'control', durability:50, friction:0.5, buoyancy:0, flammable:false },
+  timer:    { w:0.5, h:0.5, d:0.3, color:0x44aacc, mass:0.3, name:'计时器', category:'control', durability:40, friction:0.5, buoyancy:0, flammable:false },
+  sensor:   { w:0.4, h:0.4, d:0.5, color:0xcc44cc, mass:0.3, name:'传感器', category:'control', durability:40, friction:0.5, buoyancy:0, flammable:false },
+  controller: { w:0.6, h:0.5, d:0.4, color:0x44cc88, mass:0.4, name:'控制器', category:'control', durability:50, friction:0.5, buoyancy:0, flammable:false },
+  // Movement
+  wheel:   { r:0.45, w:0.35,    color:0x333333, mass:0.5, name:'轮子', category:'movement', durability:120, friction:0.6, buoyancy:-0.2, flammable:false, lateralFriction:0.8, rollingFriction:0.02 },
+  bearing: { r:0.3, h:0.2,      color:0xffaa00, mass:0.3, name:'轴承', category:'movement', durability:150, friction:0.3, buoyancy:0,    flammable:false, maxRotationSpeed:4.0, maxTorque:50 },
+  piston:  { r:0.2, h:1.0,      color:0x66cc33, mass:0.8, name:'活塞', category:'movement', durability:100, friction:0.4, buoyancy:0,    flammable:false },
+  sport_suspension: { w:0.4, h:0.6, d:0.4, color:0xcc4444, mass:0.6, name:'运动悬挂', category:'movement', durability:80, friction:0.5, buoyancy:0, flammable:false, springK:800, damping:0.4, maxTravel:0.3 },
+  offroad_suspension:{ w:0.5, h:0.8, d:0.5, color:0x44aa44, mass:0.8, name:'越野悬挂', category:'movement', durability:120, friction:0.5, buoyancy:0, flammable:false, springK:400, damping:0.2, maxTravel:0.6 },
+  // Function
+  wing:    { w:3, h:0.1, d:1,   color:0xaabbcc, mass:0.8, name:'机翼', category:'function', durability:30,  friction:0.2, buoyancy:0.1, flammable:true },
+};
+// Backward compat: 'block' → 'block_wood', 'seat' → 'driver_seat'
+PART_DEFS.block = PART_DEFS.block_wood;
+PART_DEFS.seat = PART_DEFS.driver_seat;
+PART_DEFS.engine = PART_DEFS.gas_engine;
+
+// Part categories for sidebar UI
+const PART_CATEGORIES = [
+  { id: 'block',     name: '基础',   parts: ['block_wood','block_metal','block_cardboard','block_glass','block_concrete'] },
+  { id: 'power',     name: '动力',   parts: ['gas_engine','electric_engine','thruster'] },
+  { id: 'control',   name: '控制',   parts: ['driver_seat','passenger_seat','switch','logic_gate','timer','sensor','controller'] },
+  { id: 'movement',  name: '运动',   parts: ['wheel','bearing','piston','sport_suspension','offroad_suspension'] },
+  { id: 'function',  name: '功能',   parts: ['wing'] },
+];
+
+// Helper: resolve part definition (handles block variants)
+function getPartDef(type) {
+  return PART_DEFS[type] || PART_DEFS.block_wood;
+}
+
+// Helper: check if a part type is a block variant
+function isBlockType(type) {
+  return type === 'block' || type.startsWith('block_');
+}
+
+// ============ STATE ============
+const S = {
+  mode: 'build',
+  selectedPart: 'block_wood',
+  activeCategory: 'block',
+  isDriving: false,
+  activeSeat: null,
+  activeConstruction: null,
+  constructions: [],
+  connections: [],
+  parts: [],
+  nextId: 1,
+  nextCId: 1,
+  ghostMesh: null,
+  ghostRot: 0,
+  buildLayer: 0,
+  connectSource: null,
+  weldSource: null,
+  lift: null,  // { mesh, platformY, constructionId }
+  hoverPart: null,
+  selectedColor: 0x8899aa,
+  paintColors: [0x8899aa,0xcc3333,0x3366cc,0x33aa55,0xffaa00,0xff6600,0xaa44ff,0xffffff,0x333333],
+  paintIdx: 0,
+  keys: {},
+  mouse: { x:0, y:0, down:false, right:false, dx:0, dy:0, dragged:false },
+  cam: { theta: 0.5, phi: 0.8, dist: CFG.camOrbitDist, target: new THREE.Vector3(0,0,0) },
+  playerPos: new THREE.Vector3(0, CFG.playerEyeH, 5),
+  playerYaw: Math.PI,
+  playerPitch: 0,
+  playerBody: null
+};
+
+let scene, camera, renderer, ground, gridHelper, raycaster, mouseVec;
+let lastTime = performance.now(), frameCount = 0, fpsTime = 0;
+const clock = new THREE.Clock();
+
+// ============ INIT ============
+function init() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x87ceeb);
+  scene.fog = new THREE.Fog(0x87ceeb, 120, 300);
+
+  camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 1000);
+  camera.position.set(15, 15, 15);
+  camera.lookAt(0, 0, 0);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  document.body.appendChild(renderer.domElement);
+
+  // Lights
+  const amb = new THREE.AmbientLight(0x667788, 0.7);
+  scene.add(amb);
+  const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+  sun.position.set(30, 50, 20);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = -50; sun.shadow.camera.right = 50;
+  sun.shadow.camera.top = 50; sun.shadow.camera.bottom = -50;
+  sun.shadow.camera.near = 1; sun.shadow.camera.far = 120;
+  scene.add(sun);
+  const hemi = new THREE.HemisphereLight(0x88aaff, 0x445533, 0.4);
+  scene.add(hemi);
+
+  // Ground - large procedural terrain
+  const gSize = 200, gSeg = 120;
+  const gGeo = new THREE.PlaneGeometry(gSize, gSize, gSeg, gSeg);
+  gGeo.rotateX(-Math.PI / 2);
+  const positions = gGeo.attributes.position;
+  const colors = new Float32Array(positions.count * 3);
+  const grassC = [0x55/255, 0x66/255, 0x44/255];
+  const dirtC  = [0x6b/255, 0x4c/255, 0x2a/255];
+  const sandC  = [0xc2/255, 0xb2/255, 0x80/255];
+  const rockC  = [0x77/255, 0x77/255, 0x66/255];
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i), z = positions.getZ(i);
+    positions.setY(i, getTerrainHeight(x, z));
+    const biome = Math.sin(x * 0.03) * Math.cos(z * 0.04) + Math.sin(x * 0.07 + z * 0.06) * 0.5;
+    let c = grassC;
+    if (biome > 0.8) c = sandC;
+    else if (biome < -0.6) c = rockC;
+    else if (biome < -0.2) c = dirtC;
+    const n = Math.sin(x * 2.1 + z * 1.7) * 0.03;
+    colors[i*3] = Math.max(0, Math.min(1, c[0]+n));
+    colors[i*3+1] = Math.max(0, Math.min(1, c[1]+n));
+    colors[i*3+2] = Math.max(0, Math.min(1, c[2]+n));
+  }
+  gGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  gGeo.computeVertexNormals();
+  const gMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  ground = new THREE.Mesh(gGeo, gMat);
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  // Grid
+  gridHelper = new THREE.GridHelper(CFG.worldSize, CFG.worldSize, 0x445544, 0x3a4a3a);
+  gridHelper.position.y = 0.01;
+  scene.add(gridHelper);
+
+  raycaster = new THREE.Raycaster();
+  mouseVec = new THREE.Vector2();
+
+  // Ghost
+  S.ghostMesh = createPartMesh(S.selectedPart, true);
+  S.ghostMesh.visible = false;
+  scene.add(S.ghostMesh);
+
+  // Player body (visible in first-person as shadow/below view)
+  const bodyGroup = new THREE.Group();
+  const torsoGeo = new THREE.CylinderGeometry(0.2, 0.22, 0.9, 8);
+  const bodyMat = new THREE.MeshLambertMaterial({ color: 0x445566 });
+  const torso = new THREE.Mesh(torsoGeo, bodyMat);
+  torso.position.y = -0.65;
+  torso.castShadow = true;
+  bodyGroup.add(torso);
+  const headGeo = new THREE.SphereGeometry(0.15, 8, 6);
+  const headMat = new THREE.MeshLambertMaterial({ color: 0xddbb88 });
+  const head = new THREE.Mesh(headGeo, headMat);
+  head.position.y = -0.05;
+  head.castShadow = true;
+  bodyGroup.add(head);
+  bodyGroup.position.copy(S.playerPos);
+  scene.add(bodyGroup);
+  S.playerBody = bodyGroup;
+
+  setupInput();
+  setupUI();
+  loadGame();
+
+  animate();
+}
+
+// ============ PART MESH FACTORY ============
+function createPartMesh(type, ghost) {
+  const def = getPartDef(type);
+  const opacity = ghost ? 0.4 : 1.0;
+  let group = new THREE.Group();
+
+  if (isBlockType(type)) {
+    const geo = new THREE.BoxGeometry(def.w, def.h, def.d);
+    const isGlass = def.transparent;
+    const mat = new THREE.MeshLambertMaterial({
+      color: def.color, transparent: ghost || isGlass,
+      opacity: ghost ? 0.4 : (isGlass ? 0.55 : 1.0)
+    });
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = !ghost && !isGlass; m.receiveShadow = !ghost;
+    group.add(m);
+    if (!ghost) {
+      const matKey = def.material || 'wood';
+      const edgeColor = matKey === 'metal' ? 0x99aacc : matKey === 'wood' ? 0x8b7355 :
+                        matKey === 'glass' ? 0x88ccff : matKey === 'cardboard' ? 0xb09070 : 0x666666;
+      const edge = new THREE.EdgesGeometry(geo);
+      const line = new THREE.LineSegments(edge, new THREE.LineBasicMaterial({ color: edgeColor }));
+      group.add(line);
+      // Wood: grain lines
+      if (matKey === 'wood') {
+        const grainMat = new THREE.LineBasicMaterial({ color: 0xa08050, transparent: true, opacity: 0.4 });
+        for (let i = -1; i <= 1; i += 2) {
+          const pts = [new THREE.Vector3(-0.45, i * 0.15, 0.501), new THREE.Vector3(0.45, i * 0.15, 0.501)];
+          const grainGeo = new THREE.BufferGeometry().setFromPoints(pts);
+          group.add(new THREE.Line(grainGeo, grainMat));
+        }
+      }
+      // Cardboard: crease lines
+      if (matKey === 'cardboard') {
+        const crMat = new THREE.LineBasicMaterial({ color: 0xb09878, transparent: true, opacity: 0.5 });
+        const pts = [new THREE.Vector3(0, -0.48, 0.501), new THREE.Vector3(0, 0.48, 0.501)];
+        group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), crMat));
+      }
+      // Concrete: speckle dots
+      if (matKey === 'concrete') {
+        const dotMat = new THREE.PointsMaterial({ color: 0x666666, size: 0.04 });
+        const dotPositions = [];
+        for (let i = 0; i < 12; i++) {
+          dotPositions.push((Math.random()-0.5)*0.9, (Math.random()-0.5)*0.9, 0.501);
+        }
+        const dotGeo = new THREE.BufferGeometry();
+        dotGeo.setAttribute('position', new THREE.Float32BufferAttribute(dotPositions, 3));
+        group.add(new THREE.Points(dotGeo, dotMat));
+      }
+    }
+  } else if (type === 'wheel') {
+    const geo = new THREE.CylinderGeometry(def.r, def.r, def.w, 16);
+    const mat = new THREE.MeshLambertMaterial({ color: def.color, transparent: ghost, opacity });
+    const m = new THREE.Mesh(geo, mat);
+    m.rotation.z = Math.PI / 2;
+    m.castShadow = !ghost;
+    group.add(m);
+    // hub
+    const hubGeo = new THREE.CylinderGeometry(def.r * 0.3, def.r * 0.3, def.w + 0.05, 8);
+    const hubMat = new THREE.MeshLambertMaterial({ color: 0x666666, transparent: ghost, opacity });
+    const hub = new THREE.Mesh(hubGeo, hubMat);
+    hub.rotation.z = Math.PI / 2;
+    group.add(hub);
+  } else if (type === 'bearing') {
+    const geo = new THREE.CylinderGeometry(def.r, def.r, def.h, 16);
+    const mat = new THREE.MeshLambertMaterial({ color: def.color, transparent: ghost, opacity });
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = !ghost;
+    group.add(m);
+    // ring indicator
+    const ringGeo = new THREE.TorusGeometry(def.r * 0.7, 0.03, 8, 16);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xffdd44, transparent: ghost, opacity });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = def.h * 0.5 + 0.04;
+    group.add(ring);
+  } else if (type === 'sport_suspension' || type === 'offroad_suspension') {
+    // Spring coil
+    const springColor = type === 'sport_suspension' ? 0xcc4444 : 0x44aa44;
+    const coilH = def.h * 0.6;
+    const coilR = def.w * 0.35;
+    const pts = [];
+    const coils = type === 'sport_suspension' ? 6 : 4;
+    for (let i = 0; i <= coils * 16; i++) {
+      const t = i / (coils * 16);
+      const angle = t * coils * Math.PI * 2;
+      pts.push(new THREE.Vector3(Math.cos(angle) * coilR, t * coilH - coilH / 2, Math.sin(angle) * coilR));
+    }
+    const springCurve = new THREE.CatmullRomCurve3(pts);
+    const springGeo = new THREE.TubeGeometry(springCurve, coils * 16, 0.03, 6, false);
+    const springMat = new THREE.MeshLambertMaterial({ color: springColor, transparent: ghost, opacity });
+    group.add(new THREE.Mesh(springGeo, springMat));
+    // Shock absorber cylinder (center rod)
+    const rodGeo = new THREE.CylinderGeometry(0.04, 0.04, def.h * 0.8, 6);
+    const rodMat = new THREE.MeshLambertMaterial({ color: 0x666666, transparent: ghost, opacity });
+    group.add(new THREE.Mesh(rodGeo, rodMat));
+    // Top mount plate
+    const plateGeo = new THREE.BoxGeometry(def.w * 0.6, 0.05, def.d * 0.6);
+    const plateMat = new THREE.MeshLambertMaterial({ color: 0x555555, transparent: ghost, opacity });
+    const topPlate = new THREE.Mesh(plateGeo, plateMat);
+    topPlate.position.y = def.h * 0.45;
+    group.add(topPlate);
+    // Bottom mount plate
+    const botPlate = new THREE.Mesh(plateGeo, plateMat);
+    botPlate.position.y = -def.h * 0.45;
+    group.add(botPlate);
+  } else if (type === 'gas_engine') {
+    const geo = new THREE.BoxGeometry(def.w, def.h, def.d);
+    const mat = new THREE.MeshLambertMaterial({ color: def.color, transparent: ghost, opacity });
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = !ghost;
+    group.add(m);
+    // exhaust pipes
+    const pipeMat = new THREE.MeshLambertMaterial({ color: 0x444444, transparent: ghost, opacity });
+    for (let i = -1; i <= 1; i += 2) {
+      const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.25, 8), pipeMat);
+      pipe.position.set(i * 0.25, def.h * 0.5 + 0.12, 0);
+      group.add(pipe);
+    }
+    // gear indicator (red stripe)
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(def.w * 0.9, 0.05, 0.02),
+      new THREE.MeshBasicMaterial({ color: 0xff6644, transparent: ghost, opacity }));
+    stripe.position.set(0, -def.h * 0.3, def.d * 0.5 + 0.01);
+    stripe.name = 'gearIndicator';
+    group.add(stripe);
+  } else if (type === 'electric_engine') {
+    const geo = new THREE.BoxGeometry(def.w, def.h, def.d);
+    const mat = new THREE.MeshLambertMaterial({ color: def.color, transparent: ghost, opacity });
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = !ghost;
+    group.add(m);
+    // coil rings
+    const coilMat = new THREE.MeshBasicMaterial({ color: 0x88ddff, transparent: true, opacity: ghost ? 0.2 : 0.6 });
+    for (let i = 0; i < 3; i++) {
+      const coil = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.02, 6, 12), coilMat);
+      coil.rotation.y = Math.PI / 2;
+      coil.position.set(0, 0, (i - 1) * 0.2);
+      group.add(coil);
+    }
+    // lightning bolt indicator
+    const boltMat = new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: ghost, opacity });
+    const bolt = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.15, 0.02), boltMat);
+    bolt.position.set(0, def.h * 0.15, def.d * 0.5 + 0.01);
+    bolt.name = 'gearIndicator';
+    group.add(bolt);
+  } else if (type === 'driver_seat') {
+    const baseMat = new THREE.MeshLambertMaterial({ color: def.color, transparent: ghost, opacity });
+    const base = new THREE.Mesh(new THREE.BoxGeometry(def.w, 0.15, def.d), baseMat);
+    base.position.y = 0.075;
+    base.castShadow = !ghost;
+    group.add(base);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(def.w, def.h, 0.1), baseMat);
+    back.position.set(0, def.h * 0.5, -def.d * 0.45);
+    back.castShadow = !ghost;
+    group.add(back);
+    // steering wheel
+    const wheelGeo = new THREE.TorusGeometry(0.15, 0.02, 6, 12);
+    const wheelMat = new THREE.MeshLambertMaterial({ color: 0x222222, transparent: ghost, opacity });
+    const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+    wheel.position.set(0, def.h * 0.5, def.d * 0.35);
+    wheel.rotation.x = Math.PI * 0.35;
+    group.add(wheel);
+    // steering column
+    const colGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.2, 6);
+    const col = new THREE.Mesh(colGeo, wheelMat);
+    col.position.set(0, def.h * 0.35, def.d * 0.25);
+    col.rotation.x = Math.PI * 0.15;
+    group.add(col);
+    // legs
+    const legMat = new THREE.MeshLambertMaterial({ color: 0x555555, transparent: ghost, opacity });
+    for (let x = -1; x <= 1; x += 2) {
+      for (let z = -1; z <= 1; z += 2) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.15, 0.08), legMat);
+        leg.position.set(x * 0.35, 0.075, z * 0.3);
+        group.add(leg);
+      }
+    }
+  } else if (type === 'passenger_seat') {
+    const baseMat = new THREE.MeshLambertMaterial({ color: def.color, transparent: ghost, opacity });
+    const base = new THREE.Mesh(new THREE.BoxGeometry(def.w, 0.12, def.d), baseMat);
+    base.position.y = 0.06;
+    base.castShadow = !ghost;
+    group.add(base);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(def.w, def.h, 0.08), baseMat);
+    back.position.set(0, def.h * 0.45, -def.d * 0.42);
+    back.castShadow = !ghost;
+    group.add(back);
+    // legs
+    const legMat = new THREE.MeshLambertMaterial({ color: 0x555555, transparent: ghost, opacity });
+    for (let x = -1; x <= 1; x += 2) {
+      for (let z = -1; z <= 1; z += 2) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.12, 0.06), legMat);
+        leg.position.set(x * 0.32, 0.06, z * 0.28);
+        group.add(leg);
+      }
+    }
+  } else if (type === 'piston') {
+    const geo = new THREE.CylinderGeometry(def.r, def.r, def.h, 8);
+    const mat = new THREE.MeshLambertMaterial({ color: def.color, transparent: ghost, opacity });
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = !ghost;
+    group.add(m);
+    // head
+    const headGeo = new THREE.CylinderGeometry(def.r * 1.3, def.r, 0.15, 8);
+    const head = new THREE.Mesh(headGeo, mat);
+    head.position.y = def.h * 0.5;
+    group.add(head);
+  } else if (type === 'switch') {
+    const geo = new THREE.BoxGeometry(def.w, def.h, def.d);
+    const mat = new THREE.MeshLambertMaterial({ color: def.color, transparent: ghost, opacity });
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = !ghost;
+    group.add(m);
+    // toggle indicator
+    const indGeo = new THREE.BoxGeometry(0.15, 0.15, 0.05);
+    const indMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: ghost, opacity: ghost ? 0.3 : 1 });
+    const ind = new THREE.Mesh(indGeo, indMat);
+    ind.position.set(0, 0, def.d * 0.5 + 0.03);
+    ind.name = 'indicator';
+    group.add(ind);
+  } else if (type === 'logic_gate') {
+    const geo = new THREE.BoxGeometry(def.w, def.h, def.d);
+    const mat = new THREE.MeshLambertMaterial({ color: def.color, transparent: ghost, opacity });
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = !ghost;
+    group.add(m);
+    // Gate type label (colored stripe on front)
+    const labelMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: ghost, opacity });
+    const label = new THREE.Mesh(new THREE.BoxGeometry(def.w * 0.6, 0.12, 0.02), labelMat);
+    label.position.set(0, 0.05, def.d * 0.5 + 0.01);
+    label.name = 'gateLabel';
+    group.add(label);
+    // Input dots (left side, 2 dots)
+    const dotMat = new THREE.MeshBasicMaterial({ color: 0x44ff44, transparent: ghost, opacity });
+    for (let i = -1; i <= 1; i += 2) {
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), dotMat);
+      dot.position.set(-def.w * 0.5 - 0.02, i * 0.12, 0);
+      group.add(dot);
+    }
+    // Output dot (right side)
+    const outMat = new THREE.MeshBasicMaterial({ color: 0xff8844, transparent: ghost, opacity });
+    const outDot = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), outMat);
+    outDot.position.set(def.w * 0.5 + 0.02, 0, 0);
+    group.add(outDot);
+  } else if (type === 'timer') {
+    const geo = new THREE.BoxGeometry(def.w, def.h, def.d);
+    const mat = new THREE.MeshLambertMaterial({ color: def.color, transparent: ghost, opacity });
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = !ghost;
+    group.add(m);
+    // Clock dial
+    const dialMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: ghost, opacity });
+    const dial = new THREE.Mesh(new THREE.CircleGeometry(0.15, 12), dialMat);
+    dial.position.set(0, 0, def.d * 0.5 + 0.01);
+    group.add(dial);
+    // Delay label
+    const labelMat = new THREE.MeshBasicMaterial({ color: 0xffff44, transparent: ghost, opacity });
+    const label = new THREE.Mesh(new THREE.BoxGeometry(def.w * 0.5, 0.08, 0.02), labelMat);
+    label.position.set(0, -0.15, def.d * 0.5 + 0.01);
+    label.name = 'delayLabel';
+    group.add(label);
+  } else if (type === 'sensor') {
+    const geo = new THREE.BoxGeometry(def.w, def.h, def.d);
+    const mat = new THREE.MeshLambertMaterial({ color: def.color, transparent: ghost, opacity });
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = !ghost;
+    group.add(m);
+    // Lens (front face)
+    const lensMat = new THREE.MeshBasicMaterial({ color: 0x44ffff, transparent: true, opacity: ghost ? 0.2 : 0.7 });
+    const lens = new THREE.Mesh(new THREE.CircleGeometry(0.12, 8), lensMat);
+    lens.position.set(0, 0, def.d * 0.5 + 0.01);
+    lens.name = 'lens';
+    group.add(lens);
+    // Detection beam visual (thin cone forward)
+    const beamGeo = new THREE.ConeGeometry(0.3, 2, 6, 1, true);
+    const beamMat = new THREE.MeshBasicMaterial({ color: 0x44ffff, transparent: true, opacity: 0.1, side: THREE.DoubleSide });
+    const beam = new THREE.Mesh(beamGeo, beamMat);
+    beam.rotation.x = -Math.PI / 2;
+    beam.position.set(0, 0, def.d * 0.5 + 1);
+    beam.name = 'beam';
+    group.add(beam);
+  } else if (type === 'controller') {
+    const geo = new THREE.BoxGeometry(def.w, def.h, def.d);
+    const mat = new THREE.MeshLambertMaterial({ color: def.color, transparent: ghost, opacity });
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = !ghost;
+    group.add(m);
+    // Step indicator dots (4 steps on front face)
+    const steps = [0xff4444, 0x44ff44, 0x4444ff, 0xffff44];
+    for (let i = 0; i < 4; i++) {
+      const dotMat = new THREE.MeshBasicMaterial({ color: steps[i], transparent: ghost, opacity: ghost ? 0.3 : 0.8 });
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 6), dotMat);
+      dot.position.set((i - 1.5) * 0.12, 0.1, def.d * 0.5 + 0.02);
+      dot.name = 'step' + i;
+      group.add(dot);
+    }
+    // Active step highlight
+    const activeMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: ghost ? 0.1 : 0.5 });
+    const active = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.01), activeMat);
+    active.position.set(-1.5 * 0.12, 0.1, def.d * 0.5 + 0.03);
+    active.name = 'activeStep';
+    group.add(active);
+  } else if (type === 'thruster') {
+    const geo = new THREE.CylinderGeometry(def.r * 0.5, def.r, def.h, 12);
+    const mat = new THREE.MeshLambertMaterial({ color: def.color, transparent: ghost, opacity });
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = !ghost;
+    group.add(m);
+    // flame nozzle ring
+    const ringGeo = new THREE.TorusGeometry(def.r * 0.7, 0.04, 8, 12);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xff3300, transparent: true, opacity: ghost ? 0.3 : 0.8 });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = -def.h * 0.5;
+    ring.name = 'flame';
+    group.add(ring);
+  } else if (type === 'wing') {
+    const geo = new THREE.BoxGeometry(def.w, def.h, def.d);
+    const mat = new THREE.MeshLambertMaterial({ color: def.color, transparent: ghost, opacity });
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = !ghost;
+    group.add(m);
+    // wing tip markers
+    const tipMat = new THREE.MeshBasicMaterial({ color: 0xff4444, transparent: ghost, opacity });
+    for (let x = -1; x <= 1; x += 2) {
+      const tip = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 0.2), tipMat);
+      tip.position.set(x * def.w * 0.48, 0, 0);
+      group.add(tip);
+    }
+  }
+
+  group.userData.partType = type;
+  return group;
+}
+
+// ============ GRID & PLACEMENT ============
+function snapToGrid(pos) {
+  const g = CFG.grid;
+  return new THREE.Vector3(
+    Math.round(pos.x / g) * g,
+    Math.round(pos.y / g) * g,
+    Math.round(pos.z / g) * g
+  );
+}
+
+function getPartGridKey(x, y, z) {
+  return `${Math.round(x)},${Math.round(y)},${Math.round(z)}`;
+}
+
+function getPartAtGrid(gx, gy, gz) {
+  return S.parts.find(p => {
+    const k = getPartGridKey(p.gridPos.x, p.gridPos.y, p.gridPos.z);
+    return k === getPartGridKey(gx, gy, gz);
+  });
+}
+
+function getAdjacentGrids(pos) {
+  const r = [];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        if (dx === 0 && dy === 0 && dz === 0) continue;
+        if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > 1) continue;
+        const p = getPartAtGrid(pos.x + dx, pos.y + dy, pos.z + dz);
+        if (p) r.push(p);
+      }
+    }
+  }
+  return r;
+}
+
+function getGroundIntersect() {
+  raycaster.setFromCamera(mouseVec, camera);
+  const hits = raycaster.intersectObject(ground, false);
+  if (hits.length > 0) return hits[0].point;
+  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const pt = new THREE.Vector3();
+  raycaster.ray.intersectPlane(plane, pt);
+  return pt;
+}
+
+function getPartIntersect() {
+  raycaster.setFromCamera(mouseVec, camera);
+  const meshes = [];
+  S.parts.forEach(p => {
+    p.mesh.traverse(c => { if (c.isMesh) meshes.push(c); });
+  });
+  const hits = raycaster.intersectObjects(meshes, false);
+  if (hits.length > 0) {
+    let obj = hits[0].object;
+    while (obj && !obj.userData.partId) obj = obj.parent;
+    if (obj) return S.parts.find(p => p.id === obj.userData.partId);
+  }
+  return null;
+}
+
+// ============ CONSTRUCTION SYSTEM ============
+function createConstruction(part) {
+  const c = {
+    id: S.nextCId++,
+    parts: [part.id],
+    position: new THREE.Vector3(part.gridPos.x, part.gridPos.y, part.gridPos.z),
+    velocity: new THREE.Vector3(0, 0, 0),
+    rotation: 0,
+    angularVel: 0,
+    isGrounded: true,
+    group: new THREE.Group()
+  };
+  part.mesh.position.set(0, 0, 0);
+  c.group.position.copy(c.position);
+  c.group.rotation.y = 0;
+  c.group.add(part.mesh);
+  part.mesh.userData.localPos = new THREE.Vector3(0, 0, 0);
+  scene.add(c.group);
+  S.constructions.push(c);
+  part.constructionId = c.id;
+  return c;
+}
+
+function addToConstruction(part, c) {
+  part.constructionId = c.id;
+  c.parts.push(part.id);
+  const refPart = S.parts.find(p => p.id === c.parts[0]);
+  const refPos = refPart ? new THREE.Vector3(refPart.gridPos.x, refPart.gridPos.y, refPart.gridPos.z) : c.position.clone();
+  let localPos = new THREE.Vector3(
+    part.gridPos.x - refPos.x,
+    part.gridPos.y - refPos.y,
+    part.gridPos.z - refPos.z
+  );
+  // If wheel placed near a suspension, snap below it
+  if (part.type === 'wheel') {
+    const suspTypes = ['sport_suspension', 'offroad_suspension'];
+    let bestSusp = null, bestDist = 2.5;
+    c.parts.forEach(pid => {
+      const p = S.parts.find(x => x.id === pid);
+      if (!p || !suspTypes.includes(p.type)) return;
+      const sLocal = p.mesh.userData.localPos || new THREE.Vector3();
+      const dx = localPos.x - sLocal.x, dz = localPos.z - sLocal.z;
+      const hDist = Math.sqrt(dx * dx + dz * dz);
+      if (hDist < bestDist) { bestDist = hDist; bestSusp = p; }
+    });
+    if (bestSusp) {
+      const sLocal = bestSusp.mesh.userData.localPos || new THREE.Vector3();
+      const sDef = getPartDef(bestSusp.type);
+      const suspHalfH = (sDef.h || 0.6) / 2;
+      const wheelR = getPartDef(part.type).r || 0.45;
+      localPos.x = sLocal.x;
+      localPos.z = sLocal.z;
+      localPos.y = sLocal.y - suspHalfH - wheelR;
+      part._snapToSusp = bestSusp.id;
+    }
+  }
+  part.mesh.position.copy(localPos);
+  part.mesh.userData.localPos = localPos.clone();
+  c.group.add(part.mesh);
+}
+
+function mergeConstructions(c1, c2) {
+  // merge c2 into c1, using grid positions for offset
+  const ref1 = S.parts.find(p => p.id === c1.parts[0]);
+  const ref2 = S.parts.find(p => p.id === c2.parts[0]);
+  const r1 = ref1 ? new THREE.Vector3(ref1.gridPos.x, ref1.gridPos.y, ref1.gridPos.z) : c1.position.clone();
+  const r2 = ref2 ? new THREE.Vector3(ref2.gridPos.x, ref2.gridPos.y, ref2.gridPos.z) : c2.position.clone();
+  const offset = new THREE.Vector3(r2.x - r1.x, r2.y - r1.y, r2.z - r1.z);
+  const rotDiff = c2.rotation - c1.rotation;
+
+  c2.parts.forEach(pid => {
+    const p = S.parts.find(x => x.id === pid);
+    if (!p) return;
+    p.constructionId = c1.id;
+    const oldLocal = p.mesh.userData.localPos || new THREE.Vector3();
+    const newLocal = new THREE.Vector3(
+      oldLocal.x * Math.cos(rotDiff) - oldLocal.z * Math.sin(rotDiff) + offset.x,
+      oldLocal.y + offset.y,
+      oldLocal.x * Math.sin(rotDiff) + oldLocal.z * Math.cos(rotDiff) + offset.z
+    );
+    p.mesh.position.copy(newLocal);
+    p.mesh.userData.localPos = newLocal.clone();
+    c2.group.remove(p.mesh);
+    c1.group.add(p.mesh);
+    c1.parts.push(pid);
+  });
+
+  c2.parts = [];
+  scene.remove(c2.group);
+  S.constructions = S.constructions.filter(c => c.id !== c2.id);
+}
+
+function findConstruction(id) {
+  return S.constructions.find(c => c.id === id);
+}
+
+function getPartConstruction(part) {
+  return findConstruction(part.constructionId);
+}
+
+// ============ PART PLACEMENT ============
+function showAttachConfirm(msg) {
+  return new Promise(resolve => {
+    const modal = document.getElementById('attach-modal');
+    const msgEl = document.getElementById('attach-msg');
+    const yesBtn = document.getElementById('attach-yes');
+    const noBtn = document.getElementById('attach-no');
+    msgEl.textContent = msg;
+    modal.style.display = 'block';
+    document.body.classList.add('show-cursor');
+    const cleanup = (val) => {
+      modal.style.display = 'none';
+      document.body.classList.remove('show-cursor');
+      yesBtn.removeEventListener('click', onYes);
+      noBtn.removeEventListener('click', onNo);
+      window.removeEventListener('keydown', onKey);
+      resolve(val);
+    };
+    const onYes = () => cleanup(true);
+    const onNo = () => cleanup(false);
+    const onKey = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); cleanup(true); }
+      if (e.key === 'Escape' || e.key === 'n' || e.key === 'N') { e.preventDefault(); cleanup(false); }
+    };
+    yesBtn.addEventListener('click', onYes);
+    noBtn.addEventListener('click', onNo);
+    window.addEventListener('keydown', onKey);
+  });
+}
+
+let _placing = false;
+function placePart(gridPos) {
+  if (_placing) return;
+  if (gridPos.y < 0) return;
+  const existing = getPartAtGrid(gridPos.x, gridPos.y, gridPos.z);
+  if (existing) return;
+
+  const type = S.selectedPart;
+  const def = getPartDef(type);
+
+  // Check adjacent parts before creating the new part
+  const adjacent = getAdjacentGrids(gridPos);
+  const constructions = new Set();
+  adjacent.forEach(a => {
+    if (a.constructionId) constructions.add(a.constructionId);
+  });
+
+  // If adjacent parts exist, ask for confirmation
+  if (adjacent.length > 0) {
+    const targetNames = adjacent.map(a => getPartDef(a.type).name);
+    const uniqueNames = [...new Set(targetNames)];
+    const nameList = uniqueNames.length <= 3 ? uniqueNames.join('、') : uniqueNames.slice(0, 3).join('、') + '等';
+    _placing = true;
+    showAttachConfirm(`是否将 ${def.name} 安装到 ${nameList} 上？`).then(confirmed => {
+      _placing = false;
+      if (!confirmed) return;
+      doPlacePart(gridPos, type, def);
+    });
+    return;
+  }
+
+  doPlacePart(gridPos, type, def);
+}
+
+function doPlacePart(gridPos, type, def) {
+  const mesh = createPartMesh(type, false);
+  const part = {
+    id: S.nextId++,
+    type,
+    constructionId: 0,
+    gridPos: { x: gridPos.x, y: gridPos.y, z: gridPos.z },
+    worldPos: { x: gridPos.x, y: gridPos.y, z: gridPos.z },
+    rotation: S.ghostRot,
+    mesh,
+    metadata: {},
+    material: def.material || null
+  };
+  mesh.userData.partId = part.id;
+  mesh.rotation.y = S.ghostRot;
+
+  // Determine construction — check lift first
+  if (S.lift && gridPos.y >= Math.round(S.lift.platformY) - 1) {
+    const liftPos = S.lift.mesh.position;
+    const hs = S.lift.platSize / 2;
+    if (gridPos.x >= liftPos.x - hs && gridPos.x <= liftPos.x + hs &&
+        gridPos.z >= liftPos.z - hs && gridPos.z <= liftPos.z + hs) {
+      const liftC = findConstruction(S.lift.constructionId);
+      if (liftC) {
+        addToConstruction(part, liftC);
+        S.parts.push(part);
+        return part;
+      }
+    }
+  }
+
+  const adjacent = getAdjacentGrids(gridPos);
+  const constructions = new Set();
+  adjacent.forEach(a => {
+    if (a.constructionId) constructions.add(a.constructionId);
+  });
+
+  if (constructions.size === 0) {
+    createConstruction(part);
+  } else {
+    const cids = [...constructions];
+    const mainC = findConstruction(cids[0]);
+    addToConstruction(part, mainC);
+    for (let i = 1; i < cids.length; i++) {
+      const other = findConstruction(cids[i]);
+      if (other) mergeConstructions(mainC, other);
+    }
+  }
+
+  S.parts.push(part);
+  return part;
+}
+
+function removePart(part) {
+  // Remove connections
+  S.connections = S.connections.filter(c => {
+    if (c.sourceId === part.id || c.targetId === part.id) {
+      if (c.visualLine) scene.remove(c.visualLine);
+      return false;
+    }
+    return true;
+  });
+
+  const c = getPartConstruction(part);
+  if (c) {
+    c.parts = c.parts.filter(id => id !== part.id);
+    c.group.remove(part.mesh);
+    if (c.parts.length === 0) {
+      scene.remove(c.group);
+      S.constructions = S.constructions.filter(x => x.id !== c.id);
+    }
+  }
+  scene.remove(part.mesh);
+  S.parts = S.parts.filter(p => p.id !== part.id);
+}
+
+// ============ CONNECTION SYSTEM ============
+const CONNECTION_RULES = [
+  { from: 'driver_seat', to: 'bearing', type: 'steering' },
+  { from: 'driver_seat', to: 'thruster', type: 'signal' },
+  { from: 'driver_seat', to: 'piston', type: 'signal' },
+  { from: 'driver_seat', to: 'switch', type: 'signal' },
+  { from: 'passenger_seat', to: 'switch', type: 'signal' },
+  { from: 'gas_engine', to: 'bearing', type: 'power' },
+  { from: 'gas_engine', to: 'wheel', type: 'power' },
+  { from: 'electric_engine', to: 'bearing', type: 'power' },
+  { from: 'electric_engine', to: 'wheel', type: 'power' },
+  { from: 'switch', to: 'bearing', type: 'signal' },
+  { from: 'switch', to: 'piston', type: 'signal' },
+  { from: 'switch', to: 'thruster', type: 'signal' },
+  { from: 'switch', to: 'gas_engine', type: 'signal' },
+  { from: 'switch', to: 'electric_engine', type: 'signal' },
+  { from: 'switch', to: 'logic_gate', type: 'signal' },
+  { from: 'logic_gate', to: 'bearing', type: 'signal' },
+  { from: 'logic_gate', to: 'piston', type: 'signal' },
+  { from: 'logic_gate', to: 'thruster', type: 'signal' },
+  { from: 'logic_gate', to: 'gas_engine', type: 'signal' },
+  { from: 'logic_gate', to: 'electric_engine', type: 'signal' },
+  { from: 'logic_gate', to: 'logic_gate', type: 'signal' },
+  // Timer
+  { from: 'switch', to: 'timer', type: 'signal' },
+  { from: 'logic_gate', to: 'timer', type: 'signal' },
+  { from: 'timer', to: 'bearing', type: 'signal' },
+  { from: 'timer', to: 'piston', type: 'signal' },
+  { from: 'timer', to: 'thruster', type: 'signal' },
+  { from: 'timer', to: 'gas_engine', type: 'signal' },
+  { from: 'timer', to: 'electric_engine', type: 'signal' },
+  { from: 'timer', to: 'logic_gate', type: 'signal' },
+  { from: 'timer', to: 'timer', type: 'signal' },
+  // Sensor
+  { from: 'sensor', to: 'bearing', type: 'signal' },
+  { from: 'sensor', to: 'piston', type: 'signal' },
+  { from: 'sensor', to: 'thruster', type: 'signal' },
+  { from: 'sensor', to: 'gas_engine', type: 'signal' },
+  { from: 'sensor', to: 'electric_engine', type: 'signal' },
+  { from: 'sensor', to: 'logic_gate', type: 'signal' },
+  { from: 'sensor', to: 'timer', type: 'signal' },
+  // Controller
+  { from: 'switch', to: 'controller', type: 'signal' },
+  { from: 'driver_seat', to: 'controller', type: 'signal' },
+  { from: 'logic_gate', to: 'controller', type: 'signal' },
+  { from: 'timer', to: 'controller', type: 'signal' },
+  { from: 'sensor', to: 'controller', type: 'signal' },
+  { from: 'controller', to: 'bearing', type: 'power' },
+  { from: 'controller', to: 'piston', type: 'signal' },
+  // Suspension: engine→suspension (power), suspension→wheel (suspension)
+  { from: 'gas_engine', to: 'sport_suspension', type: 'power' },
+  { from: 'gas_engine', to: 'offroad_suspension', type: 'power' },
+  { from: 'electric_engine', to: 'sport_suspension', type: 'power' },
+  { from: 'electric_engine', to: 'offroad_suspension', type: 'power' },
+  { from: 'sport_suspension', to: 'wheel', type: 'suspension' },
+  { from: 'offroad_suspension', to: 'wheel', type: 'suspension' },
+];
+
+function canConnect(fromPart, toPart) {
+  if (fromPart.id === toPart.id) return null;
+  if (fromPart.constructionId !== toPart.constructionId) return null;
+  const existing = S.connections.find(c => c.sourceId === fromPart.id && c.targetId === toPart.id);
+  if (existing) return null;
+  for (const rule of CONNECTION_RULES) {
+    if (fromPart.type === rule.from && toPart.type === rule.to) return rule.type;
+  }
+  return null;
+}
+
+function createConnection(fromPart, toPart) {
+  const type = canConnect(fromPart, toPart);
+  if (!type) return;
+
+  const colors = { power: 0xff4444, steering: 0x44aaff, signal: 0x44ff44, suspension: 0xffaa44 };
+  const color = colors[type] || 0xffffff;
+
+  const p1 = fromPart.mesh.getWorldPosition(new THREE.Vector3());
+  const p2 = toPart.mesh.getWorldPosition(new THREE.Vector3());
+
+  // Create curved cable with sag
+  const cable = createCableMesh(p1, p2, color);
+  scene.add(cable);
+
+  S.connections.push({
+    id: S.nextId++,
+    sourceId: fromPart.id,
+    targetId: toPart.id,
+    type,
+    visualLine: cable
+  });
+
+  const typeNames = { power: '动力', steering: '转向', signal: '信号' };
+  notify(`已连接: ${getPartDef(fromPart.type).name} → ${getPartDef(toPart.type).name} (${typeNames[type] || type})`);
+
+  // Snap wheel below suspension when connecting
+  if (type === 'suspension') {
+    const susp = fromPart, wheel = toPart;
+    const sLocal = susp.mesh.userData.localPos || new THREE.Vector3();
+    const sDef = getPartDef(susp.type);
+    const suspHalfH = (sDef.h || 0.6) / 2;
+    const wheelR = getPartDef(wheel.type).r || 0.45;
+    const newLocal = new THREE.Vector3(sLocal.x, sLocal.y - suspHalfH - wheelR, sLocal.z);
+    wheel.mesh.position.copy(newLocal);
+    wheel.mesh.userData.localPos = newLocal.clone();
+    wheel._snapToSusp = susp.id;
+  }
+}
+
+function createCableMesh(p1, p2, color) {
+  // CatmullRom curve with natural sag
+  const mid = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+  const dist = p1.distanceTo(p2);
+  mid.y -= dist * 0.15; // sag amount proportional to distance
+
+  const curve = new THREE.CatmullRomCurve3([p1, mid, p2]);
+  const points = curve.getPoints(20);
+  const geo = new THREE.BufferGeometry().setFromPoints(points);
+  const mat = new THREE.LineBasicMaterial({ color, linewidth: 2 });
+  const line = new THREE.Line(geo, mat);
+
+  // Small connector dots at endpoints
+  const dotGeo = new THREE.SphereGeometry(0.06, 6, 6);
+  const dotMat = new THREE.MeshBasicMaterial({ color });
+  const dot1 = new THREE.Mesh(dotGeo, dotMat);
+  dot1.position.copy(p1);
+  dot1.name = 'dot1';
+  line.add(dot1);
+  const dot2 = new THREE.Mesh(dotGeo, dotMat);
+  dot2.position.copy(p2);
+  dot2.name = 'dot2';
+  line.add(dot2);
+
+  // Direction indicator (small cone)
+  const dir = new THREE.Vector3().subVectors(p2, p1).normalize();
+  const arrowPos = new THREE.Vector3().lerpVectors(p1, p2, 0.65);
+  arrowPos.y = mid.y + (p2.y - mid.y) * 0.6;
+  const arrowGeo = new THREE.ConeGeometry(0.08, 0.18, 4);
+  const arrow = new THREE.Mesh(arrowGeo, dotMat);
+  arrow.position.copy(arrowPos);
+  arrow.lookAt(p2);
+  arrow.rotateX(Math.PI / 2);
+  arrow.name = 'arrow';
+  line.add(arrow);
+
+  return line;
+}
+
+function updateConnectionLines() {
+  S.connections.forEach(c => {
+    const sp = S.parts.find(p => p.id === c.sourceId);
+    const tp = S.parts.find(p => p.id === c.targetId);
+    if (!sp || !tp || !c.visualLine) return;
+    const p1 = sp.mesh.getWorldPosition(new THREE.Vector3());
+    const p2 = tp.mesh.getWorldPosition(new THREE.Vector3());
+
+    const mid = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+    const dist = p1.distanceTo(p2);
+    mid.y -= dist * 0.15;
+
+    const curve = new THREE.CatmullRomCurve3([p1, mid, p2]);
+    const pts = curve.getPoints(20);
+    const positions = c.visualLine.geometry.attributes.position;
+    if (positions && positions.count === pts.length) {
+      for (let i = 0; i < pts.length; i++) {
+        positions.setXYZ(i, pts[i].x, pts[i].y, pts[i].z);
+      }
+      positions.needsUpdate = true;
+    }
+
+    // Update connector dots and arrow
+    c.visualLine.children.forEach(ch => {
+      if (ch.name === 'dot1') ch.position.copy(p1);
+      else if (ch.name === 'dot2') ch.position.copy(p2);
+      else if (ch.name === 'arrow') {
+        const arrowPos = new THREE.Vector3().lerpVectors(p1, p2, 0.65);
+        arrowPos.y = mid.y + (p2.y - mid.y) * 0.6;
+        ch.position.copy(arrowPos);
+        ch.lookAt(p2);
+        ch.rotateX(Math.PI / 2);
+      }
+    });
+  });
+}
+
+// ============ SIGNAL SYSTEM ============
+const GATE_TYPES = ['AND', 'OR', 'NOT', 'XOR', 'NAND'];
+const GATE_COLORS = { AND: 0x44aaff, OR: 0x44ff44, NOT: 0xff4444, XOR: 0xffaa44, NAND: 0xff44ff };
+
+const TIMER_DELAYS = [0.5, 1, 2, 3, 5];
+const SENSOR_RANGE = 10;
+
+function getInputSignal(partId) {
+  let result = false;
+  S.connections.forEach(conn => {
+    if (conn.targetId === partId && conn.type === 'signal') {
+      const src = S.parts.find(p => p.id === conn.sourceId);
+      if (src) {
+        if (src.type === 'switch') result = result || !!src.metadata.on;
+        else if (src.type === 'logic_gate') result = result || !!src.metadata.outputSignal;
+        else if (src.type === 'timer') result = result || !!src.metadata.outputSignal;
+        else if (src.type === 'sensor') result = result || !!src.metadata.outputSignal;
+      }
+    }
+  });
+  return result;
+}
+
+function processSignals() {
+  const now = performance.now() / 1000;
+
+  // 1. Evaluate sensors (detect nearby objects)
+  S.parts.filter(p => p.type === 'sensor').forEach(sensor => {
+    const wp = sensor.mesh.getWorldPosition(new THREE.Vector3());
+    const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(sensor.mesh.getWorldQuaternion(new THREE.Quaternion()));
+    let detected = false;
+    S.parts.forEach(p => {
+      if (p.id === sensor.id) return;
+      const pp = p.mesh.getWorldPosition(new THREE.Vector3());
+      const diff = pp.clone().sub(wp);
+      const dist = diff.length();
+      if (dist < SENSOR_RANGE && dist > 0.1) {
+        const dot = diff.normalize().dot(fwd);
+        if (dot > 0.3) detected = true; // ~70 degree cone
+      }
+    });
+    sensor.metadata.outputSignal = detected;
+    // Update lens color
+    const lens = sensor.mesh.children.find(c => c.name === 'lens');
+    if (lens) lens.material.color.setHex(detected ? 0x00ff00 : 0x44ffff);
+    const beam = sensor.mesh.children.find(c => c.name === 'beam');
+    if (beam) beam.material.opacity = detected ? 0.25 : 0.05;
+  });
+
+  // 2. Evaluate timers (delay signal propagation)
+  S.parts.filter(p => p.type === 'timer').forEach(timer => {
+    const input = getInputSignal(timer.id);
+    const delay = timer.metadata.delay || 1;
+    if (!timer.metadata._timerState) timer.metadata._timerState = { lastInput: false, changeTime: 0 };
+    const st = timer.metadata._timerState;
+    // Detect input change
+    if (input !== st.lastInput) {
+      st.changeTime = now;
+      st.lastInput = input;
+    }
+    // Output follows input after delay
+    const elapsed = now - st.changeTime;
+    timer.metadata.outputSignal = input ? (elapsed >= delay) : !(elapsed >= delay);
+    // Update delay label color
+    const label = timer.mesh.children.find(c => c.name === 'delayLabel');
+    if (label) label.material.color.setHex(timer.metadata.outputSignal ? 0x00ff00 : 0xffff44);
+  });
+
+  // 3. Evaluate logic gates (3-pass for chained gates)
+  S.parts.forEach(p => { if (p.type === 'logic_gate') p.metadata.outputSignal = false; });
+  for (let pass = 0; pass < 3; pass++) {
+    S.parts.filter(p => p.type === 'logic_gate').forEach(gate => {
+      const gateType = gate.metadata.gateType || 'AND';
+      const inputs = [];
+      S.connections.forEach(conn => {
+        if (conn.targetId === gate.id && conn.type === 'signal') {
+          const src = S.parts.find(p => p.id === conn.sourceId);
+          if (src) {
+            if (src.type === 'switch') inputs.push(!!src.metadata.on);
+            else if (src.type === 'logic_gate') inputs.push(!!src.metadata.outputSignal);
+            else if (src.type === 'timer') inputs.push(!!src.metadata.outputSignal);
+            else if (src.type === 'sensor') inputs.push(!!src.metadata.outputSignal);
+          }
+        }
+      });
+      let output = false;
+      switch (gateType) {
+        case 'AND':  output = inputs.length > 0 && inputs.every(v => v); break;
+        case 'OR':   output = inputs.some(v => v); break;
+        case 'NOT':  output = inputs.length > 0 ? !inputs[0] : true; break;
+        case 'XOR':  output = inputs.filter(v => v).length === 1; break;
+        case 'NAND': output = !(inputs.length > 0 && inputs.every(v => v)); break;
+      }
+      gate.metadata.outputSignal = output;
+    });
+  }
+
+  // 4. Process controllers (sequence motion)
+  S.parts.filter(p => p.type === 'controller').forEach(ctrl => {
+    const activated = getInputSignal(ctrl.id);
+    if (!ctrl.metadata._ctrlState) {
+      ctrl.metadata._ctrlState = { step: 0, timer: 0, running: false };
+    }
+    const st = ctrl.metadata._ctrlState;
+    const stepTime = ctrl.metadata.stepTime || 1;
+    const totalSteps = 4;
+
+    if (activated) {
+      if (!st.running) { st.running = true; st.timer = 0; }
+      st.timer += 1 / 60; // approximate dt
+      if (st.timer >= stepTime) {
+        st.timer = 0;
+        st.step = (st.step + 1) % totalSteps;
+      }
+    } else {
+      st.running = false;
+      st.timer = 0;
+    }
+
+    ctrl.metadata.outputSignal = st.running;
+    ctrl.metadata.currentStep = st.step;
+
+    // Drive connected bearings to step angle
+    S.connections.forEach(conn => {
+      if (conn.sourceId === ctrl.id && conn.type === 'power') {
+        const target = S.parts.find(p => p.id === conn.targetId);
+        if (target && target.type === 'bearing') {
+          const angles = [0, Math.PI / 2, Math.PI, Math.PI * 1.5];
+          target.metadata.ctrlTargetAngle = angles[st.step];
+        }
+      }
+      if (conn.sourceId === ctrl.id && conn.type === 'signal') {
+        const target = S.parts.find(p => p.id === conn.targetId);
+        if (target && target.type === 'piston') {
+          const extensions = [0, 0.5, 1, 0.5];
+          target.metadata.ctrlExtension = extensions[st.step];
+        }
+      }
+    });
+
+    // Update visual: highlight active step
+    const activeEl = ctrl.mesh.children.find(c => c.name === 'activeStep');
+    if (activeEl) activeEl.position.x = (st.step - 1.5) * 0.12;
+  });
+
+  // 5. Apply signals to actuators
+  S.parts.forEach(p => {
+    if (p.type !== 'gas_engine' && p.type !== 'electric_engine' &&
+        p.type !== 'thruster' && p.type !== 'bearing' && p.type !== 'piston') return;
+    p.metadata.signalActive = getInputSignal(p.id);
+  });
+
+  // 5. Update visual indicators
+  S.parts.forEach(p => {
+    if (p.type === 'switch') {
+      const ind = p.mesh.children.find(c => c.name === 'indicator');
+      if (ind) ind.material.color.setHex(p.metadata.on ? 0x00ff00 : 0xff0000);
+    }
+    if (p.type === 'logic_gate') {
+      const label = p.mesh.children.find(c => c.name === 'gateLabel');
+      if (label) {
+        const gt = p.metadata.gateType || 'AND';
+        label.material.color.setHex(p.metadata.outputSignal ? 0x00ff00 : (GATE_COLORS[gt] || 0xffffff));
+      }
+    }
+  });
+}
+
+// ============ PHYSICS ENGINE ============
+function physicsStep(dt) {
+  dt = Math.min(dt, 0.05);
+  const subDt = dt / CFG.subSteps;
+
+  for (let step = 0; step < CFG.subSteps; step++) {
+    for (const c of S.constructions) {
+      if (c.parts.length === 0) continue;
+      if (c.isOnLift) continue;
+
+      // Compute total mass
+      let totalMass = 0;
+      c.parts.forEach(pid => {
+        const p = S.parts.find(x => x.id === pid);
+        if (p) totalMass += getPartDef(p.type).mass;
+      });
+      if (totalMass === 0) continue;
+
+      const isBeingDriven = S.isDriving && S.activeConstruction && S.activeConstruction.id === c.id;
+
+      // Gravity (F = mg)
+      c.velocity.y += CFG.gravity * subDt;
+
+      // Driving forces
+      if (isBeingDriven) {
+        applyDrivingForces(c, subDt);
+      }
+
+      // Air drag: F_drag = -C * v^2 * v_hat (quadratic drag)
+      const speed = c.velocity.length();
+      if (speed > 0.01) {
+        const dragForce = CFG.airDrag * speed * speed;
+        const dragAccel = dragForce / totalMass;
+        const dragFactor = Math.min(dragAccel * subDt / speed, 0.5);
+        c.velocity.multiplyScalar(1 - dragFactor);
+      }
+
+      // Rolling resistance when grounded
+      if (c.isGrounded) {
+        const hSpeed = Math.sqrt(c.velocity.x ** 2 + c.velocity.z ** 2);
+        if (hSpeed > 0.01) {
+          const rrDecel = CFG.rollingResist * CFG.gravity * -1 * subDt;
+          const rrFactor = Math.min(rrDecel / hSpeed, 1);
+          c.velocity.x *= 1 - rrFactor;
+          c.velocity.z *= 1 - rrFactor;
+        }
+      }
+
+      // Tire lateral grip — decompose velocity into forward/lateral, reduce lateral
+      if (c.isGrounded) {
+        const fwd = new THREE.Vector3(Math.sin(c.rotation), 0, Math.cos(c.rotation));
+        const right = new THREE.Vector3(Math.cos(c.rotation), 0, -Math.sin(c.rotation));
+        const hVel = new THREE.Vector3(c.velocity.x, 0, c.velocity.z);
+        const fwdSpeed = hVel.dot(fwd);
+        const latSpeed = hVel.dot(right);
+        // Reduce lateral velocity based on grip (lower grip = more drift)
+        const newLatSpeed = latSpeed * (1 - CFG.lateralGrip * subDt * 10);
+        c.velocity.x = fwd.x * fwdSpeed + right.x * newLatSpeed;
+        c.velocity.z = fwd.z * fwdSpeed + right.z * newLatSpeed;
+      }
+
+      // Update position
+      c.position.x += c.velocity.x * subDt;
+      c.position.y += c.velocity.y * subDt;
+      c.position.z += c.velocity.z * subDt;
+      c.rotation += c.angularVel * subDt;
+
+      // Angular damping
+      c.angularVel *= Math.pow(CFG.angularDamping, subDt * 60);
+
+      // Ground collision
+      const terrainH = getTerrainHeight(c.position.x, c.position.z);
+      const terrainFric = getTerrainFriction(c.position.x, c.position.z);
+      const lowestY = getLowestPartY(c);
+      const suspensions = c.parts.map(pid => S.parts.find(x => x.id === pid)).filter(p => p && (p.type === 'sport_suspension' || p.type === 'offroad_suspension'));
+      const wheels = c.parts.map(pid => S.parts.find(x => x.id === pid)).filter(p => p && p.type === 'wheel');
+      const hasSuspension = suspensions.length > 0;
+
+      // Ride height adjustment
+      if (hasSuspension && isBeingDriven) {
+        if (typeof c.rideHeightOffset === 'undefined') c.rideHeightOffset = 0;
+        if (S.keys['pageup']) c.rideHeightOffset = Math.min(c.rideHeightOffset + 2 * subDt, 2.0);
+        if (S.keys['pagedown']) c.rideHeightOffset = Math.max(c.rideHeightOffset - 2 * subDt, -0.5);
+      }
+
+      if (hasSuspension && wheels.length > 0) {
+        // Per-wheel independent suspension
+        // Wheels always touch ground; spring determines body height above wheel contact
+        let totalSpringForce = 0;
+        const rideOffset = c.rideHeightOffset || 0;
+
+        suspensions.forEach(sp => {
+          if (!sp.metadata._springState) sp.metadata._springState = { compression: 0 };
+          const ss = sp.metadata._springState;
+
+          const conn = S.connections.find(cn => cn.type === 'suspension' && cn.sourceId === sp.id);
+          const wheel = conn ? S.parts.find(p => p.id === conn.targetId) : null;
+
+          const spDef = getPartDef(sp.type);
+          const isSoft = sp.type === 'offroad_suspension';
+          const springK = isSoft ? 500 : 1000;
+          const dampK = isSoft ? 40 : 80;
+          const maxTravel = spDef.maxTravel;
+
+          // Suspension world XZ
+          const spLocal = sp.mesh.userData.localPos || new THREE.Vector3();
+          const cosR = Math.cos(c.rotation), sinR = Math.sin(c.rotation);
+          const spWorldX = c.position.x + spLocal.x * cosR - spLocal.z * sinR;
+          const spWorldZ = c.position.z + spLocal.x * sinR + spLocal.z * cosR;
+
+          const spTerrainH = getTerrainHeight(spWorldX, spWorldZ);
+          const suspHalfH = (spDef.h || 0.6) / 2;
+          const wheelR = wheel ? (getPartDef(wheel.type).r || 0.45) : 0.45;
+
+          // Target body height: terrain + wheelR + spring_rest + suspHalfH + rideOffset
+          const springRest = maxTravel * 0.5;
+          const targetBodyY = spTerrainH + wheelR + springRest + suspHalfH + rideOffset;
+
+          // Current spring top (body side) world Y
+          const springTopY = c.position.y + spLocal.y - suspHalfH;
+          // Wheel sits at terrain, spring bottom = terrain + wheelR
+          const springBottomY = spTerrainH + wheelR;
+          // Current spring length
+          const currentLen = springTopY - springBottomY;
+
+          // Compression = rest - actual (positive = compressed, negative = stretched)
+          const compression = springRest + rideOffset - currentLen;
+
+          // Spring-damper force (pushes body toward target)
+          const springForce = springK * compression;
+          const dampForce = -dampK * c.velocity.y;
+          totalSpringForce += springForce + dampForce;
+
+          // Track compression for visuals (0 = rest, 1 = max compressed, -1 = max stretched)
+          ss.compression = compression / Math.max(0.01, maxTravel);
+
+          // Move wheel mesh to sit on ground under the suspension
+          if (step === CFG.subSteps - 1 && wheel) {
+            const wLocal = wheel.mesh.userData.localPos || new THREE.Vector3();
+            const newWheelY = -c.position.y + spTerrainH + wheelR;
+            wheel.mesh.position.y = newWheelY;
+            wheel.mesh.userData.localPos = new THREE.Vector3(wLocal.x, newWheelY, wLocal.z);
+          }
+
+          // Visual spring stretch/compress
+          if (step === CFG.subSteps - 1) {
+            const stretch = 1.0 + ss.compression * 0.6;
+            const springMesh = sp.mesh.children[0];
+            if (springMesh) springMesh.scale.y = Math.max(0.3, Math.min(2.0, stretch));
+            const rodMesh = sp.mesh.children[1];
+            if (rodMesh) rodMesh.scale.y = Math.max(0.3, Math.min(2.0, stretch));
+          }
+        });
+
+        // Check if vehicle has thrusters and is flying
+        const hasThruster = c.parts.some(pid => { const p = S.parts.find(x => x.id === pid); return p && p.type === 'thruster'; });
+        const flyingHigh = hasThruster && c.position.y > terrainH + 5;
+
+        if (flyingHigh) {
+          // Free flight — no spring force, no ground friction
+          c.isGrounded = false;
+        } else if (hasThruster && S.keys[' ']) {
+          // Thrusting upward — weaken springs so thruster can lift
+          c.isGrounded = false;
+          c.velocity.y += (totalSpringForce / totalMass) * subDt * 0.05;
+        } else {
+          // Grounded — springs hold car up
+          c.isGrounded = true;
+          c.velocity.y += (totalSpringForce / totalMass) * subDt;
+          if (c.position.y + lowestY < terrainH) {
+            c.position.y = terrainH - lowestY + 0.05;
+            if (c.velocity.y < 0) c.velocity.y *= -0.05;
+          }
+          c.velocity.x *= (1 - (1 - terrainFric) * subDt * 10);
+          c.velocity.z *= (1 - (1 - terrainFric) * subDt * 10);
+        }
+      } else if (c.position.y + lowestY <= terrainH) {
+        c.position.y = terrainH - lowestY;
+        if (c.velocity.y < 0) c.velocity.y *= -CFG.bounceRestitution;
+        c.isGrounded = true;
+        c.velocity.x *= (1 - (1 - terrainFric) * subDt * 10);
+        c.velocity.z *= (1 - (1 - terrainFric) * subDt * 10);
+      } else {
+        c.isGrounded = false;
+      }
+
+      // Clamp speed
+      const spd = c.velocity.length();
+      if (spd > CFG.maxVel) {
+        c.velocity.multiplyScalar(CFG.maxVel / spd);
+      }
+    }
+
+    // Construction-to-construction collision
+    for (let i = 0; i < S.constructions.length; i++) {
+      for (let j = i + 1; j < S.constructions.length; j++) {
+        const a = S.constructions[i], b = S.constructions[j];
+        if (a.parts.length === 0 || b.parts.length === 0) continue;
+        if (a.isOnLift || b.isOnLift) continue;
+        const dx = a.position.x - b.position.x;
+        const dz = a.position.z - b.position.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        // Simple bounding sphere collision
+        const aRadius = Math.max(1, Math.sqrt(a.parts.length)) * 0.8;
+        const bRadius = Math.max(1, Math.sqrt(b.parts.length)) * 0.8;
+        const minDist = aRadius + bRadius;
+        if (dist < minDist && dist > 0.01) {
+          const nx = dx / dist, nz = dz / dist;
+          const overlap = minDist - dist;
+          // Separate
+          a.position.x += nx * overlap * 0.5;
+          a.position.z += nz * overlap * 0.5;
+          b.position.x -= nx * overlap * 0.5;
+          b.position.z -= nz * overlap * 0.5;
+          // Elastic collision response
+          const relVx = a.velocity.x - b.velocity.x;
+          const relVz = a.velocity.z - b.velocity.z;
+          const relVn = relVx * nx + relVz * nz;
+          if (relVn < 0) {
+            const impulse = -(1 + CFG.bounceRestitution) * relVn * 0.5;
+            a.velocity.x += impulse * nx;
+            a.velocity.z += impulse * nz;
+            b.velocity.x -= impulse * nx;
+            b.velocity.z -= impulse * nz;
+          }
+        }
+      }
+    }
+  }
+
+  // Tilt and visual updates (once per frame, not per substep)
+  for (const c of S.constructions) {
+    if (c.parts.length === 0 || c.isOnLift) continue;
+    if (!c.pitch) c.pitch = 0;
+    if (!c.roll) c.roll = 0;
+    const hSpeed = Math.sqrt(c.velocity.x ** 2 + c.velocity.z ** 2);
+    const targetRoll = -c.angularVel * Math.min(hSpeed * 0.12, 1.2);
+    const fwd = new THREE.Vector3(Math.sin(c.rotation), 0, Math.cos(c.rotation));
+    const fwdVel = c.velocity.x * fwd.x + c.velocity.z * fwd.z;
+    const targetPitch = -fwdVel * 0.025;
+    const dTerrainX = (getTerrainHeight(c.position.x + 0.5, c.position.z) - getTerrainHeight(c.position.x - 0.5, c.position.z));
+    const dTerrainZ = (getTerrainHeight(c.position.x, c.position.z + 0.5) - getTerrainHeight(c.position.x, c.position.z - 0.5));
+    const slopePitch = (dTerrainX * Math.cos(c.rotation) + dTerrainZ * Math.sin(c.rotation)) * 0.5;
+    const slopeRoll = (-dTerrainX * Math.sin(c.rotation) + dTerrainZ * Math.cos(c.rotation)) * 0.5;
+    c.roll += (targetRoll + slopeRoll - c.roll) * 0.06;
+    c.pitch += (targetPitch + slopePitch - c.pitch) * 0.06;
+    const maxTilt = 0.6;
+    c.roll = Math.max(-maxTilt, Math.min(maxTilt, c.roll));
+    c.pitch = Math.max(-maxTilt, Math.min(maxTilt, c.pitch));
+    if (c.isGrounded && (Math.abs(c.roll) > 1.2 || Math.abs(c.pitch) > 1.2)) {
+      c.roll *= 0.95;
+      c.pitch *= 0.95;
+    }
+    c.group.position.copy(c.position);
+    c.group.rotation.set(c.pitch, c.rotation, c.roll);
+    animateWheels(c, dt);
+    animateThrusters(c);
+  }
+}
+
+function getTerrainHeight(x, z) {
+  let h = 0;
+  h += Math.sin(x * 0.05) * Math.cos(z * 0.07) * 1.5;
+  h += Math.sin(x * 0.12 + 1.3) * Math.sin(z * 0.1 + 0.7) * 0.8;
+  h += Math.sin(x * 0.21 + 0.5) * Math.cos(z * 0.18 + 2.1) * 0.5;
+  h += Math.sin(x * 0.35 + z * 0.28) * 0.3;
+  h += Math.sin(x * 0.02) * Math.sin(z * 0.015) * 3;
+  return h;
+}
+
+function getTerrainFriction(x, z) {
+  // Use noise-based biome instead of distance
+  const biome = Math.sin(x * 0.03) * Math.cos(z * 0.04) + Math.sin(x * 0.07 + z * 0.06) * 0.5;
+  if (biome > 0.8) return 0.4;      // sand
+  if (biome < -0.6) return 0.7;     // rock
+  if (biome < -0.2) return 0.85;    // dirt
+  return CFG.friction;              // grass
+}
+
+function getLowestPartY(c) {
+  let minY = 0;
+  c.parts.forEach(pid => {
+    const p = S.parts.find(x => x.id === pid);
+    if (!p) return;
+    const lp = p.mesh.userData.localPos || new THREE.Vector3();
+    const def = getPartDef(p.type);
+    const halfH = (def.h || def.r * 2 || 0.5) / 2;
+    const worldY = lp.y - halfH;
+    if (worldY < minY) minY = worldY;
+  });
+  return minY;
+}
+
+function applyDrivingForces(c, dt) {
+  const forward = new THREE.Vector3(Math.sin(c.rotation), 0, Math.cos(c.rotation));
+  const right = new THREE.Vector3(Math.cos(c.rotation), 0, -Math.sin(c.rotation));
+
+  // Get connected parts
+  const engines = c.parts.map(pid => S.parts.find(x => x.id === pid)).filter(p => p && (p.type === 'gas_engine' || p.type === 'electric_engine'));
+  const gasEngines = engines.filter(p => p.type === 'gas_engine');
+  const electricEngines = engines.filter(p => p.type === 'electric_engine');
+  const wheels = c.parts.map(pid => S.parts.find(x => x.id === pid)).filter(p => p && p.type === 'wheel');
+  const thrusters = c.parts.map(pid => S.parts.find(x => x.id === pid)).filter(p => p && p.type === 'thruster');
+  const wings = c.parts.map(pid => S.parts.find(x => x.id === pid)).filter(p => p && p.type === 'wing');
+
+  const poweredBearings = [];
+  const steeringBearings = [];
+  S.connections.forEach(conn => {
+    if (conn.type === 'power' && c.parts.includes(conn.targetId)) {
+      const tp = S.parts.find(p => p.id === conn.targetId);
+      if (tp && tp.type === 'bearing') poweredBearings.push(tp);
+    }
+    if (conn.type === 'steering' && c.parts.includes(conn.targetId)) {
+      const tp = S.parts.find(p => p.id === conn.targetId);
+      if (tp && tp.type === 'bearing') steeringBearings.push(tp);
+    }
+  });
+
+  const hasEngine = engines.length > 0;
+  const hasThruster = thrusters.length > 0;
+  const hasWing = wings.length > 0;
+  const hasWheel = wheels.length > 0;
+
+  // W/S - Forward/Backward
+  if (S.keys['w'] || S.keys['arrowup']) {
+    // Gas engine: fixed speed, gear controls power
+    if (gasEngines.length > 0 && hasWheel) {
+      const gear = gasEngines.reduce((s, e) => s + (e.metadata.gear || 3), 0) / gasEngines.length;
+      const power = CFG.enginePower * (gear / 3);
+      c.velocity.x += forward.x * power * dt;
+      c.velocity.z += forward.z * power * dt;
+    }
+    // Electric engine: fixed power, gear controls speed
+    if (electricEngines.length > 0 && hasWheel) {
+      const gear = electricEngines.reduce((s, e) => s + (e.metadata.gear || 3), 0) / electricEngines.length;
+      const speedMult = gear / 3;
+      c.velocity.x += forward.x * CFG.enginePower * speedMult * dt;
+      c.velocity.z += forward.z * CFG.enginePower * speedMult * dt;
+    }
+    if (hasThruster) {
+      c.velocity.x += forward.x * CFG.thrusterPower * dt;
+      c.velocity.z += forward.z * CFG.thrusterPower * dt;
+    }
+  }
+  if (S.keys['s'] || S.keys['arrowdown']) {
+    if (engines.length > 0 && hasWheel) {
+      c.velocity.x -= forward.x * CFG.enginePower * dt * 0.5;
+      c.velocity.z -= forward.z * CFG.enginePower * dt * 0.5;
+    }
+    if (hasThruster) {
+      c.velocity.x -= forward.x * CFG.thrusterPower * dt * 0.5;
+      c.velocity.z -= forward.z * CFG.thrusterPower * dt * 0.5;
+    }
+  }
+
+  // A/D - Steering
+  if (S.keys['a'] || S.keys['arrowleft']) {
+    const speed = Math.sqrt(c.velocity.x ** 2 + c.velocity.z ** 2);
+    c.angularVel += CFG.turnRate * dt * Math.min(speed * 0.3, 1);
+  }
+  if (S.keys['d'] || S.keys['arrowright']) {
+    const speed = Math.sqrt(c.velocity.x ** 2 + c.velocity.z ** 2);
+    c.angularVel -= CFG.turnRate * dt * Math.min(speed * 0.3, 1);
+  }
+
+  // Space - Brake / Thrust up
+  if (S.keys[' ']) {
+    if (hasThruster) {
+      // Rocket thrust: push upward relative to vehicle
+      c.velocity.y += CFG.thrusterPower * dt;
+    } else {
+      // Brake
+      c.velocity.x *= CFG.brakeForce;
+      c.velocity.z *= CFG.brakeForce;
+      c.angularVel *= 0.9;
+    }
+  }
+
+  // Q - Thrust down / nose down
+  if (S.keys['q']) {
+    if (hasThruster) {
+      c.velocity.y -= CFG.thrusterPower * dt * 0.5;
+    }
+  }
+
+  // Lift from wings
+  if (hasWing && !c.isGrounded) {
+    const hSpeed = Math.sqrt(c.velocity.x ** 2 + c.velocity.z ** 2);
+    if (hSpeed > 5) {
+      const lift = CFG.liftCoeff * hSpeed * hSpeed * wings.length;
+      c.velocity.y += lift * dt;
+    }
+  }
+
+  // Steering bearings visual
+  steeringBearings.forEach(b => {
+    let target = 0;
+    if (S.keys['a'] || S.keys['arrowleft']) target = 0.5;
+    if (S.keys['d'] || S.keys['arrowright']) target = -0.5;
+    if (!b.metadata.steerAngle) b.metadata.steerAngle = 0;
+    b.metadata.steerAngle += (target - b.metadata.steerAngle) * 0.1;
+    const bearingChild = b.mesh.children.find(ch => ch.name === 'bearingChild');
+    if (bearingChild) bearingChild.rotation.y = b.metadata.steerAngle;
+  });
+
+  // Controller-driven bearings
+  const allBearings = c.parts.map(pid => S.parts.find(x => x.id === pid)).filter(p => p && p.type === 'bearing');
+  allBearings.forEach(b => {
+    if (b.metadata.ctrlTargetAngle !== undefined) {
+      if (!b.metadata.ctrlAngle) b.metadata.ctrlAngle = 0;
+      b.metadata.ctrlAngle += (b.metadata.ctrlTargetAngle - b.metadata.ctrlAngle) * 0.08;
+      const child = b.mesh.children.find(ch => ch.name === 'bearingChild');
+      if (child) child.rotation.y = b.metadata.ctrlAngle;
+    }
+  });
+  // Controller-driven pistons
+  c.parts.map(pid => S.parts.find(x => x.id === pid)).filter(p => p && p.type === 'piston').forEach(p => {
+    if (p.metadata.ctrlExtension !== undefined) {
+      if (!p.metadata.ctrlExt) p.metadata.ctrlExt = 0;
+      p.metadata.ctrlExt += (p.metadata.ctrlExtension - p.metadata.ctrlExt) * 0.08;
+      // Scale piston body
+      const body = p.mesh.children[0];
+      if (body) body.scale.y = 1 + p.metadata.ctrlExt;
+    }
+  });
+}
+
+function animateWheels(c, dt) {
+  const speed = Math.sqrt(c.velocity.x ** 2 + c.velocity.z ** 2);
+  c.parts.forEach(pid => {
+    const p = S.parts.find(x => x.id === pid);
+    if (!p || p.type !== 'wheel') return;
+    // Spin wheel mesh based on speed
+    const wheelChild = p.mesh.children[0];
+    if (wheelChild) {
+      wheelChild.rotation.x += speed * dt * 2;
+    }
+  });
+}
+
+function animateThrusters(c) {
+  const isActive = S.isDriving && S.activeConstruction && S.activeConstruction.id === c.id;
+  c.parts.forEach(pid => {
+    const p = S.parts.find(x => x.id === pid);
+    if (!p || p.type !== 'thruster') return;
+    const flame = p.mesh.children.find(ch => ch.name === 'flame');
+    if (flame) {
+      const thrusting = isActive && (S.keys[' '] || S.keys['w'] || S.keys['arrowup']);
+      flame.scale.set(
+        thrusting ? 1.5 + Math.random() * 0.5 : 0.3,
+        thrusting ? 1.5 + Math.random() * 0.5 : 0.3,
+        thrusting ? 2 + Math.random() * 2 : 0.5
+      );
+      flame.material.color.setHex(thrusting ? 0xff4400 : 0x661100);
+    }
+  });
+}
+
+// ============ CAMERA ============
+function updateCamera(dt) {
+  if (S.isDriving && S.activeConstruction) {
+    // Third-person follow camera
+    const c = S.activeConstruction;
+    const behind = new THREE.Vector3(
+      -Math.sin(c.rotation) * CFG.camFollowDist,
+      CFG.camFollowH,
+      -Math.cos(c.rotation) * CFG.camFollowDist
+    );
+    const targetPos = new THREE.Vector3().copy(c.position).add(behind);
+    camera.position.lerp(targetPos, CFG.camSmooth * 3);
+    const lookTarget = new THREE.Vector3().copy(c.position).add(new THREE.Vector3(0, 2, 0));
+    S.cam.target.lerp(lookTarget, CFG.camSmooth * 3);
+    camera.lookAt(S.cam.target);
+    if (S.playerBody) S.playerBody.visible = false;
+  } else {
+    // First-person camera - mouse always rotates
+    S.playerYaw -= S.mouse.dx * CFG.playerTurnSpeed;
+    S.playerPitch -= S.mouse.dy * CFG.playerTurnSpeed;
+    S.playerPitch = Math.max(-1.2, Math.min(1.4, S.playerPitch));
+    // WASD movement (arrows used for part selection)
+    const spd = CFG.playerSpeed * dt;
+    const fwd = new THREE.Vector3(-Math.sin(S.playerYaw), 0, -Math.cos(S.playerYaw));
+    const right = new THREE.Vector3(Math.cos(S.playerYaw), 0, -Math.sin(S.playerYaw));
+    if (S.keys['w']) S.playerPos.add(fwd.clone().multiplyScalar(spd));
+    if (S.keys['s']) S.playerPos.add(fwd.clone().multiplyScalar(-spd));
+    if (S.keys['a']) S.playerPos.add(right.clone().multiplyScalar(-spd));
+    if (S.keys['d']) S.playerPos.add(right.clone().multiplyScalar(spd));
+    // Keep on ground
+    S.playerPos.y = CFG.playerEyeH;
+
+    camera.position.copy(S.playerPos);
+    const lookDir = new THREE.Vector3(
+      -Math.sin(S.playerYaw) * Math.cos(S.playerPitch),
+      Math.sin(S.playerPitch),
+      -Math.cos(S.playerYaw) * Math.cos(S.playerPitch)
+    );
+    camera.lookAt(S.playerPos.clone().add(lookDir));
+
+    // Update player body position
+    if (S.playerBody) {
+      S.playerBody.position.set(S.playerPos.x, 0, S.playerPos.z);
+      S.playerBody.rotation.y = S.playerYaw;
+      S.playerBody.visible = true;
+    }
+  }
+  S.mouse.dx = 0;
+  S.mouse.dy = 0;
+}
+
+// ============ INPUT ============
+function setupInput() {
+  const canvas = renderer.domElement;
+  // Raycast always from screen center (crosshair aim)
+  mouseVec.x = 0;
+  mouseVec.y = 0;
+
+  window.addEventListener('keydown', e => {
+    S.keys[e.key.toLowerCase()] = true;
+    if ([' ', 'w', 'a', 's', 'd', 'e', 'q', 'r', 't', 'Tab', 'enter'].includes(e.key.toLowerCase()) || e.key.startsWith('Arrow') || e.key === 'PageUp' || e.key === 'PageDown' || e.key.startsWith('F')) e.preventDefault();
+
+    // Function keys
+    if (e.key === 'F5') { saveGame(); notify('已保存'); return; }
+    if (e.key === 'F6') { loadGame(); notify('已读取'); return; }
+    if (e.key === 'F7') {
+      S.constructions.forEach(c => {
+        const terrainH = getTerrainHeight(c.position.x, c.position.z);
+        const lowestY = getLowestPartY(c);
+        c.position.set(0, terrainH - lowestY, 0);
+        c.velocity.set(0, 0, 0);
+        c.rotation = 0;
+        c.angularVel = 0;
+        c.group.position.copy(c.position);
+        c.group.rotation.y = 0;
+      });
+      notify('已重置到原点'); return;
+    }
+    if (e.key === 'F8') { clearAll(); notify('已清空'); return; }
+    // Escape toggles cursor for UI interaction
+    if (e.key === 'Escape') {
+      if (document.pointerLockElement) {
+        document.exitPointerLock();
+        document.body.classList.add('show-cursor');
+      } else {
+        canvas.requestPointerLock();
+        document.body.classList.remove('show-cursor');
+      }
+      return;
+    }
+
+    if (e.key === 'r' || e.key === 'R') {
+      S.ghostRot = (S.ghostRot + Math.PI / 2) % (Math.PI * 2);
+    }
+    if (e.key === 'e' || e.key === 'E') {
+      if (S.isDriving) {
+        toggleDriving();
+      } else {
+        // Toggle logic gate type / timer delay / sensor rotate
+        const part = getPartIntersect();
+        if (part && part.type === 'logic_gate') {
+          const cur = GATE_TYPES.indexOf(part.metadata.gateType || 'AND');
+          part.metadata.gateType = GATE_TYPES[(cur + 1) % GATE_TYPES.length];
+          const gt = part.metadata.gateType;
+          const body = part.mesh.children[0];
+          if (body && body.material) body.material.color.setHex(GATE_COLORS[gt] || 0x8844cc);
+          notify(`逻辑门: ${gt}`);
+        } else if (part && part.type === 'timer') {
+          const cur = TIMER_DELAYS.indexOf(part.metadata.delay || 1);
+          part.metadata.delay = TIMER_DELAYS[(cur + 1) % TIMER_DELAYS.length];
+          notify(`计时器延迟: ${part.metadata.delay}s`);
+        } else if (part && part.type === 'sensor') {
+          const snap = part.rotation + Math.PI / 4;
+          part.rotation = snap;
+          part.mesh.rotation.y = snap;
+          notify('传感器已旋转');
+        } else if (part && part.type === 'controller') {
+          const delays = [0.5, 1, 2, 3];
+          const cur = delays.indexOf(part.metadata.stepTime || 1);
+          part.metadata.stepTime = delays[(cur + 1) % delays.length];
+          notify(`控制器步进: ${part.metadata.stepTime}s`);
+        } else if (part && part.type === 'driver_seat') {
+          enterDriving();
+        } else if (!part) {
+          // No part under crosshair, check for nearby seat
+          const seats = S.parts.filter(p => p.type === 'driver_seat');
+          let nearSeat = null, minD = 8;
+          seats.forEach(s => {
+            const wp = s.mesh.getWorldPosition(new THREE.Vector3());
+            const d = S.playerPos.distanceTo(wp);
+            if (d < minD) { minD = d; nearSeat = s; }
+          });
+          if (nearSeat) enterDriving();
+        }
+      }
+    }
+    // T - Adjust engine gear when driving
+    if ((e.key === 't' || e.key === 'T') && S.isDriving && S.activeConstruction) {
+      S.activeConstruction.parts.forEach(pid => {
+        const p = S.parts.find(x => x.id === pid);
+        if (!p) return;
+        if (p.type === 'gas_engine' || p.type === 'electric_engine') {
+          const g = (p.metadata.gear || 3) + 1;
+          p.metadata.gear = g > 5 ? 1 : g;
+          const def = getPartDef(p.type);
+          notify(`${def.name} 档位: ${p.metadata.gear}`);
+        }
+      });
+    }
+    // 1-7 keys switch tools
+    const tools = ['build', 'weld', 'connect', 'paint', 'erase', 'lift', 'drive'];
+    const toolNum = parseInt(e.key);
+    if (toolNum >= 1 && toolNum <= 7) {
+      const tool = tools[toolNum - 1];
+      if (tool === 'drive') {
+        toggleDriving();
+      } else {
+        if (S.isDriving) exitDriving();
+        S.mode = tool;
+        S.connectSource = null;
+        updateToolButtons();
+        const labels = { build: '建造模式', weld: '焊枪模式', connect: '连接模式', paint: '涂色模式', erase: '删除模式', lift: '升降台模式' };
+        document.getElementById('mode-label').textContent = labels[S.mode] || '';
+      }
+    }
+    // [ ] switch category
+    if (e.key === '[') {
+      const idx = PART_CATEGORIES.findIndex(c => c.id === S.activeCategory);
+      const newIdx = (idx - 1 + PART_CATEGORIES.length) % PART_CATEGORIES.length;
+      S.activeCategory = PART_CATEGORIES[newIdx].id;
+      document.querySelectorAll('.cat-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === S.activeCategory));
+      buildPartGrid();
+      const cat = PART_CATEGORIES[newIdx];
+      if (cat.parts.length > 0) selectPart(cat.parts[0]);
+    }
+    if (e.key === ']') {
+      const idx = PART_CATEGORIES.findIndex(c => c.id === S.activeCategory);
+      const newIdx = (idx + 1) % PART_CATEGORIES.length;
+      S.activeCategory = PART_CATEGORIES[newIdx].id;
+      document.querySelectorAll('.cat-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === S.activeCategory));
+      buildPartGrid();
+      const cat = PART_CATEGORIES[newIdx];
+      if (cat.parts.length > 0) selectPart(cat.parts[0]);
+    }
+    // Q/Shift for layer
+    if (e.key === 'q' && !S.isDriving) {
+      S.buildLayer = Math.min(S.buildLayer + 1, 20);
+      notify(`层高: ${S.buildLayer}`);
+    }
+    if (e.key === 'Shift' && !S.isDriving) {
+      S.buildLayer = Math.max(S.buildLayer - 1, 0);
+      notify(`层高: ${S.buildLayer}`);
+    }
+    // Arrow keys for part navigation in build mode
+    if (!S.isDriving) {
+      const cat = PART_CATEGORIES.find(c => c.id === S.activeCategory);
+      if (cat) {
+        const curIdx = cat.parts.indexOf(S.selectedPart);
+        if (e.key === 'ArrowUp' && curIdx > 0) { selectPart(cat.parts[curIdx - 1]); }
+        if (e.key === 'ArrowDown' && curIdx < cat.parts.length - 1) { selectPart(cat.parts[curIdx + 1]); }
+        if (e.key === 'ArrowLeft') {
+          const idx = PART_CATEGORIES.findIndex(c => c.id === S.activeCategory);
+          const nIdx = (idx - 1 + PART_CATEGORIES.length) % PART_CATEGORIES.length;
+          S.activeCategory = PART_CATEGORIES[nIdx].id;
+          document.querySelectorAll('.cat-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === S.activeCategory));
+          buildPartGrid();
+          if (PART_CATEGORIES[nIdx].parts.length > 0) selectPart(PART_CATEGORIES[nIdx].parts[0]);
+        }
+        if (e.key === 'ArrowRight') {
+          const idx = PART_CATEGORIES.findIndex(c => c.id === S.activeCategory);
+          const nIdx = (idx + 1) % PART_CATEGORIES.length;
+          S.activeCategory = PART_CATEGORIES[nIdx].id;
+          document.querySelectorAll('.cat-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === S.activeCategory));
+          buildPartGrid();
+          if (PART_CATEGORIES[nIdx].parts.length > 0) selectPart(PART_CATEGORIES[nIdx].parts[0]);
+        }
+      }
+      // Enter = place part / confirm action
+      if (e.key === 'Enter') {
+        if (S.mode === 'build') {
+          const gp = getBuildGridPos();
+          if (gp) placePart(gp);
+        } else if (S.mode === 'weld' || S.mode === 'connect') {
+          const part = getPartIntersect();
+          if (part) handleClick({ button: 0 });
+        } else if (S.mode === 'erase') {
+          const part = getPartIntersect();
+          if (part) removePart(part);
+        }
+      }
+    }
+  });
+
+  window.addEventListener('keyup', e => {
+    S.keys[e.key.toLowerCase()] = false;
+  });
+
+  // Mouse always rotates view — movementX/Y always captured
+  document.addEventListener('mousemove', e => {
+    S.mouse.dx += e.movementX || 0;
+    S.mouse.dy += e.movementY || 0;
+  });
+
+  // Request pointer lock on first canvas interaction
+  canvas.addEventListener('mousedown', e => {
+    e.preventDefault();
+    if (!document.pointerLockElement) {
+      canvas.requestPointerLock();
+      return;
+    }
+    if (e.button === 0) { S.mouse.down = true; handleClick(e); }
+    if (e.button === 2) { handleRightClick(e); }
+  });
+
+  canvas.addEventListener('mouseup', e => {
+    if (e.button === 0) S.mouse.down = false;
+  });
+
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    if (S.isDriving) return;
+    if (!S.isDriving) {
+      S.buildLayer += e.deltaY > 0 ? -1 : 1;
+      S.buildLayer = Math.max(0, Math.min(20, S.buildLayer));
+      notify(`放置层高: ${S.buildLayer}`);
+    }
+  });
+
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+}
+
+function handleClick(e) {
+  if (S.isDriving) return;
+
+  // Switch toggle in any mode (except erase)
+  if (S.mode !== 'erase') {
+    const part = getPartIntersect();
+    if (part && part.type === 'switch') {
+      part.metadata.on = !part.metadata.on;
+      notify(part.metadata.on ? '开关：开' : '开关：关');
+      return;
+    }
+    // Logic gate: E-key type cycling handled separately; click does nothing special
+  }
+
+  if (S.mode === 'build') {
+    const gp = getBuildGridPos();
+    if (gp) placePart(gp);
+  } else if (S.mode === 'weld') {
+    const part = getPartIntersect();
+    if (part) {
+      if (!S.weldSource) {
+        S.weldSource = part;
+        highlightPart(part, true);
+        notify('已选择建造体，点击另一个建造体的零件焊接');
+      } else {
+        if (part.constructionId !== S.weldSource.constructionId) {
+          const c1 = getPartConstruction(S.weldSource);
+          const c2 = getPartConstruction(part);
+          if (c1 && c2) {
+            mergeConstructions(c1, c2);
+            notify('焊接成功！两个建造体已合并');
+          }
+        } else {
+          notify('同一建造体无需焊接');
+        }
+        highlightPart(S.weldSource, false);
+        S.weldSource = null;
+      }
+    } else {
+      if (S.weldSource) {
+        highlightPart(S.weldSource, false);
+        S.weldSource = null;
+      }
+    }
+  } else if (S.mode === 'connect') {
+    const part = getPartIntersect();
+    if (part) {
+      if (!S.connectSource) {
+        S.connectSource = part;
+        highlightPart(part, true);
+        notify(`已选择: ${getPartDef(part.type).name}，点击目标零件连接`);
+      } else {
+        if (part.id !== S.connectSource.id) {
+          createConnection(S.connectSource, part);
+        }
+        highlightPart(S.connectSource, false);
+        S.connectSource = null;
+      }
+    } else {
+      if (S.connectSource) {
+        highlightPart(S.connectSource, false);
+        S.connectSource = null;
+      }
+    }
+  } else if (S.mode === 'paint') {
+    const part = getPartIntersect();
+    if (part) {
+      S.paintIdx = (S.paintIdx + 1) % S.paintColors.length;
+      const color = S.paintColors[S.paintIdx];
+      part.mesh.traverse(c => {
+        if (c.isMesh && c.material && c.material.color) {
+          c.material.color.setHex(color);
+        }
+      });
+    }
+  } else if (S.mode === 'erase') {
+    const part = getPartIntersect();
+    if (part) {
+      removePart(part);
+      notify('已删除零件');
+    }
+  } else if (S.mode === 'lift') {
+    if (!S.lift) {
+      createLift();
+    } else {
+      removeLift();
+      notify('升降台已移除');
+    }
+  } else if (S.mode === 'drive') {
+    toggleDriving();
+  }
+}
+
+function handleRightClick(e) {
+  if (S.mode === 'build' && !S.isDriving) {
+    const part = getPartIntersect();
+    if (part) {
+      removePart(part);
+    }
+  }
+}
+
+// ============ LIFT SYSTEM ============
+function createLift() {
+  const group = new THREE.Group();
+  const platSize = 5;
+  const py = 1.0;
+
+  // Platform
+  const platGeo = new THREE.BoxGeometry(platSize, 0.15, platSize);
+  const platMat = new THREE.MeshLambertMaterial({ color: 0x667788, transparent: true, opacity: 0.7 });
+  const platform = new THREE.Mesh(platGeo, platMat);
+  platform.position.y = py;
+  platform.receiveShadow = true;
+  platform.name = 'platform';
+  group.add(platform);
+
+  // Grid lines on platform
+  const gridMat = new THREE.LineBasicMaterial({ color: 0x88aacc, transparent: true, opacity: 0.5 });
+  for (let i = -2; i <= 2; i++) {
+    const pts1 = [new THREE.Vector3(i, py + 0.08, -2.5), new THREE.Vector3(i, py + 0.08, 2.5)];
+    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts1), gridMat));
+    const pts2 = [new THREE.Vector3(-2.5, py + 0.08, i), new THREE.Vector3(2.5, py + 0.08, i)];
+    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts2), gridMat));
+  }
+
+  // 4 pillars
+  const pillarMat = new THREE.MeshLambertMaterial({ color: 0x445566 });
+  const pillarGeo = new THREE.BoxGeometry(0.2, py, 0.2);
+  for (let x = -1; x <= 1; x += 2) {
+    for (let z = -1; z <= 1; z += 2) {
+      const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+      pillar.position.set(x * 2.3, py / 2, z * 2.3);
+      pillar.name = 'pillar';
+      group.add(pillar);
+    }
+  }
+
+  // Place at camera target or origin
+  const pos = S.cam.target.clone();
+  pos.y = 0;
+  pos.x = Math.round(pos.x);
+  pos.z = Math.round(pos.z);
+  group.position.copy(pos);
+  scene.add(group);
+
+  // Create a construction for the lift
+  const c = {
+    id: S.nextCId++,
+    parts: [],
+    position: new THREE.Vector3(pos.x, Math.round(py), pos.z),
+    velocity: new THREE.Vector3(0, 0, 0),
+    rotation: 0,
+    angularVel: 0,
+    isGrounded: false,
+    isOnLift: true,
+    group: new THREE.Group()
+  };
+  c.group.position.copy(c.position);
+  scene.add(c.group);
+  S.constructions.push(c);
+
+  S.lift = {
+    mesh: group,
+    platformY: py,
+    constructionId: c.id,
+    platSize
+  };
+  notify('升降台已放置！PageUp/PageDown 升降，驾驶自动脱离');
+}
+
+function removeLift() {
+  if (!S.lift) return;
+  scene.remove(S.lift.mesh);
+  // Remove lift construction (parts on it become orphaned — will be cleaned up or stay)
+  const c = findConstruction(S.lift.constructionId);
+  if (c && c.parts.length === 0) {
+    scene.remove(c.group);
+    S.constructions = S.constructions.filter(x => x.id !== c.id);
+  }
+  S.lift = null;
+}
+
+function updateLift(dt) {
+  if (!S.lift) return;
+
+  // Height adjustment (only when not driving)
+  if (!S.isDriving) {
+    if (S.keys['pageup']) {
+      S.lift.platformY = Math.min(S.lift.platformY + 3 * dt, 20);
+    }
+    if (S.keys['pagedown']) {
+      S.lift.platformY = Math.max(S.lift.platformY - 3 * dt, 0.1);
+    }
+  }
+
+  // Update lift visual
+  const lift = S.lift;
+  lift.mesh.position.y = 0;
+
+  // Update platform position
+  const platform = lift.mesh.children.find(c => c.name === 'platform');
+  if (platform) platform.position.y = lift.platformY;
+
+  // Update grid lines (they're siblings of platform)
+  lift.mesh.children.forEach(c => {
+    if (c.isLine) c.position.y = lift.platformY;
+  });
+
+  // Update pillars
+  lift.mesh.children.filter(c => c.name === 'pillar').forEach(pillar => {
+    pillar.scale.y = lift.platformY;
+    pillar.position.y = lift.platformY / 2;
+  });
+
+  // Update construction position to match platform (snap to grid)
+  const c = findConstruction(lift.constructionId);
+  if (c) {
+    c.position.y = Math.round(lift.platformY);
+    c.group.position.copy(c.position);
+  }
+}
+
+function releaseLift() {
+  if (!S.lift) return;
+  const c = findConstruction(S.lift.constructionId);
+  if (c) {
+    c.isOnLift = false;
+    c.isGrounded = false;
+  }
+  // Remove lift visual
+  scene.remove(S.lift.mesh);
+  S.lift = null;
+}
+
+function getBuildGridPos() {
+  const gp = getGroundIntersect();
+  if (!gp) return null;
+  // Auto-detect lift height
+  if (S.lift) {
+    const liftPos = S.lift.mesh.position;
+    const hs = S.lift.platSize / 2;
+    if (gp.x >= liftPos.x - hs && gp.x <= liftPos.x + hs &&
+        gp.z >= liftPos.z - hs && gp.z <= liftPos.z + hs) {
+      gp.y = Math.round(S.lift.platformY);
+      return snapToGrid(gp);
+    }
+  }
+  // Snap x,z then find adjacent part height for flush placement
+  const sx = Math.round(gp.x);
+  const sz = Math.round(gp.z);
+  // Check adjacent cells for existing parts → snap to their height
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      if (dx === 0 && dz === 0) continue;
+      for (let y = 0; y <= 20; y++) {
+        if (getPartAtGrid(sx + dx, y, sz + dz)) {
+          return new THREE.Vector3(sx, y, sz);
+        }
+      }
+    }
+  }
+  // Check directly below for stacking
+  for (let y = 0; y <= 20; y++) {
+    if (getPartAtGrid(sx, y, sz)) {
+      return new THREE.Vector3(sx, y + 1, sz);
+    }
+  }
+  // No adjacent parts: use build layer
+  gp.y = S.buildLayer;
+  return snapToGrid(gp);
+}
+
+function toggleDriving() {
+  if (S.isDriving) {
+    exitDriving();
+  } else {
+    enterDriving();
+  }
+}
+
+function enterDriving() {
+  const seats = S.parts.filter(p => p.type === 'driver_seat');
+  if (seats.length === 0) { notify('没有驾驶座！先放置一个驾驶座'); return; }
+
+  let nearest = null, minDist = Infinity;
+  seats.forEach(s => {
+    const wp = s.mesh.getWorldPosition(new THREE.Vector3());
+    const d = S.playerPos.distanceTo(wp);
+    if (d < minDist) { minDist = d; nearest = s; }
+  });
+
+  if (!nearest) return;
+  if (minDist > 8) { notify('太远了！走近驾驶座再上车'); return; }
+
+  S.isDriving = true;
+  S.activeSeat = nearest;
+  S.activeConstruction = getPartConstruction(nearest);
+  if (S.activeConstruction) {
+    S.activeConstruction.velocity.set(0, 0, 0);
+    S.activeConstruction.angularVel = 0;
+    if (S.activeConstruction.isOnLift && S.lift &&
+        S.activeConstruction.id === S.lift.constructionId) {
+      releaseLift();
+      notify('载具已脱离升降台！');
+    }
+  }
+  if (S.playerBody) S.playerBody.visible = false;
+  S.mode = 'drive';
+  updateToolButtons();
+  document.getElementById('mode-label').textContent = '驾驶模式';
+  document.getElementById('drive-hud').style.display = 'block';
+  document.getElementById('crosshair').style.display = 'block';
+  notify('已入座！WASD驾驶，Space推进/刹车，E离座');
+}
+
+function exitDriving() {
+  // Place player next to seat in first-person
+  if (S.activeSeat) {
+    const seatWorld = S.activeSeat.mesh.getWorldPosition(new THREE.Vector3());
+    const seatRot = S.activeConstruction ? S.activeConstruction.rotation : 0;
+    const sideDir = new THREE.Vector3(Math.cos(seatRot), 0, -Math.sin(seatRot));
+    S.playerPos.copy(seatWorld).add(sideDir.multiplyScalar(2));
+    S.playerPos.y = CFG.playerEyeH;
+    S.playerYaw = seatRot + Math.PI;
+  }
+  S.isDriving = false;
+  S.activeSeat = null;
+  S.activeConstruction = null;
+  S.mode = 'build';
+  updateToolButtons();
+  document.getElementById('mode-label').textContent = '建造模式';
+  document.getElementById('drive-hud').style.display = 'none';
+  document.getElementById('crosshair').style.display = 'none';
+  if (S.playerBody) S.playerBody.visible = true;
+}
+
+function highlightPart(part, on) {
+  part.mesh.traverse(c => {
+    if (c.isMesh && c.material && c.material.isMeshLambertMaterial) {
+      c.material.emissive = new THREE.Color(on ? 0x446688 : 0x000000);
+    }
+  });
+}
+
+// ============ UI ============
+function buildPartGrid() {
+  const grid = document.getElementById('part-grid');
+  grid.innerHTML = '';
+  const cat = PART_CATEGORIES.find(c => c.id === S.activeCategory);
+  if (!cat) return;
+  cat.parts.forEach(type => {
+    const def = getPartDef(type);
+    const btn = document.createElement('div');
+    btn.className = 'part-btn' + (type === S.selectedPart ? ' active' : '');
+    btn.dataset.part = type;
+    btn.title = def.name;
+    btn.innerHTML = `<canvas width="32" height="28"></canvas><span>${isBlockType(type) ? (MATERIAL_DEFS[def.material] ? MATERIAL_DEFS[def.material].name : '') : def.name}</span>`;
+    grid.appendChild(btn);
+    btn.addEventListener('click', () => selectPart(type));
+  });
+  drawPartIcons();
+}
+
+function setupUI() {
+  // Tool buttons
+  document.querySelectorAll('.tool-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.tool === 'drive') {
+        toggleDriving();
+        return;
+      }
+      if (S.isDriving) exitDriving();
+      S.mode = btn.dataset.tool;
+      S.connectSource = null;
+      updateToolButtons();
+      const labels = { build: '建造模式', weld: '焊枪模式', connect: '连接模式', paint: '涂色模式', erase: '删除模式', lift: '升降台模式' };
+      document.getElementById('mode-label').textContent = labels[S.mode] || '';
+    });
+  });
+
+  // Category tabs
+  document.querySelectorAll('.cat-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      S.activeCategory = tab.dataset.cat;
+      document.querySelectorAll('.cat-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === S.activeCategory));
+      buildPartGrid();
+      // Auto-select first part in category
+      const cat = PART_CATEGORIES.find(c => c.id === S.activeCategory);
+      if (cat && cat.parts.length > 0) selectPart(cat.parts[0]);
+    });
+  });
+
+  // Save/Load/Reset/Clear
+  document.getElementById('btn-save').addEventListener('click', () => { saveGame(); notify('已保存'); });
+  document.getElementById('btn-load').addEventListener('click', () => { loadGame(); notify('已读取'); });
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    S.constructions.forEach(c => {
+      const terrainH = getTerrainHeight(c.position.x, c.position.z);
+      const lowestY = getLowestPartY(c);
+      c.position.set(0, terrainH - lowestY, 0);
+      c.velocity.set(0, 0, 0);
+      c.rotation = 0;
+      c.angularVel = 0;
+      c.group.position.copy(c.position);
+      c.group.rotation.y = 0;
+    });
+    notify('已重置到原点');
+  });
+  document.getElementById('btn-clear').addEventListener('click', () => {
+    if (confirm('确定清空所有零件？')) {
+      clearAll();
+      notify('已清空');
+    }
+  });
+
+  // Build initial part grid
+  buildPartGrid();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+}
+
+function selectPart(type) {
+  S.selectedPart = type;
+  document.querySelectorAll('.part-btn').forEach(b => b.classList.toggle('active', b.dataset.part === type));
+  scene.remove(S.ghostMesh);
+  S.ghostMesh = createPartMesh(type, true);
+  S.ghostMesh.visible = false;
+  scene.add(S.ghostMesh);
+}
+
+function updateToolButtons() {
+  document.querySelectorAll('.tool-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tool === S.mode);
+  });
+}
+
+function notify(msg) {
+  const el = document.getElementById('notification');
+  el.textContent = msg;
+  el.style.display = 'block';
+  el.style.animation = 'none';
+  el.offsetHeight; // reflow
+  el.style.animation = 'fadeInOut 2.5s ease';
+  setTimeout(() => el.style.display = 'none', 2500);
+}
+
+function drawPartIcons() {
+  document.querySelectorAll('.part-btn').forEach(btn => {
+    const type = btn.dataset.part;
+    if (!type || !getPartDef(type)) return;
+    const canvas = btn.querySelector('canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, 32, 28);
+    const def = getPartDef(type);
+    const hex = '#' + def.color.toString(16).padStart(6, '0');
+
+    if (isBlockType(type)) {
+      ctx.fillStyle = hex; ctx.fillRect(6, 6, 20, 16);
+      const matKey = def.material || 'wood';
+      const strokeColor = matKey === 'metal' ? '#9ac' : matKey === 'wood' ? '#8b7355' :
+                          matKey === 'glass' ? '#8cf' : matKey === 'cardboard' ? '#b09070' : '#666';
+      ctx.strokeStyle = strokeColor; ctx.lineWidth = 1; ctx.strokeRect(6, 6, 20, 16);
+      // Material label
+      ctx.fillStyle = matKey === 'glass' ? '#fff' : '#ddd';
+      ctx.font = '7px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(MATERIAL_DEFS[matKey].name, 16, 17);
+    } else if (type === 'wheel') {
+      ctx.fillStyle = hex; ctx.beginPath(); ctx.arc(16, 14, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#555'; ctx.beginPath(); ctx.arc(16, 14, 4, 0, Math.PI * 2); ctx.fill();
+    } else if (type === 'bearing') {
+      ctx.fillStyle = hex; ctx.beginPath(); ctx.arc(16, 14, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#ff0'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(16, 14, 5, 0, Math.PI * 2); ctx.stroke();
+    } else if (type === 'gas_engine') {
+      ctx.fillStyle = hex; ctx.fillRect(6, 8, 20, 12);
+      ctx.fillStyle = '#444'; ctx.fillRect(10, 4, 4, 6); ctx.fillRect(18, 4, 4, 6);
+      ctx.fillStyle = '#f64'; ctx.fillRect(8, 22, 16, 2);
+    } else if (type === 'electric_engine') {
+      ctx.fillStyle = hex; ctx.fillRect(7, 9, 18, 10);
+      ctx.fillStyle = '#8df'; ctx.beginPath(); ctx.arc(16, 14, 5, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#ff0'; ctx.fillRect(14, 12, 4, 4);
+    } else if (type === 'driver_seat') {
+      ctx.fillStyle = hex; ctx.fillRect(8, 14, 16, 4); ctx.fillRect(8, 6, 16, 4);
+      ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(16, 10, 4, 0, Math.PI * 2); ctx.stroke();
+    } else if (type === 'passenger_seat') {
+      ctx.fillStyle = hex; ctx.fillRect(8, 14, 16, 4); ctx.fillRect(8, 8, 16, 3);
+    } else if (type === 'piston') {
+      ctx.fillStyle = hex; ctx.fillRect(12, 4, 8, 20);
+      ctx.fillRect(10, 4, 12, 4);
+    } else if (type === 'sport_suspension') {
+      ctx.strokeStyle = '#c44'; ctx.lineWidth = 2;
+      // zigzag spring
+      ctx.beginPath(); ctx.moveTo(16, 4);
+      for (let i = 0; i < 4; i++) { ctx.lineTo(i % 2 === 0 ? 10 : 22, 6 + i * 5); }
+      ctx.lineTo(16, 24); ctx.stroke();
+      ctx.fillStyle = '#666'; ctx.fillRect(14, 8, 4, 12);
+    } else if (type === 'offroad_suspension') {
+      ctx.strokeStyle = '#4a4'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(16, 4);
+      for (let i = 0; i < 3; i++) { ctx.lineTo(i % 2 === 0 ? 8 : 24, 6 + i * 7); }
+      ctx.lineTo(16, 24); ctx.stroke();
+      ctx.fillStyle = '#666'; ctx.fillRect(13, 6, 6, 16);
+    } else if (type === 'switch') {
+      ctx.fillStyle = hex; ctx.fillRect(10, 8, 12, 12);
+      ctx.fillStyle = '#f00'; ctx.fillRect(14, 12, 4, 4);
+    } else if (type === 'logic_gate') {
+      ctx.fillStyle = hex; ctx.fillRect(8, 7, 16, 14);
+      ctx.fillStyle = '#4f4'; ctx.beginPath(); ctx.arc(10, 14, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(10, 10, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#f84'; ctx.beginPath(); ctx.arc(22, 12, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = '6px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('G', 16, 16);
+    } else if (type === 'timer') {
+      ctx.fillStyle = hex; ctx.fillRect(8, 7, 16, 14);
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(16, 14, 5, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(16, 14); ctx.lineTo(16, 10); ctx.stroke();
+    } else if (type === 'sensor') {
+      ctx.fillStyle = hex; ctx.fillRect(9, 8, 14, 12);
+      ctx.fillStyle = '#4ff'; ctx.beginPath(); ctx.arc(16, 14, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#4ff'; ctx.beginPath(); ctx.moveTo(16, 14); ctx.lineTo(24, 8); ctx.lineTo(24, 20); ctx.closePath(); ctx.globalAlpha = 0.3; ctx.fill(); ctx.globalAlpha = 1;
+    } else if (type === 'controller') {
+      ctx.fillStyle = hex; ctx.fillRect(7, 7, 18, 14);
+      const cColors = ['#f44', '#4f4', '#44f', '#ff4'];
+      for (let i = 0; i < 4; i++) {
+        ctx.fillStyle = cColors[i]; ctx.beginPath(); ctx.arc(11 + i * 4, 18, 2, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.fillStyle = '#fff'; ctx.font = '7px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('▶', 16, 14);
+    } else if (type === 'thruster') {
+      ctx.fillStyle = hex;
+      ctx.beginPath(); ctx.moveTo(10, 4); ctx.lineTo(22, 4); ctx.lineTo(24, 24); ctx.lineTo(8, 24); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#f30'; ctx.beginPath(); ctx.arc(16, 22, 4, 0, Math.PI * 2); ctx.fill();
+    } else if (type === 'wing') {
+      ctx.fillStyle = hex; ctx.fillRect(2, 10, 28, 6);
+      ctx.fillStyle = '#f44'; ctx.fillRect(2, 10, 3, 6); ctx.fillRect(27, 10, 3, 6);
+    }
+  });
+}
+
+// ============ GHOST PREVIEW ============
+function updateGhost() {
+  if (S.isDriving || S.mode !== 'build') {
+    S.ghostMesh.visible = false;
+    return;
+  }
+  const gp = getBuildGridPos();
+  if (!gp) { S.ghostMesh.visible = false; return; }
+
+  S.ghostMesh.visible = true;
+  S.ghostMesh.position.set(gp.x, gp.y, gp.z);
+  S.ghostMesh.rotation.y = S.ghostRot;
+
+  // Check if valid placement
+  const existing = getPartAtGrid(gp.x, gp.y, gp.z);
+  if (existing) {
+    S.ghostMesh.visible = false;
+  }
+}
+
+// ============ HOVER HIGHLIGHT ============
+function updateHover() {
+  if (S.hoverPart) {
+    highlightPart(S.hoverPart, false);
+    S.hoverPart = null;
+  }
+  if (S.isDriving) return;
+  if (S.mode === 'weld' || S.mode === 'connect' || S.mode === 'erase' || S.mode === 'paint') {
+    const part = getPartIntersect();
+    if (part) {
+      S.hoverPart = part;
+      highlightPart(part, true);
+    }
+  }
+}
+
+// ============ DRIVE HUD ============
+function updateHUD() {
+  if (!S.isDriving || !S.activeConstruction) return;
+  const c = S.activeConstruction;
+  const speed = Math.sqrt(c.velocity.x ** 2 + c.velocity.z ** 2 + c.velocity.y ** 2);
+  document.getElementById('hud-speed').textContent = speed.toFixed(1) + ' m/s';
+  document.getElementById('hud-alt').textContent = c.position.y.toFixed(1) + ' m';
+  const rh = c.rideHeightOffset || 0;
+  document.getElementById('hud-ride').textContent = (rh >= 0 ? '+' : '') + rh.toFixed(2) + ' m';
+}
+
+// ============ SAVE/LOAD ============
+function saveGame() {
+  try {
+    const data = {
+      version: 2,
+      parts: S.parts.map(p => ({
+        id: p.id, type: p.type, material: p.material || null,
+        gridPos: { ...p.gridPos },
+        rotation: p.rotation,
+        metadata: { gateType: p.metadata.gateType, on: p.metadata.on, delay: p.metadata.delay, stepTime: p.metadata.stepTime },
+        color: p.mesh.children[0] && p.mesh.children[0].material && p.mesh.children[0].material.color
+          ? p.mesh.children[0].material.color.getHex() : getPartDef(p.type).color
+      })),
+      connections: S.connections.map(c => ({
+        sourceId: c.sourceId, targetId: c.targetId, type: c.type
+      })),
+      playerPos: { x: S.playerPos.x, z: S.playerPos.z },
+      playerYaw: S.playerYaw
+    };
+    localStorage.setItem('scrapMechanic_save', JSON.stringify(data));
+  } catch (e) {}
+}
+
+function loadGame() {
+  try {
+    const raw = localStorage.getItem('scrapMechanic_save');
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    clearAll();
+    // Restore parts
+    const idMap = {};
+    data.parts.forEach(pd => {
+      // Backward compat: old types → new types
+      if (pd.type === 'block') {
+        pd.type = 'block_wood';
+        pd.material = 'wood';
+      }
+      if (pd.type === 'seat') {
+        pd.type = 'driver_seat';
+      }
+      if (pd.type === 'engine') {
+        pd.type = 'gas_engine';
+      }
+      const mesh = createPartMesh(pd.type, false);
+      const gp = pd.gridPos;
+      const def = getPartDef(pd.type);
+      const part = {
+        id: pd.id,
+        type: pd.type,
+        constructionId: 0,
+        gridPos: { ...gp },
+        worldPos: { ...gp },
+        rotation: pd.rotation || 0,
+        mesh,
+        metadata: {},
+        material: pd.material || def.material || null
+      };
+      mesh.userData.partId = part.id;
+      mesh.rotation.y = part.rotation;
+
+      // Restore metadata
+      if (pd.metadata) {
+        if (pd.metadata.gateType) {
+          part.metadata.gateType = pd.metadata.gateType;
+          const body = mesh.children[0];
+          if (body && body.material) body.material.color.setHex(GATE_COLORS[pd.metadata.gateType] || 0x8844cc);
+        }
+        if (pd.metadata.on !== undefined) part.metadata.on = pd.metadata.on;
+        if (pd.metadata.delay !== undefined) part.metadata.delay = pd.metadata.delay;
+        if (pd.metadata.stepTime !== undefined) part.metadata.stepTime = pd.metadata.stepTime;
+      }
+
+      // Restore color
+      if (pd.color !== undefined) {
+        mesh.traverse(c => {
+          if (c.isMesh && c.material && c.material.color) {
+            c.material.color.setHex(pd.color);
+          }
+        });
+      }
+
+      const adjacent = getAdjacentGrids(gp);
+      const constructions = new Set();
+      adjacent.forEach(a => { if (a.constructionId) constructions.add(a.constructionId); });
+
+      if (constructions.size === 0) {
+        createConstruction(part);
+      } else {
+        const cids = [...constructions];
+        const mainC = findConstruction(cids[0]);
+        addToConstruction(part, mainC);
+        for (let i = 1; i < cids.length; i++) {
+          const other = findConstruction(cids[i]);
+          if (other) mergeConstructions(mainC, other);
+        }
+      }
+
+      S.parts.push(part);
+      idMap[pd.id] = part.id;
+      if (pd.id >= S.nextId) S.nextId = pd.id + 1;
+    });
+
+    // Restore connections
+    if (data.connections) {
+      data.connections.forEach(cd => {
+        const sp = S.parts.find(p => p.id === cd.sourceId);
+        const tp = S.parts.find(p => p.id === cd.targetId);
+        if (sp && tp) {
+          const type = canConnect(sp, tp);
+          if (type) {
+            const colors = { power: 0xff4444, steering: 0x44aaff, signal: 0x44ff44, suspension: 0xffaa44 };
+            const p1 = sp.mesh.getWorldPosition(new THREE.Vector3());
+            const p2 = tp.mesh.getWorldPosition(new THREE.Vector3());
+            const cable = createCableMesh(p1, p2, colors[type] || 0xffffff);
+            scene.add(cable);
+            S.connections.push({
+              id: S.nextId++, sourceId: cd.sourceId, targetId: cd.targetId,
+              type, visualLine: cable
+            });
+            // Snap wheel below suspension on load
+            if (type === 'suspension') {
+              const sLocal = sp.mesh.userData.localPos || new THREE.Vector3();
+              const sDef = getPartDef(sp.type);
+              const suspHalfH = (sDef.h || 0.6) / 2;
+              const wheelR = getPartDef(tp.type).r || 0.45;
+              const newLocal = new THREE.Vector3(sLocal.x, sLocal.y - suspHalfH - wheelR, sLocal.z);
+              tp.mesh.position.copy(newLocal);
+              tp.mesh.userData.localPos = newLocal.clone();
+              tp._snapToSusp = sp.id;
+            }
+          }
+        }
+      });
+    }
+
+    if (S.nextCId <= S.constructions.length) S.nextCId = S.constructions.length + 1;
+    // Restore player position
+    if (data.playerPos) {
+      S.playerPos.x = data.playerPos.x;
+      S.playerPos.z = data.playerPos.z;
+      S.playerPos.y = CFG.playerEyeH;
+    }
+    if (data.playerYaw !== undefined) S.playerYaw = data.playerYaw;
+  } catch (e) { console.error('Load failed:', e); }
+}
+
+function clearAll() {
+  S.parts.forEach(p => scene.remove(p.mesh));
+  S.constructions.forEach(c => scene.remove(c.group));
+  S.connections.forEach(c => { if (c.visualLine) scene.remove(c.visualLine); });
+  S.parts = [];
+  S.constructions = [];
+  S.connections = [];
+  S.nextId = 1;
+  S.nextCId = 1;
+  if (S.isDriving) exitDriving();
+}
+
+// ============ MAIN LOOP ============
+function animate() {
+  requestAnimationFrame(animate);
+
+  const dt = Math.min(clock.getDelta(), 0.1);
+
+  // FPS counter
+  frameCount++;
+  const now = performance.now();
+  if (now - fpsTime > 500) {
+    document.getElementById('fps').textContent = Math.round(frameCount / ((now - fpsTime) / 1000)) + ' FPS';
+    frameCount = 0;
+    fpsTime = now;
+  }
+
+  // Physics
+  physicsStep(dt);
+  processSignals();
+
+  // Lift
+  updateLift(dt);
+
+  // Camera
+  updateCamera(dt);
+
+  // Ghost preview
+  updateGhost();
+
+  // Hover
+  updateHover();
+
+  // Connection lines
+  updateConnectionLines();
+
+  // HUD
+  updateHUD();
+
+  renderer.render(scene, camera);
+}
+
+// Global save function for Electron
+window.saveGame = saveGame;
+
+// Start
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Algorithmic Art Clock</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0a0a0f;
+            overflow: hidden;
+            font-family: 'Courier New', monospace;
+        }
+
+        canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        #bg-canvas {
+            z-index: 1;
+        }
+
+        #clock-canvas {
+            z-index: 2;
+        }
+
+        #digital-display {
+            position: fixed;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            color: #fff;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 0 0 20px rgba(0, 255, 255, 0.8);
+            letter-spacing: 8px;
+            opacity: 0.9;
+        }
+
+        #info {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 12px;
+            text-align: right;
+        }
+
+        .mode-selector {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            display: flex;
+            gap: 10px;
+        }
+
+        .mode-btn {
+            background: rgba(0, 255, 255, 0.1);
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            color: rgba(0, 255, 255, 0.8);
+            padding: 8px 16px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            transition: all 0.3s;
+        }
+
+        .mode-btn:hover, .mode-btn.active {
+            background: rgba(0, 255, 255, 0.3);
+            border-color: rgba(0, 255, 255, 0.8);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="bg-canvas"></canvas>
+    <canvas id="clock-canvas"></canvas>
+
+    <div class="mode-selector">
+        <button class="mode-btn active" data-mode="spiral">Spiral</button>
+        <button class="mode-btn" data-mode="particles">Particles</button>
+        <button class="mode-btn" data-mode="waveform">Waveform</button>
+        <button class="mode-btn" data-mode="fractal">Fractal</button>
+    </div>
+
+    <div id="digital-display">00:00:00</div>
+    <div id="info">
+        Algorithmic Art Clock<br>
+        Move mouse to interact
+    </div>
+
+    <script>
+        // Canvas setup
+        const bgCanvas = document.getElementById('bg-canvas');
+        const clockCanvas = document.getElementById('clock-canvas');
+        const bgCtx = bgCanvas.getContext('2d');
+        const clockCtx = clockCanvas.getContext('2d');
+        const digitalDisplay = document.getElementById('digital-display');
+
+        let width, height, centerX, centerY;
+        let mouseX = 0, mouseY = 0;
+        let currentMode = 'spiral';
+
+        // Resize handler
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            centerX = width / 2;
+            centerY = height / 2;
+
+            bgCanvas.width = width;
+            bgCanvas.height = height;
+            clockCanvas.width = width;
+            clockCanvas.height = height;
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Mouse tracking
+        document.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX - centerX;
+            mouseY = e.clientY - centerY;
+        });
+
+        // Mode selection
+        document.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentMode = btn.dataset.mode;
+                localStorage.setItem('superClock_prefs', JSON.stringify({ mode: currentMode }));
+            });
+        });
+
+        // Auto-load saved mode
+        try {
+            const saved = JSON.parse(localStorage.getItem('superClock_prefs'));
+            if (saved && saved.mode) {
+                currentMode = saved.mode;
+                document.querySelectorAll('.mode-btn').forEach(b => {
+                    b.classList.toggle('active', b.dataset.mode === currentMode);
+                });
+            }
+        } catch (e) {}
+
+        // Color utilities
+        function hueToRgb(h, s = 1, l = 0.5) {
+            let r, g, b;
+            if (s === 0) {
+                r = g = b = l;
+            } else {
+                const hue2rgb = (p, q, t) => {
+                    if (t < 0) t += 1;
+                    if (t > 1) t -= 1;
+                    if (t < 1/6) return p + (q - p) * 6 * t;
+                    if (t < 1/2) return q;
+                    if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                    return p;
+                };
+                const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                const p = 2 * l - q;
+                r = hue2rgb(p, q, h + 1/3);
+                g = hue2rgb(p, q, h);
+                b = hue2rgb(p, q, h - 1/3);
+            }
+            return `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
+        }
+
+        // ============================================
+        // SPIRAL MODE
+        // ============================================
+        function drawSpiralMode(time) {
+            const ms = time.getMilliseconds();
+            const s = time.getSeconds() + ms / 1000;
+            const m = time.getMinutes() + s / 60;
+            const h = time.getHours() + m / 60;
+
+            // Background particles
+            for (let i = 0; i < 100; i++) {
+                const angle = (i / 100) * Math.PI * 2 + time.getTime() * 0.0001;
+                const radius = 50 + (i / 100) * Math.min(width, height) * 0.4;
+                const x = centerX + Math.cos(angle) * radius;
+                const y = centerY + Math.sin(angle) * radius;
+                const alpha = 0.1 + 0.3 * Math.sin(time.getTime() * 0.001 + i);
+
+                bgCtx.beginPath();
+                bgCtx.arc(x, y, 2, 0, Math.PI * 2);
+                bgCtx.fillStyle = `rgba(0, 255, 255, ${alpha})`;
+                bgCtx.fill();
+            }
+
+            // Hour spiral
+            for (let i = 0; i < 60; i++) {
+                const angle = (i / 60) * Math.PI * 2 - Math.PI / 2;
+                const progress = (i / 60) * h / 12;
+                const radius = 80 + progress * 150;
+                const x = centerX + Math.cos(angle) * radius;
+                const y = centerY + Math.sin(angle) * radius;
+                const hue = (i / 60 + h / 24) % 1;
+
+                clockCtx.beginPath();
+                clockCtx.arc(x, y, 8 + 4 * Math.sin(time.getTime() * 0.01 + i), 0, Math.PI * 2);
+                clockCtx.fillStyle = hueToRgb(hue, 0.8, 0.5);
+                clockCtx.shadowBlur = 15;
+                clockCtx.shadowColor = hueToRgb(hue);
+                clockCtx.fill();
+            }
+
+            // Minute spiral
+            for (let i = 0; i < 60; i++) {
+                const angle = (i / 60) * Math.PI * 2 - Math.PI / 2;
+                const progress = i / 60;
+                const radius = 50 + progress * 250;
+
+                if (i <= m) {
+                    const x = centerX + Math.cos(angle) * radius;
+                    const y = centerY + Math.sin(angle) * radius;
+                    const hue = (i / 60 + m / 60) % 1;
+
+                    clockCtx.beginPath();
+                    clockCtx.arc(x, y, 6 + 2 * Math.sin(time.getTime() * 0.02 + i), 0, Math.PI * 2);
+                    clockCtx.fillStyle = hueToRgb(hue, 1, 0.6);
+                    clockCtx.shadowBlur = 10;
+                    clockCtx.shadowColor = hueToRgb(hue);
+                    clockCtx.fill();
+                }
+            }
+
+            // Second spiral
+            for (let i = 0; i < 60; i++) {
+                const angle = (i / 60) * Math.PI * 2 - Math.PI / 2;
+                const radius = 30 + (i / 60) * 300;
+
+                if (i <= s) {
+                    const x = centerX + Math.cos(angle) * radius;
+                    const y = centerY + Math.sin(angle) * radius;
+                    const hue = (i / 60) % 1;
+
+                    clockCtx.beginPath();
+                    clockCtx.arc(x, y, 4, 0, Math.PI * 2);
+                    clockCtx.fillStyle = hueToRgb(hue, 1, 0.7);
+                    clockCtx.shadowBlur = 20;
+                    clockCtx.shadowColor = hueToRgb(hue);
+                    clockCtx.fill();
+                }
+            }
+
+            // Second hand indicator
+            const sAngle = (s / 60) * Math.PI * 2 - Math.PI / 2;
+            const sRadius = 300;
+            const sX = centerX + Math.cos(sAngle) * sRadius;
+            const sY = centerY + Math.sin(sAngle) * sRadius;
+
+            clockCtx.beginPath();
+            clockCtx.arc(sX, sY, 12, 0, Math.PI * 2);
+            clockCtx.fillStyle = '#fff';
+            clockCtx.shadowBlur = 30;
+            clockCtx.shadowColor = '#0ff';
+            clockCtx.fill();
+
+            // Center
+            clockCtx.beginPath();
+            clockCtx.arc(centerX, centerY, 15, 0, Math.PI * 2);
+            clockCtx.fillStyle = '#0ff';
+            clockCtx.shadowBlur = 20;
+            clockCtx.shadowColor = '#0ff';
+            clockCtx.fill();
+        }
+
+        // ============================================
+        // PARTICLES MODE
+        // ============================================
+        const particles = [];
+        const particleCount = 500;
+
+        for (let i = 0; i < particleCount; i++) {
+            particles.push({
+                x: Math.random() * window.innerWidth,
+                y: Math.random() * window.innerHeight,
+                vx: (Math.random() - 0.5) * 2,
+                vy: (Math.random() - 0.5) * 2,
+                size: Math.random() * 3 + 1,
+                hue: Math.random()
+            });
+        }
+
+        function drawParticlesMode(time) {
+            const ms = time.getMilliseconds();
+            const s = time.getSeconds() + ms / 1000;
+            const m = time.getMinutes() + s / 60;
+            const h = time.getHours() % 12 + m / 60;
+
+            // Update and draw particles
+            particles.forEach((p, i) => {
+                p.x += p.vx;
+                p.y += p.vy;
+
+                // Wrap around
+                if (p.x < 0) p.x = width;
+                if (p.x > width) p.x = 0;
+                if (p.y < 0) p.y = height;
+                if (p.y > height) p.y = 0;
+
+                // Mouse attraction
+                const dx = mouseX - (p.x - centerX);
+                const dy = mouseY - (p.y - centerY);
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 200) {
+                    p.vx += dx * 0.0001;
+                    p.vy += dy * 0.0001;
+                }
+
+                // Time influence
+                p.vx += Math.sin(time.getTime() * 0.001 + i) * 0.01;
+                p.vy += Math.cos(time.getTime() * 0.001 + i) * 0.01;
+
+                // Damping
+                p.vx *= 0.99;
+                p.vy *= 0.99;
+
+                // Draw
+                bgCtx.beginPath();
+                bgCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                bgCtx.fillStyle = hueToRgb((p.hue + time.getTime() * 0.0001) % 1, 0.6, 0.5);
+                bgCtx.fill();
+            });
+
+            // Draw connections based on time
+            for (let i = 0; i < particles.length; i++) {
+                for (let j = i + 1; j < particles.length; j++) {
+                    const dx = particles[j].x - particles[i].x;
+                    const dy = particles[j].y - particles[i].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist < 80) {
+                        bgCtx.beginPath();
+                        bgCtx.moveTo(particles[i].x, particles[i].y);
+                        bgCtx.lineTo(particles[j].x, particles[j].y);
+                        bgCtx.strokeStyle = `rgba(0, 255, 255, ${(1 - dist / 80) * 0.2})`;
+                        bgCtx.stroke();
+                    }
+                }
+            }
+
+            // Hour ring
+            const hRadius = 100;
+            for (let i = 0; i < 12; i++) {
+                const angle = (i / 12) * Math.PI * 2 - Math.PI / 2;
+                const x = centerX + Math.cos(angle) * hRadius;
+                const y = centerY + Math.sin(angle) * hRadius;
+
+                const active = i < h;
+                clockCtx.beginPath();
+                clockCtx.arc(x, y, active ? 15 : 8, 0, Math.PI * 2);
+                clockCtx.fillStyle = active ? hueToRgb(i / 12, 0.8, 0.6) : 'rgba(100, 100, 100, 0.3)';
+                clockCtx.shadowBlur = active ? 20 : 0;
+                clockCtx.shadowColor = hueToRgb(i / 12);
+                clockCtx.fill();
+            }
+
+            // Minute ring
+            const mRadius = 160;
+            for (let i = 0; i < 60; i++) {
+                const angle = (i / 60) * Math.PI * 2 - Math.PI / 2;
+                const x = centerX + Math.cos(angle) * mRadius;
+                const y = centerY + Math.sin(angle) * mRadius;
+
+                const active = i < m;
+                clockCtx.beginPath();
+                clockCtx.arc(x, y, active ? 6 : 3, 0, Math.PI * 2);
+                clockCtx.fillStyle = active ? hueToRgb(i / 60, 1, 0.6) : 'rgba(100, 100, 100, 0.2)';
+                clockCtx.shadowBlur = active ? 10 : 0;
+                clockCtx.shadowColor = hueToRgb(i / 60);
+                clockCtx.fill();
+            }
+
+            // Second ring
+            const sRadius = 220;
+            for (let i = 0; i < 60; i++) {
+                const angle = (i / 60) * Math.PI * 2 - Math.PI / 2;
+                const x = centerX + Math.cos(angle) * sRadius;
+                const y = centerY + Math.sin(angle) * sRadius;
+
+                const active = i <= s;
+                clockCtx.beginPath();
+                clockCtx.arc(x, y, active ? 5 : 2, 0, Math.PI * 2);
+                clockCtx.fillStyle = active ? '#0ff' : 'rgba(100, 100, 100, 0.2)';
+                clockCtx.shadowBlur = active ? 15 : 0;
+                clockCtx.shadowColor = '#0ff';
+                clockCtx.fill();
+            }
+
+            // Center
+            clockCtx.beginPath();
+            clockCtx.arc(centerX, centerY, 20, 0, Math.PI * 2);
+            clockCtx.fillStyle = '#0ff';
+            clockCtx.shadowBlur = 30;
+            clockCtx.shadowColor = '#0ff';
+            clockCtx.fill();
+        }
+
+        // ============================================
+        // WAVEFORM MODE
+        // ============================================
+        function drawWaveformMode(time) {
+            const ms = time.getMilliseconds();
+            const s = time.getSeconds() + ms / 1000;
+            const m = time.getMinutes() + s / 60;
+            const h = time.getHours() % 12 + m / 60;
+
+            // Background waveform
+            for (let wave = 0; wave < 5; wave++) {
+                bgCtx.beginPath();
+                for (let x = 0; x < width; x += 5) {
+                    const y = centerY +
+                        Math.sin(x * 0.01 + time.getTime() * 0.001 + wave) * (50 + wave * 20) +
+                        Math.sin(x * 0.02 + time.getTime() * 0.002) * 30;
+
+                    if (x === 0) {
+                        bgCtx.moveTo(x, y);
+                    } else {
+                        bgCtx.lineTo(x, y);
+                    }
+                }
+                bgCtx.strokeStyle = `rgba(0, 255, 255, ${0.1 - wave * 0.02})`;
+                bgCtx.lineWidth = 2;
+                bgCtx.stroke();
+            }
+
+            // Hour wave
+            clockCtx.beginPath();
+            for (let i = 0; i <= 360; i++) {
+                const angle = (i / 180) * Math.PI;
+                const radius = 80 + Math.sin(angle * 12 + h * Math.PI * 2) * 30;
+                const x = centerX + Math.cos(angle) * radius;
+                const y = centerY + Math.sin(angle) * radius;
+
+                if (i === 0) {
+                    clockCtx.moveTo(x, y);
+                } else {
+                    clockCtx.lineTo(x, y);
+                }
+            }
+            clockCtx.closePath();
+            clockCtx.strokeStyle = hueToRgb(h / 12, 0.8, 0.5);
+            clockCtx.lineWidth = 3;
+            clockCtx.shadowBlur = 20;
+            clockCtx.shadowColor = hueToRgb(h / 12);
+            clockCtx.stroke();
+
+            // Minute wave
+            clockCtx.beginPath();
+            for (let i = 0; i <= 360; i++) {
+                const angle = (i / 180) * Math.PI;
+                const radius = 140 + Math.sin(angle * 30 + m * Math.PI * 2) * 40;
+                const x = centerX + Math.cos(angle) * radius;
+                const y = centerY + Math.sin(angle) * radius;
+
+                if (i === 0) {
+                    clockCtx.moveTo(x, y);
+                } else {
+                    clockCtx.lineTo(x, y);
+                }
+            }
+            clockCtx.closePath();
+            clockCtx.strokeStyle = hueToRgb(m / 60, 1, 0.5);
+            clockCtx.lineWidth = 3;
+            clockCtx.shadowBlur = 20;
+            clockCtx.shadowColor = hueToRgb(m / 60);
+            clockCtx.stroke();
+
+            // Second wave
+            clockCtx.beginPath();
+            for (let i = 0; i <= 360; i++) {
+                const angle = (i / 180) * Math.PI;
+                const radius = 200 + Math.sin(angle * 60 + s * Math.PI * 2) * 50;
+                const x = centerX + Math.cos(angle) * radius;
+                const y = centerY + Math.sin(angle) * radius;
+
+                if (i === 0) {
+                    clockCtx.moveTo(x, y);
+                } else {
+                    clockCtx.lineTo(x, y);
+                }
+            }
+            clockCtx.closePath();
+            clockCtx.strokeStyle = '#0ff';
+            clockCtx.lineWidth = 2;
+            clockCtx.shadowBlur = 15;
+            clockCtx.shadowColor = '#0ff';
+            clockCtx.stroke();
+
+            // Pulsing center
+            const pulse = Math.sin(time.getTime() * 0.005) * 5 + 25;
+            clockCtx.beginPath();
+            clockCtx.arc(centerX, centerY, pulse, 0, Math.PI * 2);
+            clockCtx.fillStyle = '#0ff';
+            clockCtx.shadowBlur = 40;
+            clockCtx.shadowColor = '#0ff';
+            clockCtx.fill();
+        }
+
+        // ============================================
+        // FRACTAL MODE
+        // ============================================
+        function drawBranch(ctx, x, y, length, angle, depth, time) {
+            if (depth === 0 || length < 2) return;
+
+            const endX = x + Math.cos(angle) * length;
+            const endY = y + Math.sin(angle) * length;
+            const hue = (depth / 10 + time.getTime() * 0.0001) % 1;
+
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(endX, endY);
+            ctx.strokeStyle = hueToRgb(hue, 0.8, 0.5);
+            ctx.lineWidth = depth;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = hueToRgb(hue);
+            ctx.stroke();
+
+            const sway = Math.sin(time.getTime() * 0.001 + depth) * 0.1;
+            const lengthScale = 0.7 + Math.sin(time.getTime() * 0.002 + depth) * 0.1;
+
+            drawBranch(ctx, endX, endY, length * lengthScale, angle - 0.5 + sway, depth - 1, time);
+            drawBranch(ctx, endX, endY, length * lengthScale, angle + 0.5 + sway, depth - 1, time);
+        }
+
+        function drawFractalMode(time) {
+            const ms = time.getMilliseconds();
+            const s = time.getSeconds() + ms / 1000;
+            const m = time.getMinutes() + s / 60;
+            const h = time.getHours() % 12 + m / 60;
+
+            // Background circles
+            for (let i = 0; i < 20; i++) {
+                const radius = (i + 1) * 20 + Math.sin(time.getTime() * 0.001 + i) * 10;
+                bgCtx.beginPath();
+                bgCtx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                bgCtx.strokeStyle = `rgba(0, 255, 255, ${0.05 - i * 0.002})`;
+                bgCtx.lineWidth = 1;
+                bgCtx.stroke();
+            }
+
+            // Hour fractal (12 branches)
+            for (let i = 0; i < 12; i++) {
+                if (i < h) {
+                    const angle = (i / 12) * Math.PI * 2 - Math.PI / 2;
+                    drawBranch(clockCtx, centerX, centerY, 60, angle, 5, time);
+                }
+            }
+
+            // Minute fractal (60 branches)
+            for (let i = 0; i < 60; i += 5) {
+                if (i < m) {
+                    const angle = (i / 60) * Math.PI * 2 - Math.PI / 2;
+                    drawBranch(clockCtx, centerX, centerY, 100, angle, 4, time);
+                }
+            }
+
+            // Second indicator
+            const sAngle = (s / 60) * Math.PI * 2 - Math.PI / 2;
+            const sX = centerX + Math.cos(sAngle) * 200;
+            const sY = centerY + Math.sin(sAngle) * 200;
+
+            clockCtx.beginPath();
+            clockCtx.arc(sX, sY, 10, 0, Math.PI * 2);
+            clockCtx.fillStyle = '#0ff';
+            clockCtx.shadowBlur = 30;
+            clockCtx.shadowColor = '#0ff';
+            clockCtx.fill();
+
+            // Center
+            clockCtx.beginPath();
+            clockCtx.arc(centerX, centerY, 15, 0, Math.PI * 2);
+            clockCtx.fillStyle = '#0ff';
+            clockCtx.shadowBlur = 20;
+            clockCtx.shadowColor = '#0ff';
+            clockCtx.fill();
+        }
+
+        // ============================================
+        // MAIN LOOP
+        // ============================================
+        function update() {
+            const now = new Date();
+
+            // Clear canvases
+            bgCtx.fillStyle = 'rgba(10, 10, 15, 0.1)';
+            bgCtx.fillRect(0, 0, width, height);
+            clockCtx.clearRect(0, 0, width, height);
+
+            // Draw based on mode
+            switch (currentMode) {
+                case 'spiral':
+                    drawSpiralMode(now);
+                    break;
+                case 'particles':
+                    drawParticlesMode(now);
+                    break;
+                case 'waveform':
+                    drawWaveformMode(now);
+                    break;
+                case 'fractal':
+                    drawFractalMode(now);
+                    break;
+            }
+
+            // Update digital display
+            const h = String(now.getHours()).padStart(2, '0');
+            const m = String(now.getMinutes()).padStart(2, '0');
+            const s = String(now.getSeconds()).padStart(2, '0');
+            digitalDisplay.textContent = `${h}:${m}:${s}`;
+
+            requestAnimationFrame(update);
+        }
+
+        // Start animation
+        update();
+    </script>
+</body>
+</html>

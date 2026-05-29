@@ -1,0 +1,3729 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>三体战舰 - Three-Body Warship</title>
+    <script src="p5.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --anthropic-dark: #141413;
+            --anthropic-light: #faf9f5;
+            --anthropic-mid-gray: #b0aea5;
+            --anthropic-light-gray: #e8e6dc;
+            --anthropic-orange: #d97757;
+            --anthropic-blue: #6a9bcc;
+            --anthropic-green: #788c5d;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+            min-height: 100vh;
+            color: var(--anthropic-light);
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            min-height: 100vh;
+            padding: 20px;
+            gap: 20px;
+            position: relative;
+        }
+
+        .sidebar {
+            width: 320px;
+            flex-shrink: 0;
+            background: rgba(20, 20, 19, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 24px;
+            padding-bottom: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            overflow-y: auto;
+            overflow-x: hidden;
+            max-height: 100vh;
+            border: 1px solid rgba(217, 119, 87, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        .sidebar.collapsed {
+            width: 0;
+            min-width: 0;
+            padding: 0;
+            opacity: 0;
+            pointer-events: none;
+            overflow: hidden;
+            transform: translateX(-100%);
+        }
+
+        .menu-toggle {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            width: 45px;
+            height: 45px;
+            background: rgba(20, 20, 19, 0.95);
+            border: 2px solid rgba(217, 119, 87, 0.6);
+            border-radius: 10px;
+            cursor: pointer;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .menu-toggle:hover {
+            background: rgba(217, 119, 87, 0.2);
+            border-color: rgba(217, 119, 87, 1);
+            transform: scale(1.05);
+        }
+
+        .menu-toggle svg {
+            width: 24px;
+            height: 24px;
+            fill: var(--anthropic-orange);
+            transition: transform 0.3s ease;
+        }
+
+        .menu-toggle.collapsed svg {
+            transform: rotate(180deg);
+        }
+
+        .container.sidebar-collapsed {
+            padding: 20px;
+            padding-left: 80px; /* Space for toggle button */
+        }
+
+        .sidebar::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .sidebar::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+        }
+
+        .sidebar::-webkit-scrollbar-thumb {
+            background: rgba(217, 119, 87, 0.5);
+            border-radius: 4px;
+        }
+
+        .sidebar::-webkit-scrollbar-thumb:hover {
+            background: rgba(217, 119, 87, 0.8);
+        }
+
+        .sidebar h1 {
+            font-family: 'Lora', serif;
+            font-size: 24px;
+            font-weight: 500;
+            color: var(--anthropic-orange);
+            margin-bottom: 8px;
+            text-shadow: 0 0 20px rgba(217, 119, 87, 0.5);
+        }
+
+        .sidebar .subtitle {
+            color: var(--anthropic-mid-gray);
+            font-size: 14px;
+            margin-bottom: 32px;
+            line-height: 1.4;
+        }
+
+        .control-section {
+            margin-bottom: 32px;
+        }
+
+        .control-section h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--anthropic-light);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .control-section h3::before {
+            content: '•';
+            color: var(--anthropic-orange);
+            font-weight: bold;
+        }
+
+        .seed-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 12px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            margin-bottom: 12px;
+            border: 1px solid var(--anthropic-light-gray);
+            text-align: center;
+            color: var(--anthropic-light);
+        }
+
+        .seed-input:focus {
+            outline: none;
+            border-color: var(--anthropic-orange);
+            box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.3);
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .seed-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+        }
+
+        .control-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--anthropic-light);
+            margin-bottom: 8px;
+        }
+
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .slider-container input[type="range"] {
+            flex: 1;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .slider-container input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            background: var(--anthropic-orange);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .slider-container input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.1);
+            background: #ff8866;
+        }
+
+        .value-display {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: var(--anthropic-mid-gray);
+            min-width: 60px;
+            text-align: right;
+        }
+
+        .color-group {
+            margin-bottom: 16px;
+        }
+
+        .color-group label {
+            display: block;
+            font-size: 12px;
+            color: var(--anthropic-mid-gray);
+            margin-bottom: 4px;
+        }
+
+        .color-picker-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .color-picker-container input[type="color"] {
+            width: 32px;
+            height: 32px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            background: none;
+            padding: 0;
+        }
+
+        .color-value {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: var(--anthropic-mid-gray);
+        }
+
+        .button {
+            background: var(--anthropic-orange);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            width: 100%;
+        }
+
+        .button:hover {
+            background: #ff8866;
+            transform: translateY(-1px);
+            box-shadow: 0 5px 15px rgba(217, 119, 87, 0.4);
+        }
+
+        .button:active {
+            transform: translateY(0);
+        }
+
+        .button.secondary {
+            background: var(--anthropic-blue);
+        }
+
+        .button.secondary:hover {
+            background: #7ab3e0;
+        }
+
+        .button.tertiary {
+            background: var(--anthropic-green);
+        }
+
+        .button.tertiary:hover {
+            background: #8a9c6d;
+        }
+
+        .button-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .button-row .button {
+            flex: 1;
+        }
+
+        .canvas-area {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 0;
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #canvas-container canvas {
+            display: block;
+        }
+
+        .status-display {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(20, 20, 19, 0.9);
+            padding: 15px 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: var(--anthropic-orange);
+            border: 1px solid rgba(217, 119, 87, 0.3);
+            z-index: 100;
+        }
+
+        .controls-hint {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(20, 20, 19, 0.9);
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            color: var(--anthropic-mid-gray);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            z-index: 100;
+        }
+
+        .controls-hint kbd {
+            background: rgba(217, 119, 87, 0.2);
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: var(--anthropic-orange);
+        }
+
+        /* Fixed minimap that stays on screen */
+        .galaxy-map {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 180px;
+            height: 180px;
+            background: rgba(0, 0, 0, 0.9);
+            border: 2px solid rgba(217, 119, 87, 0.6);
+            border-radius: 8px;
+            z-index: 500;
+            overflow: hidden;
+        }
+
+        .galaxy-map-canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        .galaxy-map-label {
+            position: absolute;
+            top: 6px;
+            left: 8px;
+            color: rgba(217, 119, 87, 0.8);
+            font-size: 10px;
+            font-weight: 600;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                flex-direction: column;
+            }
+            .sidebar {
+                width: 100%;
+                max-height: 40vh;
+            }
+        }
+    </style>
+</head>
+<body>
+    <button class="menu-toggle" id="menuToggle" onclick="toggleSidebar()">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+        </svg>
+    </button>
+
+    <div class="container">
+        <div class="sidebar" id="sidebar">
+            <h1>三体战舰</h1>
+            <div class="subtitle">Three-Body Chaos Warship<br/>N-Body Gravitational Simulation</div>
+
+            <div class="control-section">
+                <h3>Seed</h3>
+                <input type="number" id="seed-input" class="seed-input" value="12345" onchange="updateSeed()">
+                <div class="seed-controls">
+                    <button class="button secondary" onclick="previousSeed()">← Prev</button>
+                    <button class="button secondary" onclick="nextSeed()">Next →</button>
+                </div>
+                <button class="button tertiary" onclick="randomSeedAndUpdate()">↻ Random</button>
+            </div>
+
+            <div class="control-section">
+                <h3>Universe</h3>
+
+                <div class="control-group">
+                    <label>Planet Count</label>
+                    <div class="slider-container">
+                        <input type="range" id="planetCount" min="1" max="8" step="1" value="3" oninput="updateParam('planetCount', this.value)">
+                        <span class="value-display" id="planetCount-value">3</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Gravity Strength</label>
+                    <div class="slider-container">
+                        <input type="range" id="gravityStrength" min="0.5" max="3.0" step="0.1" value="1.5" oninput="updateParam('gravityStrength', this.value)">
+                        <span class="value-display" id="gravityStrength-value">1.5</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Time Scale</label>
+                    <div class="slider-container">
+                        <input type="range" id="timeScale" min="0.1" max="2.0" step="0.1" value="1.0" oninput="updateParam('timeScale', this.value)">
+                        <span class="value-display" id="timeScale-value">1.0</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-section">
+                <h3>Warship</h3>
+
+                <div class="control-group">
+                    <label>Thrust Power</label>
+                    <div class="slider-container">
+                        <input type="range" id="thrustPower" min="0.3" max="1.5" step="0.1" value="0.7" oninput="updateParam('thrustPower', this.value)">
+                        <span class="value-display" id="thrustPower-value">0.7</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Rotation Speed</label>
+                    <div class="slider-container">
+                        <input type="range" id="rotationSpeed" min="0.03" max="0.15" step="0.01" value="0.08" oninput="updateParam('rotationSpeed', this.value)">
+                        <span class="value-display" id="rotationSpeed-value">0.08</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Engine Particles</label>
+                    <div class="slider-container">
+                        <input type="range" id="particleCount" min="20" max="100" step="10" value="50" oninput="updateParam('particleCount', this.value)">
+                        <span class="value-display" id="particleCount-value">50</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-section">
+                <h3>Colors</h3>
+
+                <div class="color-group">
+                    <label>Warship Color</label>
+                    <div class="color-picker-container">
+                        <input type="color" id="shipColor" value="#00ffff" onchange="updateColor('shipColor', this.value)">
+                        <span class="color-value" id="shipColor-value">#00ffff</span>
+                    </div>
+                </div>
+
+                <div class="color-group">
+                    <label>Engine Color</label>
+                    <div class="color-picker-container">
+                        <input type="color" id="engineColor" value="#ff6b6b" onchange="updateColor('engineColor', this.value)">
+                        <span class="color-value" id="engineColor-value">#ff6b6b</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-section">
+                <h3>AI Warships</h3>
+
+                <div class="control-group">
+                    <label>AI Ship Count</label>
+                    <div class="slider-container">
+                        <input type="range" id="aiShipCount" min="0" max="15" step="1" value="5" oninput="updateParam('aiShipCount', this.value)">
+                        <span class="value-display" id="aiShipCount-value">5</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Spawn Distance</label>
+                    <div class="slider-container">
+                        <input type="range" id="aiSpawnDistance" min="500" max="5000" step="100" value="1200" oninput="updateParam('aiSpawnDistance', this.value)">
+                        <span class="value-display" id="aiSpawnDistance-value">1200</span>
+                    </div>
+                </div>
+
+                <button class="button tertiary" onclick="reinitializeAIShips()">↻ Respawn AI Ships</button>
+
+                <p style="font-size: 11px; color: var(--anthropic-mid-gray); margin-top: 10px;">
+                    🤖 AI ships patrol & orbit planets<br/>
+                    🎯 Press <kbd>F</kbd> to fire homing missiles<br/>
+                    🛡️ Press <kbd>E</kbd> to activate shield<br/>
+                    💥 Destroy AI ships with missile impacts<br/>
+                    ⌨️ Press <kbd>R</kbd> to quick respawn
+                </p>
+            </div>
+
+            <div class="control-section">
+                <h3>Audio</h3>
+                <div class="control-group">
+                    <label>Sound Effects</label>
+                    <div class="slider-container">
+                        <input type="checkbox" id="soundEnabled" checked onchange="toggleSound(this.checked)">
+                        <span class="value-display" id="soundStatus">ON</span>
+                    </div>
+                </div>
+                <p style="font-size: 11px; color: var(--anthropic-mid-gray); margin-top: 10px;">
+                    🔊 Multi-layer engine rumble<br/>
+                    🌌 Deep space ambient drone<br/>
+                    🚀 Epic launch & landing sounds<br/>
+                    ⚠️ Proximity & speed warnings
+                </p>
+            </div>
+
+            <div class="control-section">
+                <h3>Actions</h3>
+                <div class="button-row">
+                    <button class="button" onclick="resetParameters()">Reset</button>
+                    <button class="button secondary" onclick="launchShip()">Launch</button>
+                </div>
+                <button class="button tertiary" style="width: 100%; margin-top: 10px;" onclick="restartGame()">🔄 Restart Game</button>
+                <p style="font-size: 11px; color: var(--anthropic-mid-gray); margin-top: 10px;">
+                    ⌨️ Press <kbd>T</kbd> to quick restart<br/>
+                    🎯 Destroy AI ships to earn points<br/>
+                    🏆 Try to beat your high score!
+                </p>
+            </div>
+        </div>
+
+        <div class="canvas-area">
+            <div id="canvas-container">
+                <div class="status-display" id="statusDisplay">
+                    SCORE: 0<br/>
+                    HIGH SCORE: 0<br/>
+                    VELOCITY: 0.00<br/>
+                    AI SHIPS: 5
+                </div>
+                <div class="controls-hint">
+                    <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move • <kbd>SPACE</kbd> Thrust • <kbd>L</kbd> Land/Launch • <kbd>E</kbd> Shield • <kbd>F</kbd> Fire Missile • <kbd>R</kbd> Respawn AI • <kbd>T</kbd> Restart Game
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fixed Galaxy Map -->
+    <div class="galaxy-map">
+        <div class="galaxy-map-label">GALAXY MAP</div>
+        <canvas id="minimapCanvas" class="galaxy-map-canvas"></canvas>
+    </div>
+
+    <script>
+        // ═══════════════════════════════════════════════════════════════════════
+        // THREE-BODY CHAOS - ALGORITHMIC PARAMETERS
+        // ═══════════════════════════════════════════════════════════════════════
+
+        let params = {
+            seed: 12345,
+            planetCount: 3,
+            gravityStrength: 1.5,
+            timeScale: 1.0,
+            thrustPower: 0.7,
+            rotationSpeed: 0.08,
+            maxParticles: 50,
+            shipColor: '#00ffff',
+            engineColor: '#ff6b6b',
+            soundEnabled: true,
+            aiShipCount: 5,
+            aiSpawnDistance: 1200
+        };
+
+        let defaultParams = {...params};
+
+        // Sidebar state
+        let sidebarCollapsed = false;
+
+        // Score system
+        let score = 0;
+        let highScore = 0;
+
+        // Game start time (for grace period)
+        let gameStartTime = 0;
+        const AI_GRACE_PERIOD = 120; // 2 seconds at 60fps
+
+        // Player respawn time (for post-respawn grace period)
+        let playerRespawnTime = 0;
+        const RESPAWN_GRACE_PERIOD = 120; // 2 seconds at 60fps
+
+        // Missile warning state
+        let missileWarningActive = false;
+        let warningCooldown = 0;
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // PHYSICS SIMULATION - N-BODY GRAVITY
+        // ═══════════════════════════════════════════════════════════════════════
+
+        let planets = [];
+        let ship;
+        let aiShips = [];
+        let particles = [];
+        let missiles = [];
+        let explosions = [];
+        let stars = [];
+        let galaxies = [];
+        let nebulas = [];
+        let asteroidBelts = [];
+        let cam = { x: 0, y: 0, zoom: 1 };
+        let keys = {};
+        let mouse = { x: 0, y: 0, clicked: false, locked: false, sensitivity: 0.002 };
+
+        // Camera view modes
+        let viewMode = 0; // 0 = first person, 1 = third person, 2 = top down
+        const VIEW_MODES = ['First Person', 'Third Person', 'Top Down'];
+
+        // Mouse control for ship direction (like Minecraft)
+        let mouseXOffset = 0; // Accumulated mouse movement for ship rotation (yaw)
+        let mouseYOffset = 0; // Accumulated mouse movement for ship pitch (up/down)
+
+        // Universe boundaries
+        const UNIVERSE_BOUNDS = 5000;
+        const BOUNDARY_FORCE = 0.5;
+
+        // Minimap canvas context
+        let minimapCanvas;
+        let minimapCtx;
+
+        // Helper function to convert hex to RGB object
+        function hexToRgb(hex) {
+            let result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : { r: 255, g: 255, b: 255 };
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // ADVANCED AUDIO SYSTEM - Web Audio API
+        // ═══════════════════════════════════════════════════════════════════════
+
+        let audioContext = null;
+        let thrustOscillators = [];
+        let thrustGain = null;
+        let ambientOscillator = null;
+        let ambientGain = null;
+        let masterGain = null;
+
+        function initAudio() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                masterGain = audioContext.createGain();
+                masterGain.gain.value = 0.4;
+                masterGain.connect(audioContext.destination);
+            }
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            startAmbient();
+        }
+
+        function startAmbient() {
+            if (ambientOscillator || !params.soundEnabled) return;
+
+            // Deep space ambient drone
+            ambientOscillator = audioContext.createOscillator();
+            ambientGain = audioContext.createGain();
+            const ambientFilter = audioContext.createBiquadFilter();
+
+            ambientOscillator.type = 'sine';
+            ambientOscillator.frequency.setValueAtTime(55, audioContext.currentTime);
+
+            ambientFilter.type = 'lowpass';
+            ambientFilter.frequency.value = 200;
+            ambientFilter.Q.value = 1;
+
+            ambientGain.gain.value = 0.03;
+
+            ambientOscillator.connect(ambientFilter);
+            ambientFilter.connect(ambientGain);
+            ambientGain.connect(masterGain);
+            ambientOscillator.start();
+        }
+
+        function stopAmbient() {
+            if (ambientOscillator) {
+                const now = audioContext.currentTime;
+                ambientGain.gain.linearRampToValueAtTime(0, now + 0.5);
+                ambientOscillator.stop(now + 0.5);
+                ambientOscillator = null;
+            }
+        }
+
+        function playSound(type) {
+            if (!params.soundEnabled) return;
+            initAudio();
+
+            const now = audioContext.currentTime;
+
+            switch(type) {
+                case 'thrust':
+                    stopThrust();
+
+                    // Multi-layered engine sound
+                    thrustOscillators = [];
+
+                    // Layer 1: Deep rumble
+                    const osc1 = audioContext.createOscillator();
+                    osc1.type = 'sawtooth';
+                    osc1.frequency.setValueAtTime(60, now);
+                    osc1.frequency.linearRampToValueAtTime(85, now + 0.2);
+
+                    // Layer 2: Mid frequency
+                    const osc2 = audioContext.createOscillator();
+                    osc2.type = 'square';
+                    osc2.frequency.setValueAtTime(120, now);
+                    osc2.frequency.linearRampToValueAtTime(150, now + 0.15);
+
+                    // Layer 3: High whine
+                    const osc3 = audioContext.createOscillator();
+                    osc3.type = 'triangle';
+                    osc3.frequency.setValueAtTime(200, now);
+                    osc3.frequency.linearRampToValueAtTime(280, now + 0.1);
+
+                    thrustGain = audioContext.createGain();
+                    thrustGain.gain.setValueAtTime(0, now);
+                    thrustGain.gain.linearRampToValueAtTime(0.25, now + 0.05);
+
+                    const filter = audioContext.createBiquadFilter();
+                    filter.type = 'lowpass';
+                    filter.frequency.setValueAtTime(500, now);
+                    filter.frequency.linearRampToValueAtTime(1500, now + 0.1);
+                    filter.Q.value = 2;
+
+                    [osc1, osc2, osc3].forEach(osc => {
+                        osc.connect(filter);
+                        thrustOscillators.push(osc);
+                    });
+
+                    filter.connect(thrustGain);
+                    thrustGain.connect(masterGain);
+
+                    thrustOscillators.forEach(osc => osc.start(now));
+                    break;
+
+                case 'land':
+                    // Epic landing sound with reverb effect
+                    const landOsc1 = audioContext.createOscillator();
+                    const landOsc2 = audioContext.createOscillator();
+                    const landGain1 = audioContext.createGain();
+                    const landGain2 = audioContext.createGain();
+                    const landFilter = audioContext.createBiquadFilter();
+
+                    landOsc1.type = 'sine';
+                    landOsc1.frequency.setValueAtTime(600, now);
+                    landOsc1.frequency.exponentialRampToValueAtTime(80, now + 1.0);
+
+                    landOsc2.type = 'triangle';
+                    landOsc2.frequency.setValueAtTime(300, now);
+                    landOsc2.frequency.exponentialRampToValueAtTime(40, now + 0.8);
+
+                    landFilter.type = 'lowpass';
+                    landFilter.frequency.setValueAtTime(2000, now);
+                    landFilter.frequency.exponentialRampToValueAtTime(200, now + 1.0);
+
+                    landGain1.gain.setValueAtTime(0.4, now);
+                    landGain1.gain.exponentialRampToValueAtTime(0.01, now + 1.0);
+
+                    landGain2.gain.setValueAtTime(0.2, now);
+                    landGain2.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
+
+                    landOsc1.connect(landFilter);
+                    landOsc2.connect(landFilter);
+                    landFilter.connect(landGain1);
+                    landGain1.connect(masterGain);
+                    landOsc2.connect(landGain2);
+                    landGain2.connect(masterGain);
+
+                    landOsc1.start(now);
+                    landOsc2.start(now);
+                    landOsc1.stop(now + 1.0);
+                    landOsc2.stop(now + 0.8);
+                    break;
+
+                case 'launch':
+                    // Powerful launch with buildup
+                    for (let i = 0; i < 5; i++) {
+                        const osc = audioContext.createOscillator();
+                        const gain = audioContext.createGain();
+
+                        osc.type = i % 2 === 0 ? 'square' : 'sawtooth';
+                        osc.frequency.setValueAtTime(80 + i * 40, now);
+                        osc.frequency.exponentialRampToValueAtTime(400 + i * 100, now + 0.5);
+
+                        gain.gain.setValueAtTime(0, now + i * 0.05);
+                        gain.gain.linearRampToValueAtTime(0.15, now + i * 0.05 + 0.1);
+                        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+
+                        osc.connect(gain);
+                        gain.connect(masterGain);
+
+                        osc.start(now + i * 0.02);
+                        osc.stop(now + 0.6);
+                    }
+                    break;
+
+                case 'speed':
+                    // High speed warning
+                    const speedOsc = audioContext.createOscillator();
+                    const speedGain = audioContext.createGain();
+
+                    speedOsc.type = 'sine';
+                    speedOsc.frequency.setValueAtTime(800, now);
+                    speedOsc.frequency.linearRampToValueAtTime(1200, now + 0.1);
+                    speedOsc.frequency.linearRampToValueAtTime(800, now + 0.2);
+
+                    speedGain.gain.setValueAtTime(0.1, now);
+                    speedGain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+
+                    speedOsc.connect(speedGain);
+                    speedGain.connect(masterGain);
+                    speedOsc.start(now);
+                    speedOsc.stop(now + 0.2);
+                    break;
+
+                case 'proximity':
+                    // Planet proximity alert
+                    const proxOsc = audioContext.createOscillator();
+                    const proxGain = audioContext.createGain();
+                    const proxFilter = audioContext.createBiquadFilter();
+
+                    proxOsc.type = 'sine';
+                    proxOsc.frequency.setValueAtTime(440, now);
+
+                    proxFilter.type = 'bandpass';
+                    proxFilter.frequency.setValueAtTime(800, now);
+                    proxFilter.Q.value = 10;
+
+                    proxGain.gain.setValueAtTime(0.08, now);
+
+                    proxOsc.connect(proxFilter);
+                    proxFilter.connect(proxGain);
+                    proxGain.connect(masterGain);
+                    proxOsc.start(now);
+                    proxOsc.stop(now + 0.3);
+                    break;
+
+                case 'explosion':
+                    // Massive explosion with multiple layers
+                    // Layer 1: Deep explosion boom
+                    const explOsc1 = audioContext.createOscillator();
+                    const explGain1 = audioContext.createGain();
+                    const explFilter1 = audioContext.createBiquadFilter();
+
+                    explOsc1.type = 'sawtooth';
+                    explOsc1.frequency.setValueAtTime(150, now);
+                    explOsc1.frequency.exponentialRampToValueAtTime(30, now + 0.8);
+
+                    explFilter1.type = 'lowpass';
+                    explFilter1.frequency.setValueAtTime(1000, now);
+                    explFilter1.frequency.exponentialRampToValueAtTime(100, now + 0.8);
+                    explFilter1.Q.value = 5;
+
+                    explGain1.gain.setValueAtTime(0.5, now);
+                    explGain1.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
+
+                    explOsc1.connect(explFilter1);
+                    explFilter1.connect(explGain1);
+                    explGain1.connect(masterGain);
+
+                    explOsc1.start(now);
+                    explOsc1.stop(now + 0.8);
+
+                    // Layer 2: Mid-frequency crunch
+                    const explOsc2 = audioContext.createOscillator();
+                    const explGain2 = audioContext.createGain();
+                    const explFilter2 = audioContext.createBiquadFilter();
+
+                    explOsc2.type = 'square';
+                    explOsc2.frequency.setValueAtTime(200, now);
+                    explOsc2.frequency.exponentialRampToValueAtTime(50, now + 0.5);
+
+                    explFilter2.type = 'bandpass';
+                    explFilter2.frequency.setValueAtTime(800, now);
+                    explFilter2.Q.value = 3;
+
+                    explGain2.gain.setValueAtTime(0.3, now);
+                    explGain2.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+
+                    explOsc2.connect(explFilter2);
+                    explFilter2.connect(explGain2);
+                    explGain2.connect(masterGain);
+
+                    explOsc2.start(now);
+                    explOsc2.stop(now + 0.5);
+
+                    // Layer 3: High frequency crackle
+                    for (let i = 0; i < 3; i++) {
+                        const crackleOsc = audioContext.createOscillator();
+                        const crackleGain = audioContext.createGain();
+
+                        crackleOsc.type = 'triangle';
+                        crackleOsc.frequency.setValueAtTime(random(800, 1500), now);
+                        crackleOsc.frequency.exponentialRampToValueAtTime(100, now + 0.15);
+
+                        crackleGain.gain.setValueAtTime(0.15, now + i * 0.02);
+                        crackleGain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+
+                        crackleOsc.connect(crackleGain);
+                        crackleGain.connect(masterGain);
+
+                        crackleOsc.start(now + i * 0.02);
+                        crackleOsc.stop(now + 0.2);
+                    }
+                    break;
+            }
+        }
+
+        function playMissileWarning(distance) {
+            if (!params.soundEnabled) return;
+            initAudio();
+
+            const now = audioContext.currentTime;
+
+            // Calculate pitch based on distance (closer = higher pitch)
+            // Distance 0-3000 maps to frequency 1600-200Hz
+            let frequency = map(distance, 0, 3000, 1600, 200);
+            frequency = Math.max(200, Math.min(1600, frequency));
+
+            // Calculate volume based on distance (closer = louder)
+            let volume = map(distance, 0, 3000, 0.6, 0.12);
+            volume = Math.max(0.12, Math.min(0.6, volume));
+
+            // Create warning beep with double beep for urgency
+            const warningOsc = audioContext.createOscillator();
+            const warningGain = audioContext.createGain();
+
+            warningOsc.type = 'square';
+            warningOsc.frequency.setValueAtTime(frequency, now);
+
+            // Quick attack and decay for sharp beeping sound
+            warningGain.gain.setValueAtTime(0, now);
+            warningGain.gain.linearRampToValueAtTime(volume, now + 0.005);
+            warningGain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+
+            warningOsc.connect(warningGain);
+            warningGain.connect(masterGain);
+
+            warningOsc.start(now);
+            warningOsc.stop(now + 0.08);
+
+            // Second beep for very close missiles (<600m now)
+            if (distance < 600) {
+                const warningOsc2 = audioContext.createOscillator();
+                const warningGain2 = audioContext.createGain();
+
+                warningOsc2.type = 'square';
+                warningOsc2.frequency.setValueAtTime(frequency * 1.2, now);
+
+                warningGain2.gain.setValueAtTime(0, now);
+                warningGain2.gain.linearRampToValueAtTime(volume * 0.8, now + 0.005);
+                warningGain2.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+
+                warningOsc2.connect(warningGain2);
+                warningGain2.connect(masterGain);
+
+                warningOsc2.start(now + 0.1);
+                warningOsc2.stop(now + 0.18);
+            }
+        }
+
+        function stopThrust() {
+            if (thrustOscillators.length > 0 && thrustGain) {
+                const now = audioContext.currentTime;
+                thrustGain.gain.linearRampToValueAtTime(0, now + 0.15);
+                thrustOscillators.forEach(osc => {
+                    try { osc.stop(now + 0.15); } catch(e) {}
+                });
+                thrustOscillators = [];
+                thrustGain = null;
+            }
+        }
+
+        class Planet {
+            constructor(x, y, radius, mass, rgb) {
+                this.x = x;
+                this.y = y;
+                this.radius = radius;
+                this.mass = mass;
+                this.rgb = rgb;
+                this.vx = random(-0.3, 0.3);
+                this.vy = random(-0.3, 0.3);
+                this.rings = random() > 0.7;
+            }
+
+            update() {
+                for (let other of planets) {
+                    if (other === this) continue;
+
+                    let dx = other.x - this.x;
+                    let dy = other.y - this.y;
+                    let dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < this.radius + other.radius) continue;
+
+                    let force = (params.gravityStrength * other.mass) / (dist * dist);
+                    let angle = Math.atan2(dy, dx);
+
+                    this.vx += Math.cos(angle) * force * 0.01 * params.timeScale;
+                    this.vy += Math.sin(angle) * force * 0.01 * params.timeScale;
+                }
+
+                this.x += this.vx * params.timeScale;
+                this.y += this.vy * params.timeScale;
+
+                // Boundary collision - bounce back from universe edges
+                if (this.x < -UNIVERSE_BOUNDS + this.radius) {
+                    this.x = -UNIVERSE_BOUNDS + this.radius;
+                    this.vx = Math.abs(this.vx) * 0.3;
+                } else if (this.x > UNIVERSE_BOUNDS - this.radius) {
+                    this.x = UNIVERSE_BOUNDS - this.radius;
+                    this.vx = -Math.abs(this.vx) * 0.3;
+                }
+
+                if (this.y < -UNIVERSE_BOUNDS + this.radius) {
+                    this.y = -UNIVERSE_BOUNDS + this.radius;
+                    this.vy = Math.abs(this.vy) * 0.3;
+                } else if (this.y > UNIVERSE_BOUNDS - this.radius) {
+                    this.y = UNIVERSE_BOUNDS - this.radius;
+                    this.vy = -Math.abs(this.vy) * 0.3;
+                }
+            }
+
+            draw() {
+                let screenX = (this.x - cam.x) * cam.zoom + width / 2;
+                let screenY = (this.y - cam.y) * cam.zoom + height / 2;
+                let screenRadius = this.radius * cam.zoom;
+
+                if (screenX < -screenRadius * 2 || screenX > width + screenRadius * 2 ||
+                    screenY < -screenRadius * 2 || screenY > height + screenRadius * 2) return;
+
+                // Atmospheric glow
+                noStroke();
+                for (let i = 5; i > 0; i--) {
+                    let alpha = (5 / i) * 0.03 * 255;
+                    let glowRadius = screenRadius * (1 + i * 0.3);
+                    fill(this.rgb.r, this.rgb.g, this.rgb.b, alpha);
+                    ellipse(screenX, screenY, glowRadius * 2, glowRadius * 2);
+                }
+
+                // Planet body - simple gradient effect with multiple circles
+                for (let i = 10; i > 0; i--) {
+                    let size = screenRadius * 2 * (i / 10);
+                    let r = lerp(this.rgb.r, 20, i / 10);
+                    let g = lerp(this.rgb.g, 20, i / 10);
+                    let b = lerp(this.rgb.b, 20, i / 10);
+                    fill(r, g, b);
+                    noStroke();
+                    ellipse(screenX, screenY, size, size);
+                }
+
+                // Main planet body
+                fill(this.rgb.r, this.rgb.g, this.rgb.b);
+                ellipse(screenX, screenY, screenRadius * 2, screenRadius * 2);
+
+                // Rings
+                if (this.rings) {
+                    stroke(this.rgb.r, this.rgb.g, this.rgb.b, 100);
+                    strokeWeight(3 * cam.zoom);
+                    noFill();
+                    ellipse(screenX, screenY, screenRadius * 3, screenRadius * 0.8);
+                }
+
+                // Craters
+                noStroke();
+                for (let i = 0; i < 5; i++) {
+                    let craterX = screenX + (noise(this.x + i * 100) - 0.5) * screenRadius;
+                    let craterY = screenY + (noise(this.y + i * 200) - 0.5) * screenRadius;
+                    let craterSize = screenRadius * (0.05 + noise(i * 50) * 0.1);
+                    fill(0, 0, 0, 50);
+                    ellipse(craterX, craterY, craterSize, craterSize);
+                }
+            }
+
+            draw3D() {
+                push();
+                translate(this.x, 0, -this.y); // Changed: x, 0, z coordinates
+
+                // Atmospheric glow (3D spheres) - reduced from 5 to 3 layers
+                noStroke();
+                for (let i = 3; i > 0; i--) {
+                    let alpha = (3 / i) * 0.03 * 255;
+                    let glowRadius = this.radius * (1 + i * 0.3);
+                    fill(this.rgb.r, this.rgb.g, this.rgb.b, alpha);
+                    sphere(glowRadius, 12, 12); // Reduced detail from 24 to 12
+                }
+
+                // Main planet body - reduced detail
+                fill(this.rgb.r, this.rgb.g, this.rgb.b);
+                noStroke();
+                sphere(this.radius, 16, 16); // Reduced detail from 24 to 16
+
+                // Rings - reduced detail
+                if (this.rings) {
+                    rotateX(HALF_PI * 0.3);
+                    fill(this.rgb.r, this.rgb.g, this.rgb.b, 100);
+                    torus(this.radius * 1.5, this.radius * 0.1, 16, 3); // Reduced detail
+                }
+
+                pop();
+            }
+        }
+
+        class Ship {
+            constructor() {
+                this.x = 0;
+                this.y = -400;
+                this.z = 0; // Vertical position (3D height)
+                this.vx = 0;
+                this.vy = 0.5;
+                this.vz = 0; // Vertical velocity
+                this.angle = -Math.PI / 2; // Horizontal rotation (yaw)
+                this.pitch = 0; // Vertical rotation (pitch), 0 = level
+                this.baseAngle = -Math.PI / 2; // For mouse control
+                this.basePitch = 0; // For mouse control
+                this.size = 20;
+                this.landed = false;
+                this.landedOn = null;
+                this.thrustPlaying = false;
+                this.health = 100;
+                this.maxHealth = 100;
+                this.invulnerableTime = 0;
+
+                // Shield system
+                this.shieldActive = false;
+                this.shieldEnergy = 100;
+                this.maxShieldEnergy = 100;
+                this.shieldCooldown = 0;
+                this.maxShieldCooldown = 300; // 5 seconds cooldown at 60fps
+                this.shieldDepletionRate = 0.25; // Energy per frame when active (~6.7 seconds at 100 energy)
+            }
+
+            update() {
+                // Update invulnerability timer
+                if (this.invulnerableTime > 0) {
+                    this.invulnerableTime--;
+                }
+
+                // Update shield cooldown
+                if (this.shieldCooldown > 0) {
+                    this.shieldCooldown--;
+                }
+
+                // Shield control - E key to toggle
+                if ((keys['e'] || keys['E']) && !this.landed) {
+                    if (!this.shieldActive && this.shieldCooldown <= 0 && this.shieldEnergy > 0) {
+                        this.shieldActive = true;
+                        playSound('launch'); // Reuse launch sound for shield activation
+                    }
+                } else {
+                    this.shieldActive = false;
+                }
+
+                // Deplete shield energy when active
+                if (this.shieldActive) {
+                    this.shieldEnergy -= this.shieldDepletionRate * params.timeScale;
+                    if (this.shieldEnergy <= 0) {
+                        this.shieldEnergy = 0;
+                        this.shieldActive = false;
+                        this.shieldCooldown = this.maxShieldCooldown;
+                    }
+                } else if (!this.shieldActive && this.shieldCooldown <= 0) {
+                    // Recharge shield when not active and not on cooldown (faster recharge)
+                    this.shieldEnergy = Math.min(this.maxShieldEnergy, this.shieldEnergy + 0.5 * params.timeScale);
+                }
+
+                // Launch from planet
+                if (this.landed && (keys['l'] || keys['L'])) {
+                    this.launch();
+                    playSound('launch');
+                }
+
+                // If landed, stick to planet
+                if (this.landed && this.landedOn) {
+                    this.x = this.landedOn.x + Math.cos(this.angle) * (this.landedOn.radius + this.size);
+                    this.y = this.landedOn.y + Math.sin(this.angle) * (this.landedOn.radius + this.size);
+                    this.vx = this.landedOn.vx;
+                    this.vy = this.landedOn.vy;
+                    return;
+                }
+
+                // Gravitational forces
+                for (let planet of planets) {
+                    let dx = planet.x - this.x;
+                    let dy = planet.y - this.y;
+                    let dist = Math.sqrt(dx * dx + dy * dy);
+
+                    // Landing detection
+                    if (dist < planet.radius + this.size * 0.5) {
+                        if (keys['l'] || keys['L']) {
+                            this.landOn(planet);
+                            playSound('land');
+                            return;
+                        }
+                    }
+
+                    let force = (params.gravityStrength * planet.mass * 0.5) / (dist * dist);
+                    let angle = Math.atan2(dy, dx);
+
+                    this.vx += Math.cos(angle) * force * params.timeScale;
+                    this.vy += Math.sin(angle) * force * params.timeScale;
+                }
+
+                // Thrust - supports WASD, Arrow keys, and Space
+                if ((keys['w'] || keys['W'] || keys['ArrowUp']) && !this.landed) {
+                    // Calculate thrust vector based on ship's angle (horizontal only)
+                    let thrust = params.thrustPower * 0.3 * params.timeScale;
+
+                    // Horizontal components only (no vertical/pitch)
+                    this.vx += Math.cos(this.angle) * thrust;
+                    this.vy += Math.sin(this.angle) * thrust;
+
+                    // Play thrust sound
+                    if (!this.thrustPlaying) {
+                        playSound('thrust', true);
+                        this.thrustPlaying = true;
+                    }
+
+                    let rgb = hexToRgb(params.engineColor);
+                    for (let i = 0; i < 1; i++) { // Reduced from 3 to 1 particle
+                        particles.push(new Particle(
+                            this.x - Math.cos(this.angle) * this.size,
+                            this.y - Math.sin(this.angle) * this.size,
+                            -this.angle + random(-0.3, 0.3),
+                            rgb
+                        ));
+                    }
+                } else {
+                    if (this.thrustPlaying) {
+                        stopThrust();
+                    }
+                    this.thrustPlaying = false;
+                }
+
+                // Reverse
+                if ((keys['s'] || keys['S'] || keys['ArrowDown']) && !this.landed) {
+                    this.vx -= Math.cos(this.angle) * params.thrustPower * 0.15 * params.timeScale;
+                    this.vy -= Math.sin(this.angle) * params.thrustPower * 0.15 * params.timeScale;
+                }
+
+                // Vertical thrust control (direct up/down movement) - REMOVED
+
+                // Rotation - Mouse control (when locked) OR Keyboard (fallback)
+                if (mouse.locked && !this.landed) {
+                    // Mouse controls ship direction (yaw only - horizontal only)
+                    // Ship angle = base angle + mouse offset
+                    this.angle = this.baseAngle + mouseXOffset;
+                    // No pitch control - removed vertical movement
+                } else {
+                    // Keyboard control - update base angle when not using mouse
+                    if ((keys['a'] || keys['A'] || keys['ArrowLeft']) && !this.landed) {
+                        this.angle += params.rotationSpeed;
+                        this.baseAngle = this.angle;
+                        mouseXOffset = 0; // Reset mouse offset when switching to keyboard
+                    }
+                    if ((keys['d'] || keys['D'] || keys['ArrowRight']) && !this.landed) {
+                        this.angle -= params.rotationSpeed;
+                        this.baseAngle = this.angle;
+                        mouseXOffset = 0; // Reset mouse offset when switching to keyboard
+                    }
+                }
+
+                this.x += this.vx * params.timeScale;
+                this.y += this.vy * params.timeScale;
+                // No vertical movement - z stays constant
+
+                // Boundary collision - bounce back from universe edges
+                if (this.x < -UNIVERSE_BOUNDS) {
+                    this.x = -UNIVERSE_BOUNDS;
+                    this.vx = Math.abs(this.vx) * 0.5;
+                } else if (this.x > UNIVERSE_BOUNDS) {
+                    this.x = UNIVERSE_BOUNDS;
+                    this.vx = -Math.abs(this.vx) * 0.5;
+                }
+
+                if (this.y < -UNIVERSE_BOUNDS) {
+                    this.y = -UNIVERSE_BOUNDS;
+                    this.vy = Math.abs(this.vy) * 0.5;
+                } else if (this.y > UNIVERSE_BOUNDS) {
+                    this.y = UNIVERSE_BOUNDS;
+                    this.vy = -Math.abs(this.vy) * 0.5;
+                }
+
+                // No altitude limits - removed vertical movement
+
+                this.vx *= 0.999;
+                this.vy *= 0.999;
+                // No vertical drag - removed vertical movement
+            }
+
+            landOn(planet) {
+                this.landed = true;
+                this.landedOn = planet;
+                let dx = this.x - planet.x;
+                let dy = this.y - planet.y;
+                this.angle = Math.atan2(dy, dx);
+            }
+
+            launch() {
+                this.landed = false;
+                this.landedOn = null;
+                this.vx += Math.cos(this.angle) * 3;
+                this.vy += Math.sin(this.angle) * 3;
+                // Update base angle for mouse control
+                this.baseAngle = this.angle;
+                mouseXOffset = 0;
+                // No pitch - removed vertical movement
+            }
+
+            draw() {
+                let screenX = (this.x - cam.x) * cam.zoom + width / 2;
+                let screenY = (this.y - cam.y) * cam.zoom + height / 2;
+
+                // Skip drawing if invulnerable and currently in "blink" period
+                if (this.invulnerableTime > 0 && this.invulnerableTime % 10 < 5) {
+                    // Draw faint outline only
+                    push();
+                    translate(screenX, screenY);
+                    rotate(this.angle + Math.PI / 2);
+                    scale(cam.zoom);
+                    noFill();
+                    stroke(255, 255, 255, 100);
+                    strokeWeight(1);
+                    beginShape();
+                    vertex(0, -this.size);
+                    vertex(-this.size * 0.4, this.size * 0.3);
+                    vertex(-this.size * 0.3, this.size);
+                    vertex(0, this.size * 0.7);
+                    vertex(this.size * 0.3, this.size);
+                    vertex(this.size * 0.4, this.size * 0.3);
+                    endShape(CLOSE);
+                    pop();
+                    return;
+                }
+
+                push();
+                translate(screenX, screenY);
+                rotate(this.angle + Math.PI / 2);
+                scale(cam.zoom);
+
+                let shipRgb = hexToRgb(params.shipColor);
+
+                // Main body - droplet shape
+                fill(shipRgb.r, shipRgb.g, shipRgb.b);
+                stroke(255);
+                strokeWeight(1.5);
+
+                beginShape();
+                vertex(0, -this.size);
+                vertex(-this.size * 0.4, this.size * 0.3);
+                vertex(-this.size * 0.3, this.size);
+                vertex(0, this.size * 0.7);
+                vertex(this.size * 0.3, this.size);
+                vertex(this.size * 0.4, this.size * 0.3);
+                endShape(CLOSE);
+
+                // Cockpit
+                fill(255, 255, 255, 150);
+                noStroke();
+                ellipse(0, -this.size * 0.2, this.size * 0.4, this.size * 0.5);
+
+                // Engine glow
+                if (keys['w'] || keys['W'] || keys[' ']) {
+                    let engineRgb = hexToRgb(params.engineColor);
+                    fill(engineRgb.r, engineRgb.g, engineRgb.b, 100 + random(155));
+                    noStroke();
+                    triangle(
+                        -this.size * 0.3, this.size,
+                        this.size * 0.3, this.size,
+                        0, this.size * 1.5 + random(10)
+                    );
+                }
+
+                pop();
+
+                // Draw shield effect
+                if (this.shieldActive) {
+                    let shieldAlpha = 100 + sin(frameCount * 0.2) * 50;
+                    let shieldPulse = sin(frameCount * 0.15) * 5;
+                    noFill();
+                    stroke(100, 255, 200, shieldAlpha);
+                    strokeWeight(2);
+
+                    // Multiple shield rings
+                    for (let i = 0; i < 3; i++) {
+                        let shieldRadius = (this.size * 1.5 + i * 8 + shieldPulse) * cam.zoom;
+                        ellipse(screenX, screenY, shieldRadius, shieldRadius);
+                    }
+
+                    // Shield glow
+                    noStroke();
+                    fill(100, 255, 200, 30);
+                    let glowRadius = (this.size * 2.5 + shieldPulse) * cam.zoom;
+                    ellipse(screenX, screenY, glowRadius, glowRadius);
+                }
+
+                // Velocity indicator
+                if (!this.landed) {
+                    let speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+                    if (speed > 0.1) {
+                        let velAngle = Math.atan2(this.vy, this.vx);
+                        let shipRgb = hexToRgb(params.shipColor);
+                        stroke(shipRgb.r, shipRgb.g, shipRgb.b);
+                        strokeWeight(2);
+                        let lineLen = speed * 30 * cam.zoom;
+                        line(screenX, screenY,
+                             screenX + Math.cos(velAngle) * lineLen,
+                             screenY + Math.sin(velAngle) * lineLen);
+                    }
+                }
+            }
+
+            draw3D() {
+                push();
+                translate(this.x, -this.z, -this.y); // x, -z (height), -y (depth)
+                rotateY(this.angle - HALF_PI); // Yaw - horizontal rotation only
+                // No pitch rotation - removed vertical movement
+
+                let shipRgb = hexToRgb(params.shipColor);
+
+                // Main body - 3D cone for ship
+                // Cone's TIP points forward (in direction of ship's angle)
+                fill(shipRgb.r, shipRgb.g, shipRgb.b);
+                stroke(255);
+                strokeWeight(1);
+
+                // Ship body (cone) - tip at +Z (forward), base at -Z (back)
+                push();
+                translate(0, 0, this.size * 0.3); // Shift so tip is at front
+                rotateX(HALF_PI);
+                rotateZ(PI); // Flip so tip points to +Z
+                cone(this.size * 0.7, this.size * 1.8, 8, 1);
+                pop();
+
+                // Direction indicator - bright cone at front (same direction as ship tip)
+                push();
+                translate(0, 0, this.size * 1.2); // +Z is forward
+                fill(255, 255, 0, 200); // Bright yellow
+                noStroke();
+                rotateX(HALF_PI);
+                rotateZ(PI); // Tip points forward
+                cone(this.size * 0.25, this.size * 0.8, 6, 1);
+                pop();
+
+                // Cockpit (sphere) - on top near front
+                push();
+                translate(0, this.size * 0.35, this.size * 0.3); // Y is up
+                fill(255, 255, 255, 150);
+                noStroke();
+                sphere(this.size * 0.25, 8, 8);
+                pop();
+
+                // Engine glow - at the back (-Z direction)
+                if (keys['w'] || keys['W']) {
+                    let engineRgb = hexToRgb(params.engineColor);
+                    push();
+                    translate(0, 0, -this.size * 1.2); // -Z is back
+                    fill(engineRgb.r, engineRgb.g, engineRgb.b, 150);
+                    noStroke();
+                    sphere(this.size * 0.35, 6, 6);
+                    pop();
+                }
+
+                pop();
+
+                // Draw velocity vector in 3D - shows actual movement direction
+                if (!this.landed) {
+                    let speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy + this.vz * this.vz);
+                    if (speed > 0.1) {
+                        let shipRgb = hexToRgb(params.shipColor);
+                        push();
+                        translate(this.x, -this.z, -this.y);
+                        stroke(shipRgb.r, shipRgb.g, shipRgb.b);
+                        strokeWeight(3);
+                        let lineLen = speed * 50;
+
+                        // Draw 3D line showing velocity (includes vertical)
+                        line(0, 0, 0, this.vx * lineLen / speed, -this.vz * lineLen / speed, -this.vy * lineLen / speed);
+
+                        // Bright tip at the end
+                        push();
+                        translate(this.vx * lineLen / speed, -this.vz * lineLen / speed, -this.vy * lineLen / speed);
+                        fill(shipRgb.r, shipRgb.g, shipRgb.b, 200);
+                        noStroke();
+                        sphere(3, 4, 4);
+                        pop();
+
+                        pop();
+                    }
+                }
+
+                // Draw shield effect (3D) - simplified
+                if (this.shieldActive) {
+                    let shieldPulse = sin(frameCount * 0.15) * 5;
+                    push();
+                    translate(this.x, -this.z, -this.y);
+                    noFill();
+                    stroke(100, 255, 200, 150);
+
+                    // Shield sphere - reduced detail
+                    push();
+                    translate(0, 0, 0);
+                    strokeWeight(2);
+                    sphere(this.size * 1.8 + shieldPulse, 12, 12); // Reduced detail
+                    pop();
+
+                    // Single shield ring only - horizontal
+                    push();
+                    rotateX(HALF_PI);
+                    strokeWeight(1);
+                    torus(this.size * 1.5 + shieldPulse, 2, 12, 2); // Reduced detail
+                    pop();
+
+                    pop();
+                }
+            }
+
+            getSpeed() {
+                return Math.sqrt(this.vx * this.vx + this.vy * this.vy + this.vz * this.vz);
+            }
+
+            getNearestPlanet() {
+                let nearest = null;
+                let minDist = Infinity;
+                for (let planet of planets) {
+                    let dx = planet.x - this.x;
+                    let dy = planet.y - this.y;
+                    let dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        nearest = planet;
+                    }
+                }
+                return { planet: nearest, distance: minDist };
+            }
+
+            fireMissile() {
+                if (this.landed) return;
+                // Fire missile in the direction the ship is facing
+                let missileX = this.x + Math.cos(this.angle) * this.size * 1.5;
+                let missileY = this.y + Math.sin(this.angle) * this.size * 1.5;
+                missiles.push(new Missile(missileX, missileY, this.angle, 'player'));
+
+                // Play fire sound
+                playSound('launch');
+
+                // Limit max missiles
+                if (missiles.length > 20) {
+                    missiles.shift();
+                }
+            }
+
+            takeDamage(amount) {
+                if (this.invulnerableTime > 0) return;
+
+                // Check if shield is active
+                if (this.shieldActive && this.shieldEnergy > 0) {
+                    // Shield absorbs damage
+                    let shieldDamage = amount * 2; // Shield takes extra damage
+                    this.shieldEnergy -= shieldDamage;
+
+                    // Create small shield hit effect - reduced particles
+                    for (let i = 0; i < 2; i++) { // Reduced from 5 to 2
+                        let shieldRgb = { r: 100, g: 255, b: 200 };
+                        particles.push(new Particle(
+                            this.x + random(-this.size, this.size),
+                            this.y + random(-this.size, this.size),
+                            random(TWO_PI),
+                            shieldRgb
+                        ));
+                    }
+
+                    // Play sound for shield hit
+                    if (frameCount % 10 === 0) {
+                        playSound('proximity');
+                    }
+
+                    // If shield depleted from hit
+                    if (this.shieldEnergy <= 0) {
+                        this.shieldEnergy = 0;
+                        this.shieldActive = false;
+                        this.shieldCooldown = this.maxShieldCooldown;
+                    }
+                    return; // Damage absorbed by shield
+                }
+
+                this.health -= amount;
+                this.invulnerableTime = 60; // 1 second of invulnerability
+
+                if (this.health <= 0) {
+                    this.health = 0;
+                    // Player destroyed - create explosion and respawn
+                    explosions.push(new Explosion(this.x, this.y, hexToRgb(params.shipColor)));
+                    playSound('explosion');
+                    this.respawn();
+                }
+            }
+
+            respawn() {
+                // Reset position and health
+                this.x = 0;
+                this.y = -400;
+                this.vx = 0;
+                this.vy = 0.5;
+                this.angle = -Math.PI / 2;
+                this.health = this.maxHealth;
+                this.invulnerableTime = 120; // 2 seconds of invulnerability after respawn
+                this.landed = false;
+                this.landedOn = null;
+
+                // Record respawn time for AI grace period
+                playerRespawnTime = frameCount;
+
+                // Reset shield energy
+                this.shieldEnergy = this.maxShieldEnergy;
+                this.shieldActive = false;
+                this.shieldCooldown = 0;
+
+                // Lose some score when destroyed
+                score = Math.max(0, score - 50);
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // AI CONTROLLED WARSHIPS
+        // ═══════════════════════════════════════════════════════════════════════
+
+        class AIWarship {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.vx = random(-1, 1);
+                this.vy = random(-1, 1);
+                this.angle = random(TWO_PI);
+                this.size = 18;
+                this.color = color;
+                this.targetPlanet = null;
+                this.behaviorTimer = 0;
+                this.behavior = 'chase'; // Start with chase behavior
+                this.thrusting = false;
+                this.fireCooldown = 0;
+                this.fireRate = random(120, 240); // 2-4 seconds between shots
+                this.aggressiveness = random(0.3, 0.8); // Chance to engage player
+                this.chaseTimer = 0; // How long to chase player
+            }
+
+            update() {
+                this.behaviorTimer++;
+
+                // Calculate distance to player
+                let dxToPlayer = ship.x - this.x;
+                let dyToPlayer = ship.y - this.y;
+                let distToPlayer = Math.sqrt(dxToPlayer * dxToPlayer + dyToPlayer * dyToPlayer);
+
+                // Change behavior periodically
+                if (this.behaviorTimer > random(120, 240)) {
+                    this.behaviorTimer = 0;
+
+                    // Priority: Chase player (70%), Orbit planet (20%), Patrol (10%)
+                    let behaviorRoll = random();
+                    if (behaviorRoll < 0.7) {
+                        this.behavior = 'chase';
+                        this.chaseTimer = random(300, 600); // Chase for 5-10 seconds
+                    } else if (behaviorRoll < 0.9) {
+                        this.behavior = 'orbit';
+                        this.targetPlanet = random(planets);
+                    } else {
+                        this.behavior = 'patrol';
+                        this.targetPlanet = null;
+                    }
+                }
+
+                // Apply gravitational forces
+                for (let planet of planets) {
+                    let dx = planet.x - this.x;
+                    let dy = planet.y - this.y;
+                    let dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < planet.radius) continue;
+
+                    let force = (params.gravityStrength * planet.mass * 0.5) / (dist * dist);
+                    let angle = Math.atan2(dy, dx);
+
+                    this.vx += Math.cos(angle) * force * params.timeScale;
+                    this.vy += Math.sin(angle) * force * params.timeScale;
+                }
+
+                // AI Behavior
+                this.thrusting = false;
+
+                if (this.behavior === 'chase') {
+                    // Chase player - maintain optimal combat distance (300-600 units)
+                    let targetAngle = Math.atan2(dyToPlayer, dxToPlayer);
+                    let angleDiff = targetAngle - this.angle;
+
+                    while (angleDiff > Math.PI) angleDiff -= TWO_PI;
+                    while (angleDiff < -Math.PI) angleDiff += TWO_PI;
+
+                    // Smoothly rotate towards player
+                    this.angle += angleDiff * 0.08;
+
+                    // Thrust towards player if too far, back away if too close
+                    if (distToPlayer > 500) {
+                        // Move closer
+                        this.vx += Math.cos(this.angle) * params.thrustPower * 0.2 * params.timeScale;
+                        this.vy += Math.sin(this.angle) * params.thrustPower * 0.2 * params.timeScale;
+                        this.thrusting = true;
+                    } else if (distToPlayer < 250) {
+                        // Too close, back away
+                        this.vx -= Math.cos(this.angle) * params.thrustPower * 0.15 * params.timeScale;
+                        this.vy -= Math.sin(this.angle) * params.thrustPower * 0.15 * params.timeScale;
+                        this.thrusting = true;
+                    } else {
+                        // At optimal distance, make small adjustments
+                        if (random() > 0.9) {
+                            this.vx += Math.cos(this.angle) * params.thrustPower * 0.1 * params.timeScale;
+                            this.vy += Math.sin(this.angle) * params.thrustPower * 0.1 * params.timeScale;
+                            this.thrusting = true;
+                        }
+                    }
+
+                    // Decrease chase timer
+                    this.chaseTimer--;
+                    if (this.chaseTimer <= 0 && distToPlayer > 1000) {
+                        // Player escaped, switch to patrol
+                        this.behavior = 'patrol';
+                    }
+
+                } else if (this.behavior === 'orbit' && this.targetPlanet) {
+                    // Orbit around target planet
+                    let dx = this.targetPlanet.x - this.x;
+                    let dy = this.targetPlanet.y - this.y;
+                    let dist = Math.sqrt(dx * dx + dy * dy);
+                    let targetAngle = Math.atan2(dy, dx) + Math.PI / 2;
+                    let angleDiff = targetAngle - this.angle;
+
+                    while (angleDiff > Math.PI) angleDiff -= TWO_PI;
+                    while (angleDiff < -Math.PI) angleDiff += TWO_PI;
+
+                    this.angle += angleDiff * 0.05;
+
+                    // Thrust to maintain orbit
+                    if (dist > this.targetPlanet.radius * 3) {
+                        this.vx += Math.cos(this.angle) * params.thrustPower * 0.15 * params.timeScale;
+                        this.vy += Math.sin(this.angle) * params.thrustPower * 0.15 * params.timeScale;
+                        this.thrusting = true;
+                    }
+
+                    // If player comes near, switch to chase
+                    if (distToPlayer < 800 && random() < 0.3) {
+                        this.behavior = 'chase';
+                        this.chaseTimer = random(300, 600);
+                    }
+
+                } else {
+                    // Patrol - random exploration
+                    if (random() > 0.98) {
+                        this.angle += random(-0.5, 0.5);
+                    }
+                    if (random() > 0.95) {
+                        this.vx += Math.cos(this.angle) * params.thrustPower * 0.1 * params.timeScale;
+                        this.vy += Math.sin(this.angle) * params.thrustPower * 0.1 * params.timeScale;
+                        this.thrusting = true;
+                    }
+
+                    // If player comes near, switch to chase
+                    if (distToPlayer < 800 && random() < 0.5) {
+                        this.behavior = 'chase';
+                        this.chaseTimer = random(300, 600);
+                    }
+                }
+
+                // Apply velocity
+                this.x += this.vx * params.timeScale;
+                this.y += this.vy * params.timeScale;
+
+                // Boundary collision - bounce back from universe edges
+                if (this.x < -UNIVERSE_BOUNDS) {
+                    this.x = -UNIVERSE_BOUNDS;
+                    this.vx = Math.abs(this.vx) * 0.5;
+                } else if (this.x > UNIVERSE_BOUNDS) {
+                    this.x = UNIVERSE_BOUNDS;
+                    this.vx = -Math.abs(this.vx) * 0.5;
+                }
+
+                if (this.y < -UNIVERSE_BOUNDS) {
+                    this.y = -UNIVERSE_BOUNDS;
+                    this.vy = Math.abs(this.vy) * 0.5;
+                } else if (this.y > UNIVERSE_BOUNDS) {
+                    this.y = UNIVERSE_BOUNDS;
+                    this.vy = -Math.abs(this.vy) * 0.5;
+                }
+
+                // Drag
+                this.vx *= 0.999;
+                this.vy *= 0.999;
+
+                // Emit particles when thrusting
+                if (this.thrusting && random() > 0.5) {
+                    let engineRgb = this.color;
+                    particles.push(new Particle(
+                        this.x - Math.cos(this.angle) * this.size,
+                        this.y - Math.sin(this.angle) * this.size,
+                        -this.angle + random(-0.3, 0.3),
+                        engineRgb
+                    ));
+                }
+
+                // Update fire cooldown
+                if (this.fireCooldown > 0) {
+                    this.fireCooldown--;
+                }
+
+                // AI Missile firing logic - more aggressive when chasing
+                if (this.fireCooldown <= 0 && !ship.landed && ship.invulnerableTime <= 0) {
+                    // Check if game start grace period has passed
+                    let framesSinceStart = frameCount - gameStartTime;
+                    if (framesSinceStart < AI_GRACE_PERIOD) {
+                        // Still in grace period, can't fire
+                        return;
+                    }
+
+                    // Check if respawn grace period has passed
+                    let framesSinceRespawn = frameCount - playerRespawnTime;
+                    if (framesSinceRespawn < RESPAWN_GRACE_PERIOD) {
+                        // Player just respawned, can't fire
+                        return;
+                    }
+
+                    // Calculate distance to player
+                    let dx = ship.x - this.x;
+                    let dy = ship.y - this.y;
+                    let distToPlayer = Math.sqrt(dx * dx + dy * dy);
+
+                    // Different firing behavior based on AI state
+                    let fireRange = this.behavior === 'chase' ? 1200 : 800; // Longer range when chasing
+                    let fireChance = this.behavior === 'chase' ? this.aggressiveness * 1.5 : this.aggressiveness;
+
+                    // Fire at player if within range and aggressive behavior
+                    if (distToPlayer < fireRange && random() < fireChance) {
+                        this.fireMissile();
+                        // Shorter cooldown when chasing
+                        this.fireCooldown = this.behavior === 'chase' ? this.fireRate * 0.7 : this.fireRate;
+                    }
+                }
+            }
+
+            draw() {
+                let screenX = (this.x - cam.x) * cam.zoom + width / 2;
+                let screenY = (this.y - cam.y) * cam.zoom + height / 2;
+
+                // Only draw if on screen
+                if (screenX < -50 || screenX > width + 50 || screenY < -50 || screenY > height + 50) return;
+
+                // Draw chase indicator - red pulsing ring when chasing player
+                if (this.behavior === 'chase') {
+                    let pulseSize = (sin(frameCount * 0.1) + 1) * 10;
+                    noStroke();
+                    fill(255, 50, 50, 100 + sin(frameCount * 0.1) * 50);
+                    ellipse(screenX, screenY, (this.size * 2.5 + pulseSize) * cam.zoom);
+                }
+
+                push();
+                translate(screenX, screenY);
+                rotate(this.angle + Math.PI / 2);
+                scale(cam.zoom);
+
+                // Slightly smaller than player ship
+                let drawSize = this.size * 0.9;
+
+                // Main body - droplet shape
+                fill(this.color.r, this.color.g, this.color.b);
+                stroke(200);
+                strokeWeight(1);
+
+                beginShape();
+                vertex(0, -drawSize);
+                vertex(-drawSize * 0.4, drawSize * 0.3);
+                vertex(-drawSize * 0.3, drawSize);
+                vertex(0, drawSize * 0.7);
+                vertex(drawSize * 0.3, drawSize);
+                vertex(drawSize * 0.4, drawSize * 0.3);
+                endShape(CLOSE);
+
+                // Cockpit
+                fill(200, 200, 200, 150);
+                noStroke();
+                ellipse(0, -drawSize * 0.2, drawSize * 0.4, drawSize * 0.5);
+
+                // Engine glow when thrusting
+                if (this.thrusting) {
+                    fill(this.color.r, this.color.g, this.color.b, 100 + random(155));
+                    noStroke();
+                    triangle(
+                        -drawSize * 0.3, drawSize,
+                        drawSize * 0.3, drawSize,
+                        0, drawSize * 1.3 + random(8)
+                    );
+                }
+
+                pop();
+            }
+
+            draw3D() {
+                push();
+                translate(this.x, 0, -this.y); // Changed: x, 0, z coordinates
+                rotateY(this.angle - HALF_PI); // Subtract 90 degrees to align with movement
+
+                let drawSize = this.size * 0.9;
+
+                // Draw chase indicator when chasing player - simplified
+                if (this.behavior === 'chase') {
+                    push();
+                    rotateX(HALF_PI);
+                    noFill();
+                    stroke(255, 50, 50, 150);
+                    strokeWeight(2);
+                    let pulseSize = sin(frameCount * 0.1) * 5;
+                    torus(drawSize * 1.5 + pulseSize, 2, 8, 2); // Reduced detail
+                    pop();
+                }
+
+                // Main body - cone - TIP points forward
+                fill(this.color.r, this.color.g, this.color.b);
+                stroke(200);
+                strokeWeight(1);
+
+                push();
+                translate(0, 0, drawSize * 0.3);
+                rotateX(HALF_PI);
+                rotateZ(PI); // Flip so tip points to +Z
+                cone(drawSize * 0.6, drawSize * 1.6, 8, 1);
+                pop();
+
+                // Cockpit (smaller sphere) - reduced detail
+                push();
+                translate(0, drawSize * 0.25, drawSize * 0.3); // Y is up, near front
+                fill(200, 200, 200, 150);
+                noStroke();
+                sphere(drawSize * 0.2, 6, 6);
+                pop();
+
+                // Engine glow when thrusting - at the back
+                if (this.thrusting) {
+                    push();
+                    translate(0, 0, -drawSize * 1.2); // -Z is back
+                    fill(this.color.r, this.color.g, this.color.b, 150);
+                    noStroke();
+                    sphere(drawSize * 0.25, 6, 6);
+                    pop();
+                }
+
+                pop();
+            }
+
+            fireMissile() {
+                // Calculate angle to player
+                let dx = ship.x - this.x;
+                let dy = ship.y - this.y;
+                let angleToPlayer = Math.atan2(dy, dx);
+
+                // Fire missile towards player
+                let missileX = this.x + Math.cos(angleToPlayer) * this.size * 1.5;
+                let missileY = this.y + Math.sin(angleToPlayer) * this.size * 1.5;
+                missiles.push(new Missile(missileX, missileY, angleToPlayer, 'ai'));
+
+                // Limit max AI missiles
+                let aiMissileCount = missiles.filter(m => m.owner === 'ai').length;
+                if (aiMissileCount > 30) {
+                    // Remove oldest AI missile
+                    for (let i = 0; i < missiles.length; i++) {
+                        if (missiles[i].owner === 'ai') {
+                            missiles.splice(i, 1);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // MISSILE SYSTEM - Homing Missiles
+        // ═══════════════════════════════════════════════════════════════════════
+
+        class Missile {
+            constructor(x, y, angle, owner) {
+                this.x = x;
+                this.y = y;
+                this.vx = Math.cos(angle) * 8;
+                this.vy = Math.sin(angle) * 8;
+                this.angle = angle;
+                this.owner = owner; // 'player' or 'ai'
+                this.speed = 8;
+                this.maxSpeed = 12;
+                this.turnRate = 0.08;
+                this.target = null;
+                this.lifetime = 600; // 10 seconds at 60fps
+                this.age = 0;
+                this.size = 6;
+            }
+
+            update() {
+                this.age++;
+
+                // Find nearest target
+                if (this.owner === 'player') {
+                    // Player missiles: PRIORITY ORDER
+                    // 1. First, target incoming AI missiles (anti-missile defense)
+                    // 2. If no AI missiles, target AI ships
+
+                    let nearestAIMissile = null;
+                    let nearestAIMissileDist = Infinity;
+
+                    // Check for incoming AI missiles
+                    for (let missile of missiles) {
+                        if (missile.owner === 'ai') {
+                            let dx = missile.x - this.x;
+                            let dy = missile.y - this.y;
+                            let dist = Math.sqrt(dx * dx + dy * dy);
+
+                            // Check if this AI missile is heading toward the player
+                            let dxToPlayer = ship.x - missile.x;
+                            let dyToPlayer = ship.y - missile.y;
+                            let distToPlayer = Math.sqrt(dxToPlayer * dxToPlayer + dyToPlayer * dyToPlayer);
+
+                            // Only target missiles that are closer to player than to this missile
+                            // This ensures we intercept missiles that are real threats
+                            if (dist < distToPlayer && dist < nearestAIMissileDist) {
+                                nearestAIMissileDist = dist;
+                                nearestAIMissile = missile;
+                            }
+                        }
+                    }
+
+                    // If there's an incoming AI missile, target it
+                    if (nearestAIMissile) {
+                        this.target = nearestAIMissile;
+                    } else {
+                        // No incoming missiles, target nearest AI ship
+                        let nearestShip = null;
+                        let minShipDist = Infinity;
+                        for (let aiShip of aiShips) {
+                            let dx = aiShip.x - this.x;
+                            let dy = aiShip.y - this.y;
+                            let dist = Math.sqrt(dx * dx + dy * dy);
+                            if (dist < minShipDist) {
+                                minShipDist = dist;
+                                nearestShip = aiShip;
+                            }
+                        }
+                        this.target = nearestShip;
+                    }
+                } else if (this.owner === 'ai') {
+                    // AI missiles target the player ship
+                    this.target = ship;
+                }
+
+                // Homing logic
+                if (this.target) {
+                    let dx = this.target.x - this.x;
+                    let dy = this.target.y - this.y;
+                    let targetAngle = Math.atan2(dy, dx);
+
+                    // Smooth rotation towards target
+                    let angleDiff = targetAngle - this.angle;
+                    while (angleDiff > Math.PI) angleDiff -= TWO_PI;
+                    while (angleDiff < -Math.PI) angleDiff += TWO_PI;
+                    angleDiff = Math.max(-this.turnRate, Math.min(this.turnRate, angleDiff));
+
+                    this.angle += angleDiff;
+                }
+
+                // Apply velocity
+                this.vx = Math.cos(this.angle) * this.speed;
+                this.vy = Math.sin(this.angle) * this.speed;
+
+                this.x += this.vx * params.timeScale;
+                this.y += this.vy * params.timeScale;
+
+                // Boundary check - destroy missile if it goes out of bounds
+                if (this.x < -UNIVERSE_BOUNDS || this.x > UNIVERSE_BOUNDS ||
+                    this.y < -UNIVERSE_BOUNDS || this.y > UNIVERSE_BOUNDS) {
+                    return false; // Missile dies
+                }
+
+                // Leave particle trail - different colors for player vs AI
+                if (this.age % 3 === 0) {
+                    let trailColor = this.owner === 'player' ?
+                        { r: 255, g: 150, b: 50 } :  // Orange for player
+                        { r: 255, g: 50, b: 50 };    // Red for AI
+                    particles.push(new Particle(
+                        this.x, this.y,
+                        this.angle + Math.PI + random(-0.5, 0.5),
+                        trailColor
+                    ));
+                }
+
+                return this.age < this.lifetime;
+            }
+
+            draw() {
+                let screenX = (this.x - cam.x) * cam.zoom + width / 2;
+                let screenY = (this.y - cam.y) * cam.zoom + height / 2;
+
+                push();
+                translate(screenX, screenY);
+                rotate(this.angle + Math.PI / 2);
+
+                // Different colors for player vs AI missiles
+                if (this.owner === 'player') {
+                    // Player missile - orange
+                    fill(255, 150, 50);
+                    stroke(255, 200, 100);
+                } else {
+                    // AI missile - red
+                    fill(255, 50, 50);
+                    stroke(255, 100, 100);
+                }
+                strokeWeight(1);
+
+                beginShape();
+                vertex(0, -this.size * 1.5);
+                vertex(-this.size * 0.4, this.size * 0.5);
+                vertex(0, this.size);
+                vertex(this.size * 0.4, this.size * 0.5);
+                endShape(CLOSE);
+
+                // Engine glow
+                if (this.owner === 'player') {
+                    fill(255, 200, 100, 200);
+                } else {
+                    fill(255, 100, 100, 200);
+                }
+                noStroke();
+                triangle(
+                    -this.size * 0.3, this.size,
+                    this.size * 0.3, this.size,
+                    0, this.size * 2
+                );
+
+                pop();
+            }
+
+            draw3D() {
+                push();
+                translate(this.x, 0, -this.y); // Changed: x, 0, z coordinates
+                rotateY(this.angle - HALF_PI); // Subtract 90 degrees to align with movement
+
+                // Different colors for player vs AI missiles
+                if (this.owner === 'player') {
+                    // Player missile - orange
+                    fill(255, 150, 50);
+                    stroke(255, 200, 100);
+                } else {
+                    // AI missile - red
+                    fill(255, 50, 50);
+                    stroke(255, 100, 100);
+                }
+                strokeWeight(1);
+
+                // Missile body (cone) - TIP points forward (+Z)
+                push();
+                translate(0, 0, this.size * 0.5);
+                rotateX(HALF_PI);
+                rotateZ(PI); // Flip so tip points to +Z
+                cone(this.size * 0.35, this.size * 1.8, 6, 1);
+                pop();
+
+                // Engine glow - at the back (-Z)
+                if (this.owner === 'player') {
+                    fill(255, 200, 100, 200);
+                } else {
+                    fill(255, 100, 100, 200);
+                }
+                noStroke();
+                push();
+                translate(0, 0, -this.size * 1.2); // -Z is back
+                sphere(this.size * 0.2, 4, 4);
+                pop();
+
+                pop();
+            }
+
+            checkCollision() {
+                // Check collision with AI ships (player missiles)
+                if (this.owner === 'player') {
+                    // First, check collision with AI missiles (anti-missile defense)
+                    for (let i = missiles.length - 1; i >= 0; i--) {
+                        let otherMissile = missiles[i];
+                        if (otherMissile.owner === 'ai' && otherMissile !== this) {
+                            let dx = otherMissile.x - this.x;
+                            let dy = otherMissile.y - this.y;
+                            let dist = Math.sqrt(dx * dx + dy * dy);
+
+                            if (dist < otherMissile.size + this.size) {
+                                // Missile interception! Both missiles destroyed
+                                explosions.push(new Explosion(this.x, this.y, { r: 255, g: 200, b: 100 }));
+                                playSound('explosion');
+
+                                // Remove both missiles
+                                missiles.splice(i, 1);
+
+                                // Bonus score for intercepting missile
+                                score += 25;
+                                if (score > highScore) {
+                                    highScore = score;
+                                }
+
+                                return true;
+                            }
+                        }
+                    }
+
+                    // Then check collision with AI ships
+                    for (let i = aiShips.length - 1; i >= 0; i--) {
+                        let aiShip = aiShips[i];
+                        let dx = aiShip.x - this.x;
+                        let dy = aiShip.y - this.y;
+                        let dist = Math.sqrt(dx * dx + dy * dy);
+
+                        if (dist < aiShip.size + this.size) {
+                            // Hit! Create explosion and play sound
+                            explosions.push(new Explosion(this.x, this.y, aiShip.color));
+                            playSound('explosion');
+                            aiShips.splice(i, 1);
+
+                            // Add score for destroying AI ship
+                            score += 100;
+                            if (score > highScore) {
+                                highScore = score;
+                            }
+
+                            return true;
+                        }
+                    }
+                }
+
+                // Check collision with player (AI missiles)
+                if (this.owner === 'ai' && !ship.landed && ship.invulnerableTime <= 0) {
+                    let dx = ship.x - this.x;
+                    let dy = ship.y - this.y;
+                    let dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist < ship.size + this.size) {
+                        // Hit player! Create small explosion and damage
+                        explosions.push(new Explosion(this.x, this.y, { r: 255, g: 50, b: 50 }));
+                        playSound('explosion');
+                        ship.takeDamage(20); // 20 damage per hit
+                        return true;
+                    }
+                }
+
+                // Check collision with planets
+                for (let planet of planets) {
+                    let dx = planet.x - this.x;
+                    let dy = planet.y - this.y;
+                    let dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist < planet.radius) {
+                        explosions.push(new Explosion(this.x, this.y, { r: 255, g: 100, b: 50 }));
+                        playSound('explosion');
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+
+        class Explosion {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.particles = [];
+                this.lifetime = 90;
+                this.flashIntensity = 1.0;
+
+                // Reduced particle count for better performance (80 -> 40)
+                for (let i = 0; i < 40; i++) {
+                    let angle = random(TWO_PI);
+                    let speed = random(3, 15);
+                    let size = random(5, 20);
+                    this.particles.push({
+                        vx: Math.cos(angle) * speed,
+                        vy: Math.sin(angle) * speed,
+                        size: size,
+                        life: 1.0,
+                        decay: random(0.008, 0.02),
+                        type: random() > 0.7 ? 'spark' : 'debris'
+                    });
+                }
+
+                // Add shockwave ring
+                this.shockwaveRadius = 10;
+                this.shockwaveMaxRadius = 150;
+            }
+
+            update() {
+                this.lifetime--;
+                this.flashIntensity *= 0.9;
+
+                // Expand shockwave
+                if (this.shockwaveRadius < this.shockwaveMaxRadius) {
+                    this.shockwaveRadius += 8;
+                }
+
+                for (let p of this.particles) {
+                    p.x += p.vx * params.timeScale;
+                    p.y += p.vy * params.timeScale;
+                    p.vx *= 0.96;
+                    p.vy *= 0.96;
+                    p.life -= p.decay * params.timeScale;
+                }
+                return this.lifetime > 0;
+            }
+
+            draw() {
+                let screenX = (this.x - cam.x) * cam.zoom + width / 2;
+                let screenY = (this.y - cam.y) * cam.zoom + height / 2;
+
+                // Bright flash at explosion center
+                if (this.flashIntensity > 0.1) {
+                    fill(255, 255, 255, this.flashIntensity * 200);
+                    noStroke();
+                    let flashSize = (1 - this.flashIntensity) * 200 + 50;
+                    ellipse(screenX, screenY, flashSize, flashSize);
+                }
+
+                // Draw shockwave ring
+                if (this.shockwaveRadius < this.shockwaveMaxRadius) {
+                    let shockwaveAlpha = map(this.shockwaveRadius, 10, this.shockwaveMaxRadius, 200, 0);
+                    stroke(255, 200, 100, shockwaveAlpha);
+                    strokeWeight(4);
+                    noFill();
+                    ellipse(screenX, screenY, this.shockwaveRadius * 2, this.shockwaveRadius * 2);
+                }
+
+                // Draw all particles
+                for (let p of this.particles) {
+                    if (p.life <= 0) continue;
+
+                    let px = screenX + p.x * cam.zoom;
+                    let py = screenY + p.y * cam.zoom;
+                    let psize = p.size * cam.zoom * p.life;
+
+                    if (p.type === 'spark') {
+                        // Bright glowing sparks
+                        fill(255, 255, 200, p.life * 255);
+                        noStroke();
+                        ellipse(px, py, psize * 0.5, psize * 0.5);
+
+                        // Add glow to sparks
+                        fill(255, 200, 100, p.life * 100);
+                        ellipse(px, py, psize * 1.5, psize * 1.5);
+                    } else {
+                        // Colored debris
+                        fill(this.color.r, this.color.g, this.color.b, p.life * 255);
+                        noStroke();
+                        ellipse(px, py, psize, psize);
+                    }
+                }
+
+                // Add central glow
+                let glowAlpha = map(this.lifetime, 90, 0, 150, 0);
+                fill(this.color.r, this.color.g, this.color.b, glowAlpha);
+                noStroke();
+                ellipse(screenX, screenY, 80 * (this.lifetime / 90), 80 * (this.lifetime / 90));
+            }
+
+            draw3D() {
+                push();
+                translate(this.x, 0, -this.y); // Changed: x, 0, z coordinates
+
+                // Bright flash at explosion center - reduced detail
+                if (this.flashIntensity > 0.1) {
+                    fill(255, 255, 255, this.flashIntensity * 200);
+                    noStroke();
+                    let flashSize = (1 - this.flashIntensity) * 100 + 25;
+                    sphere(flashSize, 8, 8); // Reduced detail
+                }
+
+                // Draw shockwave ring - reduced detail
+                if (this.shockwaveRadius < this.shockwaveMaxRadius) {
+                    let shockwaveAlpha = map(this.shockwaveRadius, 10, this.shockwaveMaxRadius, 200, 0);
+                    stroke(255, 200, 100, shockwaveAlpha);
+                    strokeWeight(4);
+                    noFill();
+                    push();
+                    rotateX(HALF_PI);
+                    torus(this.shockwaveRadius, 5, 12, 2); // Reduced detail
+                    pop();
+                }
+
+                // Draw all particles - reduced detail, skip some for performance
+                let particleCount = 0;
+                for (let p of this.particles) {
+                    if (p.life <= 0) continue;
+                    particleCount++;
+                    if (particleCount > 40) break; // Limit particles drawn
+
+                    push();
+                    translate(p.x, 0, -p.y); // Changed: x, 0, z coordinates
+                    let psize = p.size * p.life;
+
+                    if (p.type === 'spark') {
+                        // Bright glowing sparks - simplified
+                        fill(255, 255, 200, p.life * 255);
+                        noStroke();
+                        sphere(psize * 0.2, 3, 3); // Very low detail
+                    } else {
+                        // Colored debris - simplified
+                        fill(this.color.r, this.color.g, this.color.b, p.life * 255);
+                        noStroke();
+                        sphere(psize * 0.4, 4, 4); // Low detail
+                    }
+                    pop();
+                }
+
+                // Add central glow - reduced detail
+                let glowAlpha = map(this.lifetime, 90, 0, 150, 0);
+                fill(this.color.r, this.color.g, this.color.b, glowAlpha);
+                noStroke();
+                sphere(40 * (this.lifetime / 90), 8, 8); // Reduced detail
+
+                pop();
+            }
+        }
+
+        class Particle {
+            constructor(x, y, angle, rgb) {
+                this.x = x;
+                this.y = y;
+                this.speed = random(2, 5);
+                this.vx = Math.cos(angle) * this.speed;
+                this.vy = Math.sin(angle) * this.speed;
+                this.life = 1.0;
+                this.decay = random(0.02, 0.05);
+                this.rgb = rgb;
+                this.size = random(3, 8);
+            }
+
+            update() {
+                this.x += this.vx * params.timeScale;
+                this.y += this.vy * params.timeScale;
+                this.life -= this.decay * params.timeScale;
+            }
+
+            draw() {
+                if (this.life <= 0) return;
+
+                let screenX = (this.x - cam.x) * cam.zoom + width / 2;
+                let screenY = (this.y - cam.y) * cam.zoom + height / 2;
+
+                fill(this.rgb.r, this.rgb.g, this.rgb.b, this.life * 255);
+                noStroke();
+                ellipse(screenX, screenY, this.size * cam.zoom, this.size * cam.zoom);
+            }
+
+            draw3D() {
+                if (this.life <= 0) return;
+
+                push();
+                translate(this.x, 0, -this.y); // Changed: x, 0, z coordinates
+                fill(this.rgb.r, this.rgb.g, this.rgb.b, this.life * 255);
+                noStroke();
+                sphere(this.size * 0.5, 4, 4); // Very low detail for particles
+                pop();
+            }
+        }
+
+        class SpiralGalaxy {
+            constructor(x, y, size, arms, color1, color2) {
+                this.x = x;
+                this.y = y;
+                this.size = size;
+                this.arms = arms;
+                this.color1 = color1;
+                this.color2 = color2;
+                this.stars = [];
+                this.rotation = random(TWO_PI);
+
+                // Generate spiral arms
+                for (let i = 0; i < 500; i++) {
+                    let arm = i % arms;
+                    let angle = arm * (TWO_PI / arms) + random(-0.3, 0.3);
+                    let distance = random(20, size);
+                    let spiralAngle = angle + distance * 0.02;
+                    let px = x + Math.cos(spiralAngle) * distance;
+                    let py = y + Math.sin(spiralAngle) * distance;
+                    let brightness = random(100, 255);
+                    let starSize = random(0.5, 2);
+
+                    this.stars.push({ x: px, y: py, brightness, size: starSize });
+                }
+            }
+
+            draw() {
+                let screenX = (this.x - cam.x) * cam.zoom + width / 2;
+                let screenY = (this.y - cam.y) * cam.zoom + height / 2;
+
+                if (screenX < -this.size * 2 || screenX > width + this.size * 2 ||
+                    screenY < -this.size * 2 || screenY > height + this.size * 2) return;
+
+                // Galaxy core glow
+                noStroke();
+                for (let i = 5; i > 0; i--) {
+                    let alpha = (5 / i) * 0.02 * 255;
+                    let glowSize = this.size * 0.3 * (6 - i) * cam.zoom;
+                    fill(this.color1.r, this.color1.g, this.color1.b, alpha);
+                    ellipse(screenX, screenY, glowSize, glowSize);
+                }
+
+                // Draw spiral stars
+                for (let star of this.stars) {
+                    let sx = (star.x - cam.x) * cam.zoom + width / 2;
+                    let sy = (star.y - cam.y) * cam.zoom + height / 2;
+
+                    let mixRatio = Math.sqrt(Math.pow(star.x - this.x, 2) + Math.pow(star.y - this.y, 2)) / this.size;
+                    let r = lerp(this.color1.r, this.color2.r, mixRatio);
+                    let g = lerp(this.color1.g, this.color2.g, mixRatio);
+                    let b = lerp(this.color1.b, this.color2.b, mixRatio);
+
+                    fill(r, g, b, star.brightness);
+                    ellipse(sx, sy, star.size * cam.zoom, star.size * cam.zoom);
+                }
+            }
+        }
+
+        class Nebula {
+            constructor(x, y, size, rgb) {
+                this.x = x;
+                this.y = y;
+                this.size = size;
+                this.rgb = rgb;
+                this.clouds = [];
+
+                for (let i = 0; i < 20; i++) {
+                    this.clouds.push({
+                        offsetX: random(-size, size),
+                        offsetY: random(-size, size),
+                        cloudSize: random(size * 0.3, size * 0.8),
+                        alpha: random(5, 15)
+                    });
+                }
+            }
+
+            draw() {
+                let screenX = (this.x - cam.x) * cam.zoom + width / 2;
+                let screenY = (this.y - cam.y) * cam.zoom + height / 2;
+
+                if (screenX < -this.size * 2 || screenX > width + this.size * 2 ||
+                    screenY < -this.size * 2 || screenY > height + this.size * 2) return;
+
+                for (let cloud of this.clouds) {
+                    let cx = screenX + cloud.offsetX * cam.zoom;
+                    let cy = screenY + cloud.offsetY * cam.zoom;
+                    let cs = cloud.cloudSize * cam.zoom;
+
+                    for (let i = 3; i > 0; i--) {
+                        let alpha = cloud.alpha * (4 - i) / 3;
+                        fill(this.rgb.r, this.rgb.g, this.rgb.b, alpha);
+                        noStroke();
+                        ellipse(cx, cy, cs * (4 - i) / 3, cs * (4 - i) / 3);
+                    }
+                }
+            }
+        }
+
+        class AsteroidBelt {
+            constructor(centerX, centerY, minRadius, maxRadius, count) {
+                this.centerX = centerX;
+                this.centerY = centerY;
+                this.minRadius = minRadius;
+                this.maxRadius = maxRadius;
+                this.asteroids = [];
+
+                for (let i = 0; i < count; i++) {
+                    let angle = random(TWO_PI);
+                    let radius = random(minRadius, maxRadius);
+                    this.asteroids.push({
+                        angle: angle,
+                        radius: radius,
+                        size: random(2, 6),
+                        speed: random(0.001, 0.003) * (Math.random() > 0.5 ? 1 : -1)
+                    });
+                }
+            }
+
+            update() {
+                for (let asteroid of this.asteroids) {
+                    asteroid.angle += asteroid.speed * params.timeScale;
+                }
+            }
+
+            draw() {
+                let screenCX = (this.centerX - cam.x) * cam.zoom + width / 2;
+                let screenCY = (this.centerY - cam.y) * cam.zoom + height / 2;
+
+                if (screenCX < -this.maxRadius * 2 || screenCX > width + this.maxRadius * 2 ||
+                    screenCY < -this.maxRadius * 2 || screenCY > height + this.maxRadius * 2) return;
+
+                fill(120, 110, 100);
+                noStroke();
+
+                for (let asteroid of this.asteroids) {
+                    let ax = screenCX + Math.cos(asteroid.angle) * asteroid.radius * cam.zoom;
+                    let ay = screenCY + Math.sin(asteroid.angle) * asteroid.radius * cam.zoom;
+                    ellipse(ax, ay, asteroid.size * cam.zoom, asteroid.size * cam.zoom);
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // P5.JS SETUP & DRAW
+        // ═══════════════════════════════════════════════════════════════════════
+
+        function setup() {
+            // Calculate canvas width based on sidebar state
+            // When sidebar is expanded: 20px (padding) + 320px (sidebar) + 20px (gap) = 360px
+            // When sidebar is collapsed: 80px (padding-left for toggle button)
+            let leftOffset = sidebarCollapsed ? 80 : 360;
+            let canvasWidth = windowWidth - leftOffset;
+            let canvasHeight = windowHeight;
+
+            let container = document.getElementById('canvas-container');
+            let canvas = createCanvas(canvasWidth, canvasHeight, WEBGL);
+            canvas.parent('canvas-container');
+
+            // Initialize minimap canvas
+            minimapCanvas = document.getElementById('minimapCanvas');
+            minimapCanvas.width = 180;
+            minimapCanvas.height = 180;
+            minimapCtx = minimapCanvas.getContext('2d');
+
+            initializeUniverse();
+
+            window.addEventListener('resize', () => {
+                let leftOffset = sidebarCollapsed ? 80 : 360;
+                resizeCanvas(windowWidth - leftOffset, windowHeight);
+            });
+
+            document.addEventListener('keydown', (e) => {
+                keys[e.key] = true;
+                if (['w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'l', 'L', 'e', 'E', 'f', 'F', 'r', 'R', 't', 'T', 'v', 'V', '1', '2', '3'].includes(e.key)) {
+                    e.preventDefault();
+                }
+                // Fire missiles with F key
+                if ((e.key === 'f' || e.key === 'F') && ship && !ship.landed) {
+                    ship.fireMissile();
+                }
+                // Respawn AI ships with R key
+                if (e.key === 'r' || e.key === 'R') {
+                    reinitializeAIShips();
+                }
+                // Restart game with T key
+                if (e.key === 't' || e.key === 'T') {
+                    restartGame();
+                }
+                // Switch view mode with V key
+                if (e.key === 'v' || e.key === 'V') {
+                    viewMode = (viewMode + 1) % 3;
+                }
+                // Direct view mode selection with number keys
+                if (e.key === '1') viewMode = 0;
+                if (e.key === '2') viewMode = 1;
+                if (e.key === '3') viewMode = 2;
+            });
+
+            document.addEventListener('keyup', (e) => {
+                keys[e.key] = false;
+            });
+
+            // Mouse click to lock pointer for ship control (like Minecraft)
+            // This will be set up after canvas is created
+            setTimeout(() => {
+                let canvasElement = document.getElementById('defaultCanvas0');
+                if (canvasElement) {
+                    // Handle canvas click for pointer lock
+                    canvasElement.addEventListener('click', () => {
+                        if (!mouse.locked) {
+                            canvasElement.requestPointerLock();
+                        }
+                    });
+                }
+            }, 100);
+
+            // Handle pointer lock change
+            document.addEventListener('pointerlockchange', () => {
+                let canvasElement = document.getElementById('defaultCanvas0');
+                if (document.pointerLockElement === canvasElement) {
+                    // Mouse locked - save current angle and pitch as base
+                    mouse.locked = true;
+                    if (ship) {
+                        ship.baseAngle = ship.angle;
+                        ship.basePitch = ship.pitch;
+                        mouseXOffset = 0;
+                        mouseYOffset = 0;
+                    }
+                } else {
+                    // Mouse unlocked
+                    mouse.locked = false;
+                }
+            });
+
+            // Handle mouse movement for ship rotation
+            document.addEventListener('mousemove', (e) => {
+                if (mouse.locked) {
+                    // Accumulate mouse movement for ship rotation (horizontal only)
+                    mouseXOffset += e.movementX * mouse.sensitivity;
+                    // No vertical/pitch control - removed
+                }
+            });
+
+            // Mouse click to fire missiles
+            canvas.elt.addEventListener('mousedown', (e) => {
+                if (ship && !ship.landed) {
+                    ship.fireMissile();
+                }
+            });
+        }
+
+        function initializeUniverse() {
+            randomSeed(params.seed);
+            noiseSeed(params.seed);
+
+            // Set game start time for AI grace period
+            gameStartTime = frameCount;
+
+            // Initialize respawn time to past (no grace period at start)
+            playerRespawnTime = frameCount - RESPAWN_GRACE_PERIOD - 1;
+
+            // Reset missile warning state
+            missileWarningActive = false;
+            warningCooldown = 0;
+
+            planets = [];
+            particles = [];
+            ship = new Ship();
+            aiShips = [];
+            galaxies = [];
+            nebulas = [];
+            asteroidBelts = [];
+            missiles = [];
+            explosions = [];
+
+            let planetColors = [
+                { r: 180, g: 50, b: 50 },
+                { r: 50, g: 100, b: 180 },
+                { r: 180, g: 180, b: 50 },
+                { r: 100, g: 50, b: 150 },
+                { r: 50, g: 150, b: 100 },
+                { r: 200, g: 100, b: 50 },
+                { r: 80, g: 80, b: 80 },
+                { r: 100, g: 200, b: 200 }
+            ];
+
+            for (let i = 0; i < params.planetCount; i++) {
+                let angle = random(TWO_PI);
+                let distance = random(400, 1200);
+                let x = Math.cos(angle) * distance;
+                let y = Math.sin(angle) * distance;
+                let radius = random(40, 100);
+                let mass = radius * 2;
+                planets.push(new Planet(x, y, radius, mass, planetColors[i % planetColors.length]));
+            }
+
+            // Generate spiral galaxies
+            for (let i = 0; i < 3; i++) {
+                let gx = random(-4000, 4000);
+                let gy = random(-4000, 4000);
+                let arms = floor(random(3, 6));
+                let size = random(200, 400);
+                let c1 = { r: random(100, 200), g: random(100, 200), b: random(200, 255) };
+                let c2 = { r: random(150, 255), g: random(100, 180), b: random(100, 180) };
+                galaxies.push(new SpiralGalaxy(gx, gy, size, arms, c1, c2));
+            }
+
+            // Generate nebulas
+            for (let i = 0; i < 4; i++) {
+                let nx = random(-5000, 5000);
+                let ny = random(-5000, 5000);
+                let nsize = random(150, 300);
+                let nrgb = { r: random(50, 150), g: random(50, 150), b: random(100, 200) };
+                nebulas.push(new Nebula(nx, ny, nsize, nrgb));
+            }
+
+            // Generate asteroid belts around some planets
+            for (let i = 0; i < 2; i++) {
+                if (planets[i]) {
+                    let p = planets[i];
+                    asteroidBelts.push(new AsteroidBelt(p.x, p.y, p.radius * 1.8, p.radius * 2.2, 100));
+                }
+            }
+
+            stars = [];
+            for (let i = 0; i < 500; i++) {
+                stars.push({
+                    x: random(-5000, 5000),
+                    y: random(-5000, 5000),
+                    size: random(0.5, 2),
+                    brightness: random(0.3, 1)
+                });
+            }
+
+            // Generate AI warships
+            let aiShipColors = [
+                { r: 255, g: 100, b: 100 },
+                { r: 100, g: 255, b: 100 },
+                { r: 255, g: 255, b: 100 },
+                { r: 100, g: 255, b: 255 },
+                { r: 255, g: 100, b: 255 }
+            ];
+
+            for (let i = 0; i < params.aiShipCount; i++) {
+                let angle = random(TWO_PI);
+                let distance = random(params.aiSpawnDistance * 0.5, params.aiSpawnDistance);
+                let ax = Math.cos(angle) * distance;
+                let ay = Math.sin(angle) * distance;
+                aiShips.push(new AIWarship(ax, ay, aiShipColors[i % aiShipColors.length]));
+            }
+        }
+
+        function reinitializeAIShips() {
+            aiShips = [];
+            missiles = [];
+            explosions = [];
+            let aiShipColors = [
+                { r: 255, g: 100, b: 100 },
+                { r: 100, g: 255, b: 100 },
+                { r: 255, g: 255, b: 100 },
+                { r: 100, g: 255, b: 255 },
+                { r: 255, g: 100, b: 255 }
+            ];
+
+            for (let i = 0; i < params.aiShipCount; i++) {
+                let angle = random(TWO_PI);
+                let distance = random(params.aiSpawnDistance * 0.5, params.aiSpawnDistance);
+                let ax = Math.cos(angle) * distance;
+                let ay = Math.sin(angle) * distance;
+                aiShips.push(new AIWarship(ax, ay, aiShipColors[i % aiShipColors.length]));
+            }
+        }
+
+        function draw() {
+            background(5, 5, 10);
+
+            // Camera locked to ship - ship always at center
+            cam.x = ship.x;
+            cam.y = ship.y;
+
+            // Set camera based on view mode
+            setupCamera();
+
+            // Enhanced lighting system
+            setupLighting();
+
+            // Draw distant stars as 3D points - optimized
+            for (let star of stars) {
+                push();
+                let sx = star.x;
+                let sy = 0;
+                let sz = -star.y; // Changed: y is now z
+                let starZ = sz - 2000; // Push stars into background
+                translate(sx, sy, starZ);
+                let brightness = star.brightness * (0.5 + 0.5 * Math.sin(Date.now() * 0.001 + star.x));
+                fill(255, 255, 255, brightness * 255);
+                noStroke();
+                sphere(star.size * 2, 3, 3); // Very low detail for stars
+                pop();
+            }
+
+            // Update and draw planets (3D)
+            for (let planet of planets) {
+                planet.update();
+                planet.draw3D();
+            }
+
+            // Draw spiral galaxies
+            for (let galaxy of galaxies) {
+                galaxy.draw();
+            }
+
+            // Update and draw asteroid belts
+            for (let belt of asteroidBelts) {
+                belt.update();
+                belt.draw();
+            }
+
+            // Update and draw AI warships (3D)
+            for (let aiShip of aiShips) {
+                aiShip.update();
+                aiShip.draw3D();
+            }
+
+            // Update and draw particles (3D)
+            for (let i = particles.length - 1; i >= 0; i--) {
+                particles[i].update();
+                particles[i].draw3D();
+                if (particles[i].life <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+
+            // Update and draw missiles (3D)
+            for (let i = missiles.length - 1; i >= 0; i--) {
+                let alive = missiles[i].update();
+                if (!alive || missiles[i].checkCollision()) {
+                    missiles.splice(i, 1);
+                } else {
+                    missiles[i].draw3D();
+                }
+            }
+
+            // Update and draw explosions (3D)
+            for (let i = explosions.length - 1; i >= 0; i--) {
+                let alive = explosions[i].update();
+                if (!alive) {
+                    explosions.splice(i, 1);
+                } else {
+                    explosions[i].draw3D();
+                }
+            }
+
+            // Update and draw ship (3D)
+            ship.update();
+            ship.draw3D();
+
+            // Play proximity sound when near planet
+            let nearest = ship.getNearestPlanet();
+            if (!ship.landed && nearest.distance < nearest.planet.radius * 2) {
+                if (frameCount % 60 === 0) {
+                    playSound('proximity');
+                }
+            }
+
+            // High speed sound effect
+            if (ship.getSpeed() > 3 && frameCount % 30 === 0) {
+                playSound('speed');
+            }
+
+            // Missile proximity warning - check for incoming AI missiles
+            let nearestAIMissileDist = Infinity;
+            let incomingAIMissiles = 0;
+
+            for (let missile of missiles) {
+                if (missile.owner === 'ai') {
+                    let dx = ship.x - missile.x;
+                    let dy = ship.y - missile.y;
+                    let dist = Math.sqrt(dx * dx + dy * dy);
+
+                    // IMPORTANT: All AI missiles are homing missiles, they WILL track the player!
+                    // So we should detect ANY AI missile within range, regardless of its current angle
+                    // Expanded detection range for earlier warning
+                    if (dist < 3000) {
+                        incomingAIMissiles++;
+                        if (dist < nearestAIMissileDist) {
+                            nearestAIMissileDist = dist;
+                        }
+                    }
+                }
+            }
+
+            // Activate warning if incoming missiles detected
+            if (incomingAIMissiles > 0) {
+                missileWarningActive = true;
+                warningCooldown = 0;
+            } else if (missileWarningActive && warningCooldown === 0) {
+                // Start cooldown when no more incoming missiles
+                warningCooldown = 60; // 1 second cooldown
+            }
+
+            // Update cooldown
+            if (warningCooldown > 0) {
+                warningCooldown--;
+                if (warningCooldown <= 0) {
+                    missileWarningActive = false;
+                }
+            }
+
+            // Play warning beeps and show visual warning
+            if (missileWarningActive && incomingAIMissiles > 0) {
+                // Calculate beep interval based on distance (closer = faster beeps)
+                // Range expanded to 3000
+                let beepInterval = map(nearestAIMissileDist, 0, 3000, 4, 50);
+                beepInterval = Math.max(4, Math.min(50, beepInterval));
+
+                if (frameCount % Math.floor(beepInterval) === 0) {
+                    playMissileWarning(nearestAIMissileDist);
+                }
+
+                // Draw visual warning
+                drawMissileWarningEffect(nearestAIMissileDist, incomingAIMissiles);
+            } else if (missileWarningActive && warningCooldown > 0) {
+                // Continue showing warning during cooldown (with "CLEAR" status)
+                drawMissileWarningEffect(4000, 0); // Show far distance to indicate clearing
+            }
+
+            // Draw minimap
+            drawMinimap();
+
+            // Draw 3D boundary warning if player is near edge
+            draw3DBoundaryWarning();
+
+            // Draw grace period effect if in preparation phase
+            drawGracePeriodEffect();
+
+            updateStatus();
+        }
+
+        function draw3DBoundaryWarning() {
+            // Calculate distance to nearest boundary
+            let distToEdge = Math.min(
+                UNIVERSE_BOUNDS - Math.abs(ship.x),
+                UNIVERSE_BOUNDS - Math.abs(ship.y)
+            );
+
+            // Show warning when within 1500 units of boundary (increased from 1000)
+            if (distToEdge < 1500) {
+                let alpha = map(distToEdge, 1500, 0, 0, 100);
+                let edgeSize = map(distToEdge, 1500, 0, 0, 200);
+
+                push();
+                noFill();
+                stroke(255, 50, 50, alpha);
+                strokeWeight(3);
+
+                // Draw boundary boxes in 3D space
+                let bounds = UNIVERSE_BOUNDS;
+
+                // Draw warning box at each edge
+                // Left edge
+                if (ship.x > 0) {
+                    push();
+                    translate(-bounds, 0, 0);
+                    box(edgeSize, 100, UNIVERSE_BOUNDS * 2); // Changed: y is now up
+                    pop();
+                }
+                // Right edge
+                if (ship.x < 0) {
+                    push();
+                    translate(bounds, 0, 0);
+                    box(edgeSize, 100, UNIVERSE_BOUNDS * 2);
+                    pop();
+                }
+                // Top edge (negative Z in our coordinate system)
+                if (ship.y > 0) {
+                    push();
+                    translate(0, 0, -bounds);
+                    box(UNIVERSE_BOUNDS * 2, 100, edgeSize);
+                    pop();
+                }
+                // Bottom edge
+                if (ship.y < 0) {
+                    push();
+                    translate(0, 0, bounds);
+                    box(UNIVERSE_BOUNDS * 2, 100, edgeSize);
+                    pop();
+                }
+
+                pop();
+            }
+        }
+
+        function drawBoundaryWarning() {
+            // Calculate distance to nearest boundary
+            let distToEdge = Math.min(
+                UNIVERSE_BOUNDS - Math.abs(ship.x),
+                UNIVERSE_BOUNDS - Math.abs(ship.y)
+            );
+
+            // Show warning when within 1000 units of boundary
+            if (distToEdge < 1000) {
+                let alpha = map(distToEdge, 1000, 0, 0, 150);
+                noStroke();
+                fill(255, 50, 50, alpha);
+
+                // Draw warning overlay on edges
+                let edgeThickness = map(distToEdge, 1000, 0, 0, 50);
+
+                // Calculate screen positions of boundaries
+                let leftEdge = (-UNIVERSE_BOUNDS - cam.x) * cam.zoom + width / 2;
+                let rightEdge = (UNIVERSE_BOUNDS - cam.x) * cam.zoom + width / 2;
+                let topEdge = (-UNIVERSE_BOUNDS - cam.y) * cam.zoom + height / 2;
+                let bottomEdge = (UNIVERSE_BOUNDS - cam.y) * cam.zoom + height / 2;
+
+                // Draw red edges
+                if (leftEdge > -edgeThickness) {
+                    rect(leftEdge, 0, edgeThickness, height);
+                }
+                if (rightEdge < width + edgeThickness) {
+                    rect(rightEdge - edgeThickness, 0, edgeThickness, height);
+                }
+                if (topEdge > -edgeThickness) {
+                    rect(0, topEdge, width, edgeThickness);
+                }
+                if (bottomEdge < height + edgeThickness) {
+                    rect(0, bottomEdge - edgeThickness, width, edgeThickness);
+                }
+            }
+        }
+
+        function drawGracePeriodEffect() {
+            // Check game start grace period
+            let framesSinceStart = frameCount - gameStartTime;
+            let gracePeriodRemaining = AI_GRACE_PERIOD - framesSinceStart;
+
+            // Check respawn grace period
+            let framesSinceRespawn = frameCount - playerRespawnTime;
+            let respawnGraceRemaining = RESPAWN_GRACE_PERIOD - framesSinceRespawn;
+
+            // Use whichever grace period is active (respawn takes priority if both active)
+            let activeGraceRemaining = Math.max(gracePeriodRemaining, respawnGraceRemaining);
+            let isRespawnGrace = respawnGraceRemaining > 0 && respawnGraceRemaining >= gracePeriodRemaining;
+
+            if (activeGraceRemaining > 0) {
+                // Calculate alpha based on remaining time (fade out)
+                let totalGracePeriod = isRespawnGrace ? RESPAWN_GRACE_PERIOD : AI_GRACE_PERIOD;
+                let alpha = map(activeGraceRemaining, 0, totalGracePeriod, 0, 100);
+                let pulseAlpha = alpha + sin(frameCount * 0.15) * 30;
+
+                // Draw protective shield around player
+                push();
+                translate(width / 2, height / 2);
+                noFill();
+
+                // Different colors for different grace periods
+                if (isRespawnGrace) {
+                    // Golden yellow for respawn protection
+                    stroke(255, 200, 50, pulseAlpha);
+                } else {
+                    // Cyan for initial preparation
+                    stroke(100, 255, 200, pulseAlpha);
+                }
+                strokeWeight(3);
+
+                // Pulsing shield circles
+                for (let i = 0; i < 3; i++) {
+                    let shieldRadius = 80 + i * 30 + sin(frameCount * 0.1 + i) * 10;
+                    ellipse(0, 0, shieldRadius, shieldRadius);
+                }
+
+                pop();
+
+                // Draw countdown text in center
+                textAlign(CENTER, CENTER);
+                textSize(48);
+
+                if (isRespawnGrace) {
+                    fill(255, 200, 50, alpha);
+                } else {
+                    fill(100, 255, 200, alpha);
+                }
+                noStroke();
+                let secondsRemaining = Math.ceil(activeGraceRemaining / 60);
+                text(secondsRemaining, width / 2, height / 2 - 100);
+
+                textSize(16);
+                let statusText = isRespawnGrace ? "RESPAWN PROTECTION" : "PREPARING FOR BATTLE";
+                text(statusText, width / 2, height / 2 - 60);
+            }
+        }
+
+        function drawMissileWarningEffect(nearestDist, incomingCount) {
+            // Check if in cooldown phase (no missiles but warning still active)
+            let inCooldown = warningCooldown > 0;
+
+            // Calculate warning intensity based on distance (0-3000 range)
+            let intensity = map(nearestDist, 0, 3000, 1, 0);
+            intensity = Math.max(0, Math.min(1, intensity));
+
+            // During cooldown, use low intensity but keep showing
+            if (inCooldown) {
+                intensity = 0.3;
+            }
+
+            // Removed full screen flash - too distracting
+            // Border warnings also removed per user request
+
+            // Simplified central warning display
+            if (intensity > 0.4 || inCooldown) {
+                textAlign(CENTER, CENTER);
+                noStroke();
+
+                if (inCooldown) {
+                    // Show "CLEARING" message during cooldown
+                    textSize(50);
+                    fill(100, 255, 100, 180);
+                    text("✓ CLEAR", width / 2, 80);
+                } else {
+                    // Distance indicator with color coding (expanded to 3000 range)
+                    let distText, distColor;
+
+                    if (nearestDist < 500) {
+                        distText = "CRITICAL";
+                        distColor = color(255, 0, 0);
+                    } else if (nearestDist < 1000) {
+                        distText = "CLOSE";
+                        distColor = color(255, 100, 0);
+                    } else if (nearestDist < 1800) {
+                        distText = "APPROACHING";
+                        distColor = color(255, 200, 0);
+                    } else if (nearestDist < 2500) {
+                        distText = "DETECTED";
+                        distColor = color(100, 255, 100);
+                    } else {
+                        distText = "DISTANT";
+                        distColor = color(100, 200, 255);
+                    }
+
+                    // Display distance text
+                    textSize(28);
+                    fill(red(distColor), green(distColor), blue(distColor), 220);
+                    text(`${distText}`, width / 2, 80);
+
+                    // Distance in meters
+                    textSize(18);
+                    fill(255, 255, 255, 200);
+                    text(`${Math.floor(nearestDist)}m`, width / 2, 105);
+
+                    // Incoming count if multiple missiles
+                    if (incomingCount > 1) {
+                        textSize(16);
+                        fill(255, 200, 50, 200);
+                        text(`${incomingCount}×`, width / 2, 125);
+                    }
+                }
+            }
+
+            // Directional indicator - show where missiles are coming from
+            if (intensity > 0.6 && incomingCount > 0 && !inCooldown) {
+                // Find average direction of incoming missiles
+                let totalAngleX = 0;
+                let totalAngleY = 0;
+                let count = 0;
+
+                for (let missile of missiles) {
+                    if (missile.owner === 'ai') {
+                        let dx = missile.x - ship.x;
+                        let dy = missile.y - missile.y;
+                        let dist = Math.sqrt(dx * dx + dy * dy);
+
+                        if (dist < 3000) {
+                            totalAngleX += dx / dist;
+                            totalAngleY += dy / dist;
+                            count++;
+                        }
+                    }
+                }
+
+                if (count > 0) {
+                    let avgAngle = Math.atan2(totalAngleY, totalAngleX);
+
+                    // Draw directional arrows
+                    push();
+                    translate(width / 2, height / 2);
+                    rotate(avgAngle);
+
+                    // Multiple arrows
+                    for (let i = 0; i < 3; i++) {
+                        let arrowDist = 200 + i * 50;
+                        let arrowAlpha = intensity * (220 - i * 50);
+
+                        fill(255, 50, 50, arrowAlpha);
+                        noStroke();
+
+                        push();
+                        translate(arrowDist, 0);
+
+                        // Arrow pointing inward
+                        beginShape();
+                        vertex(20, 0);
+                        vertex(-10, -10);
+                        vertex(-5, 0);
+                        vertex(-10, 10);
+                        endShape(CLOSE);
+
+                        pop();
+                    }
+
+                    pop();
+                }
+            }
+        }
+
+        function drawMinimap() {
+            if (!minimapCtx) return;
+
+            let mapSize = 180;
+            let universeSize = 5000;
+            let scale = mapSize / (universeSize * 2);
+
+            // Clear canvas
+            minimapCtx.clearRect(0, 0, mapSize, mapSize);
+
+            // Draw background
+            minimapCtx.fillStyle = 'rgba(0, 0, 0, 0.95)';
+            minimapCtx.fillRect(0, 0, mapSize, mapSize);
+
+            // Grid lines
+            minimapCtx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+            minimapCtx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                let pos = (mapSize / 4) * i;
+                minimapCtx.beginPath();
+                minimapCtx.moveTo(pos, 0);
+                minimapCtx.lineTo(pos, mapSize);
+                minimapCtx.stroke();
+                minimapCtx.beginPath();
+                minimapCtx.moveTo(0, pos);
+                minimapCtx.lineTo(mapSize, pos);
+                minimapCtx.stroke();
+            }
+
+            // Draw universe boundary
+            minimapCtx.strokeStyle = 'rgba(255, 100, 100, 0.5)';
+            minimapCtx.lineWidth = 2;
+            let boundaryPadding = 2;
+            minimapCtx.strokeRect(boundaryPadding, boundaryPadding,
+                                  mapSize - boundaryPadding * 2,
+                                  mapSize - boundaryPadding * 2);
+
+            // Draw planets
+            for (let planet of planets) {
+                let px = mapSize / 2 + planet.x * scale;
+                let py = mapSize / 2 + planet.y * scale;
+                let pSize = Math.max(4, planet.radius * scale * 3);
+
+                // Only draw if within map bounds
+                if (px > -pSize && px < mapSize + pSize &&
+                    py > -pSize && py < mapSize + pSize) {
+                    minimapCtx.fillStyle = `rgba(${planet.rgb.r}, ${planet.rgb.g}, ${planet.rgb.b}, 0.7)`;
+                    minimapCtx.beginPath();
+                    minimapCtx.arc(px, py, pSize / 2, 0, Math.PI * 2);
+                    minimapCtx.fill();
+                }
+            }
+
+            // Draw AI ships
+            for (let aiShip of aiShips) {
+                let ax = mapSize / 2 + aiShip.x * scale;
+                let ay = mapSize / 2 + aiShip.y * scale;
+
+                if (ax > 0 && ax < mapSize && ay > 0 && ay < mapSize) {
+                    minimapCtx.fillStyle = `rgb(${aiShip.color.r}, ${aiShip.color.g}, ${aiShip.color.b})`;
+                    minimapCtx.beginPath();
+                    minimapCtx.arc(ax, ay, 2.5, 0, Math.PI * 2);
+                    minimapCtx.fill();
+                }
+            }
+
+            // Draw player ship
+            let playerX = mapSize / 2 + ship.x * scale;
+            let playerY = mapSize / 2 + ship.y * scale;
+
+            // Player glow
+            minimapCtx.fillStyle = 'rgba(0, 255, 255, 0.3)';
+            minimapCtx.beginPath();
+            minimapCtx.arc(playerX, playerY, 8, 0, Math.PI * 2);
+            minimapCtx.fill();
+
+            // Player triangle
+            minimapCtx.save();
+            minimapCtx.translate(playerX, playerY);
+            minimapCtx.rotate(ship.angle + Math.PI / 2);
+            minimapCtx.fillStyle = 'rgb(0, 255, 255)';
+            minimapCtx.beginPath();
+            minimapCtx.moveTo(0, -5);
+            minimapCtx.lineTo(-3, 3);
+            minimapCtx.lineTo(3, 3);
+            minimapCtx.closePath();
+            minimapCtx.fill();
+            minimapCtx.restore();
+        }
+
+        function setupCamera() {
+            // Camera setup based on view mode
+            if (viewMode === 0) {
+                // First-person view from ship's tail, looking forward
+                // Camera positioned at ship's tail, looking in direction of ship's movement
+                let camDistance = 100; // Distance behind ship center (further back to see more of ship)
+                let camHeight = 30; // Slightly above ship
+
+                // Calculate camera position at ship's tail
+                let camX = ship.x - Math.cos(ship.angle) * camDistance;
+                let camZ = -ship.y - Math.sin(ship.angle) * camDistance;
+                let camY = -ship.z - camHeight;
+
+                // Look FORWARD in direction of ship's movement
+                let lookAhead = 1000;
+                let lookX = ship.x + Math.cos(ship.angle) * lookAhead;
+                let lookY = -ship.z;
+                let lookZ = -ship.y + Math.sin(ship.angle) * lookAhead;
+
+                camera(camX, camY, camZ, lookX, lookY, lookZ, 0, 1, 0);
+
+            } else if (viewMode === 1) {
+                // Third-person view (behind ship)
+                let camDistance = 400;
+                let camHeight = 250;
+
+                let camX = ship.x - Math.cos(ship.angle) * camDistance;
+                let camZ = -ship.y - Math.sin(ship.angle) * camDistance; // Fixed: -sin to put camera behind
+                let camY = -ship.z - camHeight; // Consider ship's altitude
+
+                camera(camX, camY, camZ, ship.x, -ship.z, -ship.y, 0, 1, 0);
+
+            } else {
+                // Top-down view
+                let camHeight = 800;
+                camera(ship.x, -ship.z - camHeight, -ship.y, ship.x, -ship.z, -ship.y, 0, 0, -1);
+            }
+        }
+
+        function setupLighting() {
+            // Base ambient light
+            ambientLight(40);
+
+            // Dynamic lighting based on view mode and engine state
+            if (viewMode === 0) {
+                // First-person: brighter, cockpit lighting
+                ambientLight(60);
+                pointLight(255, 255, 255, ship.x, -ship.z + 100, -ship.y);
+
+                // Engine glow light when thrusting
+                if (keys['w'] || keys['W']) {
+                    let engineRgb = hexToRgb(params.engineColor);
+                    // Light from behind ship
+                    let lightX = ship.x - Math.cos(ship.angle) * 50;
+                    let lightZ = -ship.y + Math.sin(ship.angle) * 50;
+                    pointLight(engineRgb.r, engineRgb.g, engineRgb.b, lightX, -ship.z + 20, lightZ);
+                }
+
+            } else if (viewMode === 1) {
+                // Third-person: dramatic lighting
+                ambientLight(50);
+                // Light from camera direction
+                directionalLight(200, 200, 200, 0, 1, 0);
+                pointLight(255, 255, 255, ship.x, -ship.z + 300, -ship.y);
+
+            } else {
+                // Top-down: even lighting
+                ambientLight(80);
+                directionalLight(150, 150, 150, 0, 1, 0);
+            }
+
+            // Add colored point lights from nearby planets
+            for (let planet of planets) {
+                let dx = planet.x - ship.x;
+                let dy = planet.y - ship.y;
+                let dz = 0 - ship.z; // Planet at z=0
+                let dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+                // Only light from nearby planets (performance)
+                if (dist < 800) {
+                    let intensity = map(dist, 0, 800, 100, 20);
+                    pointLight(
+                        planet.rgb.r * intensity / 255,
+                        planet.rgb.g * intensity / 255,
+                        planet.rgb.b * intensity / 255,
+                        planet.x, 0, -planet.y
+                    );
+                }
+            }
+
+            // Engine lights from AI ships
+            for (let aiShip of aiShips) {
+                if (aiShip.thrusting) {
+                    let dx = aiShip.x - ship.x;
+                    let dy = aiShip.y - ship.y;
+                    let dz = 0 - ship.z;
+                    let dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+                    if (dist < 500) {
+                        pointLight(
+                            aiShip.color.r * 0.5,
+                            aiShip.color.g * 0.5,
+                            aiShip.color.b * 0.5,
+                            aiShip.x, 0, -aiShip.y
+                        );
+                    }
+                }
+            }
+        }
+
+        function updateStatus() {
+            let speed = ship.getSpeed();
+            let nearest = ship.getNearestPlanet();
+            let altitude = nearest.distance - nearest.planet.radius - ship.size;
+            let status = ship.landed ? "LANDED" : "ORBITING";
+            let aiCount = aiShips.length;
+
+            // Health bar color based on health percentage
+            let healthPercent = ship.health / ship.maxHealth;
+            let healthColor = healthPercent > 0.5 ? '#788c5d' :
+                             healthPercent > 0.25 ? '#d97757' :
+                             '#cc4444';
+
+            // Shield energy color
+            let shieldPercent = ship.shieldEnergy / ship.maxShieldEnergy;
+            let shieldColor = shieldPercent > 0.5 ? '#64ffc8' :
+                            shieldPercent > 0.25 ? '#d97757' :
+                            '#cc4444';
+
+            let shieldStatus = ship.shieldActive ? '🛡️ ACTIVE' :
+                              ship.shieldCooldown > 0 ? `⏳ ${Math.ceil(ship.shieldCooldown / 60)}s` :
+                              '✅ READY';
+
+            // Calculate game start grace period remaining
+            let framesSinceStart = frameCount - gameStartTime;
+            let gracePeriodRemaining = Math.max(0, Math.ceil((AI_GRACE_PERIOD - framesSinceStart) / 60));
+            let gracePeriodText = gracePeriodRemaining > 0 ?
+                `<br/>⏳ PREPARING: ${gracePeriodRemaining}s` : '';
+
+            // Calculate respawn grace period remaining
+            let framesSinceRespawn = frameCount - playerRespawnTime;
+            let respawnGraceRemaining = Math.max(0, Math.ceil((RESPAWN_GRACE_PERIOD - framesSinceRespawn) / 60));
+            let respawnGraceText = respawnGraceRemaining > 0 && gracePeriodRemaining <= 0 ?
+                `<br/>🛡️ SAFE: ${respawnGraceRemaining}s` : '';
+
+            let mouseStatus = mouse.locked ?
+                `<span style="color: #788c5d">🖱️ LOCKED (ESC to unlock)</span>` :
+                `<span style="color: #d97757">🖱️ CLICK to lock mouse</span>`;
+
+            // Altitude indicator
+            let altColor = Math.abs(ship.z) > 1500 ? '#cc4444' :
+                         Math.abs(ship.z) > 1000 ? '#d97757' :
+                         '#788c5d';
+
+            document.getElementById('statusDisplay').innerHTML =
+                `SCORE: ${score}<br/>` +
+                `HIGH SCORE: ${highScore}<br/>` +
+                `HEALTH: <span style="color: ${healthColor}">${ship.health}/${ship.maxHealth}</span><br/>` +
+                `SHIELD: <span style="color: ${shieldColor}">${Math.floor(ship.shieldEnergy)}/${ship.maxShieldEnergy}</span> ${shieldStatus}<br/>` +
+                `VELOCITY: ${speed.toFixed(2)}<br/>` +
+                `ALTITUDE: <span style="color: ${altColor}">${Math.round(ship.z)}</span><br/>` +
+                `AI SHIPS: ${aiCount}<br/>` +
+                `VIEW: <span style="color: #64ffc8">${VIEW_MODES[viewMode]}</span> (V to change)<br/>` +
+                `MOUSE: ${mouseStatus}${gracePeriodText}${respawnGraceText}`;
+        }
+
+        function launchShip() {
+            if (ship.landed) {
+                ship.launch();
+            }
+        }
+
+        function restartGame() {
+            // Reset score
+            score = 0;
+
+            // Reinitialize entire universe
+            initializeUniverse();
+
+            playSound('launch');
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // UI CONTROL HANDLERS
+        // ═══════════════════════════════════════════════════════════════════════
+
+        function updateParam(paramName, value) {
+            params[paramName] = parseFloat(value);
+            document.getElementById(paramName + '-value').textContent = value;
+
+            if (paramName === 'planetCount') {
+                initializeUniverse();
+            } else if (paramName === 'aiShipCount' || paramName === 'aiSpawnDistance') {
+                reinitializeAIShips();
+            }
+        }
+
+        function updateColor(colorId, value) {
+            params[colorId] = value;
+            document.getElementById(colorId + '-value').textContent = value;
+        }
+
+        function toggleSound(enabled) {
+            params.soundEnabled = enabled;
+            document.getElementById('soundStatus').textContent = enabled ? 'ON' : 'OFF';
+
+            if (enabled) {
+                initAudio();
+            } else {
+                stopThrust();
+                stopAmbient();
+            }
+        }
+
+        function toggleSidebar() {
+            sidebarCollapsed = !sidebarCollapsed;
+
+            const sidebar = document.getElementById('sidebar');
+            const container = document.querySelector('.container');
+            const toggle = document.getElementById('menuToggle');
+
+            if (sidebarCollapsed) {
+                sidebar.classList.add('collapsed');
+                container.classList.add('sidebar-collapsed');
+                toggle.classList.add('collapsed');
+            } else {
+                sidebar.classList.remove('collapsed');
+                container.classList.remove('sidebar-collapsed');
+                toggle.classList.remove('collapsed');
+            }
+
+            // Resize canvas immediately - no delay needed
+            let leftOffset = sidebarCollapsed ? 80 : 360;
+            resizeCanvas(windowWidth - leftOffset, windowHeight);
+        }
+
+        function updateSeedDisplay() {
+            document.getElementById('seed-input').value = params.seed;
+        }
+
+        function updateSeed() {
+            let input = document.getElementById('seed-input');
+            let newSeed = parseInt(input.value);
+            if (newSeed && newSeed > 0) {
+                params.seed = newSeed;
+                initializeUniverse();
+            } else {
+                updateSeedDisplay();
+            }
+        }
+
+        function previousSeed() {
+            params.seed = Math.max(1, params.seed - 1);
+            updateSeedDisplay();
+            initializeUniverse();
+        }
+
+        function nextSeed() {
+            params.seed = params.seed + 1;
+            updateSeedDisplay();
+            initializeUniverse();
+        }
+
+        function randomSeedAndUpdate() {
+            params.seed = Math.floor(Math.random() * 999999) + 1;
+            updateSeedDisplay();
+            initializeUniverse();
+        }
+
+        function resetParameters() {
+            params = {...defaultParams};
+
+            for (let key in params) {
+                let element = document.getElementById(key);
+                if (element && element.type === 'range') {
+                    element.value = params[key];
+                    let display = document.getElementById(key + '-value');
+                    if (display) display.textContent = params[key];
+                }
+                if (element && element.type === 'color') {
+                    element.value = params[key];
+                    let display = document.getElementById(key + '-value');
+                    if (display) display.textContent = params[key];
+                }
+            }
+
+            updateSeedDisplay();
+            initializeUniverse();
+        }
+
+        window.addEventListener('load', function() {
+            updateSeedDisplay();
+        });
+    </script>
+</body>
+</html>

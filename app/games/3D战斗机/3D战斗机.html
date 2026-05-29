@@ -1,0 +1,1503 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D战斗机 - 空战英雄</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+            background: #000;
+        }
+
+        #gameCanvas {
+            display: block;
+        }
+
+        /* HUD 界面 */
+        #hud {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            color: #0f0;
+            text-shadow: 0 0 10px #0f0;
+        }
+
+        /* 速度和高度 */
+        #speedometer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 24px;
+        }
+
+        #altimeter {
+            position: absolute;
+            top: 60px;
+            left: 20px;
+            font-size: 24px;
+        }
+
+        /* 分数和击杀 */
+        #score {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 28px;
+        }
+
+        #kills {
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            font-size: 24px;
+        }
+
+        /* 生命值条 */
+        #healthBar {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 300px;
+            height: 20px;
+            border: 2px solid #0f0;
+            background: rgba(0, 50, 0, 0.5);
+        }
+
+        #healthFill {
+            height: 100%;
+            background: linear-gradient(90deg, #f00, #ff0, #0f0);
+            transition: width 0.3s;
+        }
+
+        /* 弹药显示 */
+        #ammo {
+            position: absolute;
+            bottom: 110px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 20px;
+        }
+
+        /* 准星 */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 60px;
+            height: 60px;
+            border: 2px solid rgba(0, 255, 0, 0.5);
+            border-radius: 50%;
+        }
+
+        #crosshair::before,
+        #crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(0, 255, 0, 0.5);
+        }
+
+        #crosshair::before {
+            top: 50%;
+            left: 10%;
+            right: 10%;
+            height: 2px;
+            transform: translateY(-50%);
+        }
+
+        #crosshair::after {
+            left: 50%;
+            top: 10%;
+            bottom: 10%;
+            width: 2px;
+            transform: translateX(-50%);
+        }
+
+        /* 游戏开始界面 */
+        #startScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: #0f0;
+            pointer-events: all;
+        }
+
+        #startScreen h1 {
+            font-size: 64px;
+            margin-bottom: 30px;
+            text-shadow: 0 0 20px #0f0;
+        }
+
+        #startScreen .controls {
+            font-size: 20px;
+            line-height: 2;
+            margin-bottom: 40px;
+        }
+
+        #startScreen button {
+            padding: 20px 60px;
+            font-size: 28px;
+            background: transparent;
+            border: 3px solid #0f0;
+            color: #0f0;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        #startScreen button:hover {
+            background: #0f0;
+            color: #000;
+        }
+
+        /* 游戏结束界面 */
+        #gameOver {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: #f00;
+            pointer-events: all;
+        }
+
+        #gameOver h2 {
+            font-size: 72px;
+            margin-bottom: 30px;
+            text-shadow: 0 0 20px #f00;
+        }
+
+        #gameOver .stats {
+            font-size: 32px;
+            margin-bottom: 40px;
+            color: #0f0;
+        }
+
+        /* 武器锁定指示 - 已禁用 */
+        #lockIndicator {
+            display: none !important;
+        }
+
+        @keyframes lockPulse {
+            0%, 100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+            50% { opacity: 0.5; transform: translate(-50%, -50%) scale(1.1); }
+        }
+
+        /* 警告信息 */
+        #warning {
+            position: absolute;
+            top: 15%;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 48px;
+            color: #f00;
+            text-shadow: 0 0 20px #f00;
+            display: none;
+            animation: warningFlash 0.3s infinite;
+        }
+
+        @keyframes warningFlash {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* 小地图 */
+        #minimap {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 150px;
+            height: 150px;
+            border: 2px solid #0f0;
+            background: rgba(0, 50, 0, 0.3);
+        }
+
+        /* 警告雷达 */
+        #radar {
+            position: absolute;
+            bottom: 180px;
+            right: 20px;
+            width: 100px;
+            height: 100px;
+            border: 2px solid #0f0;
+            border-radius: 50%;
+            background: rgba(0, 50, 0, 0.3);
+            position: relative;
+        }
+
+        #radarSweep {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 50%;
+            height: 2px;
+            background: linear-gradient(90deg, #0f0, transparent);
+            transform-origin: left center;
+            animation: radarSweep 2s linear infinite;
+        }
+
+        @keyframes radarSweep {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        #saveMsg { position:fixed; top:60px; left:50%; transform:translateX(-50%);
+          color:#0f0; font-size:16px; pointer-events:none; opacity:0;
+          text-shadow:0 0 4px #0f0; font-family:monospace; z-index:9999;
+          transition:opacity 0.3s; }
+    </style>
+</head>
+<body>
+    <div id="saveMsg"></div>
+    <div id="mpKillFeed" style="position:fixed;top:150px;right:20px;z-index:100;pointer-events:none;"></div>
+    <div id="mpScoreboard" style="position:fixed;top:20px;right:20px;z-index:100;background:rgba(0,0,0,0.7);padding:10px 15px;border-radius:8px;color:#fff;font-size:14px;display:none;backdrop-filter:blur(10px);min-width:150px;"></div>
+    <!-- 游戏画布 -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- HUD 界面 -->
+    <div id="hud">
+        <div id="speedometer">速度: <span id="speed">0</span> km/h</div>
+        <div id="altimeter">高度: <span id="altitude">0</span> m</div>
+        <div id="score">分数: <span id="scoreValue">0</span></div>
+        <div id="kills">击杀: <span id="killsValue">0</span></div>
+        <div id="healthBar">
+            <div id="healthFill" style="width: 100%"></div>
+        </div>
+        <div id="ammo">机炮: ∞ | 导弹: <span id="missileCount">4</span></div>
+        <div id="crosshair"></div>
+        <div id="lockIndicator"></div>
+        <div id="warning">警告: 敌机接近!</div>
+        <div id="radar">
+            <div id="radarSweep"></div>
+        </div>
+    </div>
+
+    <!-- 开始界面 -->
+    <div id="startScreen">
+        <h1>🛩️ 3D战斗机 🛩️</h1>
+        <div class="controls">
+            <p>🎮 控制方式:</p>
+            <p>W / S - 俯仰 (机头上下)</p>
+            <p>A / D - 偏航 (左右转向)</p>
+            <p>Q / E - 滚转 (左右翻滚)</p>
+            <p>Shift - 加速 | Ctrl - 减速</p>
+            <p>空格 - 机炮射击</p>
+            <p>鼠标左键 - 发射导弹</p>
+            <p>P - 暂停游戏</p>
+        </div>
+        <button id="startBtn">开始游戏</button>
+    </div>
+
+    <!-- 游戏结束界面 -->
+    <div id="gameOver">
+        <h2>游戏结束</h2>
+        <div class="stats">
+            <p>最终分数: <span id="finalScore">0</span></p>
+            <p>击杀敌机: <span id="finalKills">0</span></p>
+        </div>
+        <button id="restartBtn">重新开始</button>
+    </div>
+
+    <!-- Three.js -->
+    <script src="three.min.js"></script>
+
+    <script>
+        // ==================== 存档系统 ====================
+        let _savedFighter = JSON.parse(localStorage.getItem('fighter3d_save') || '{}');
+        let highScore = _savedFighter.highScore || 0;
+        let highKills = _savedFighter.highKills || 0;
+        function showSaveToast(msg) {
+            const sm = document.getElementById('saveMsg');
+            sm.textContent = msg; sm.style.opacity = 1;
+            setTimeout(() => sm.style.opacity = 0, 1500);
+        }
+        function saveFighter() {
+            if (score > highScore) highScore = score;
+            if (kills > highKills) highKills = kills;
+            try { localStorage.setItem('fighter3d_save', JSON.stringify({ highScore, highKills })); showSaveToast('已保存 最高分:' + highScore); } catch(e){}
+        }
+        function loadFighter() { showSaveToast('最高分:' + highScore + ' 最高击杀:' + highKills); }
+        document.addEventListener('keydown', e => {
+            if (e.code === 'F5') { e.preventDefault(); saveFighter(); }
+            if (e.code === 'F9') { e.preventDefault(); loadFighter(); }
+        });
+
+        // ==================== 游戏配置 ====================
+        const CONFIG = {
+            playerSpeed: { min: 50, max: 300, default: 150 },
+            rotationSpeed: { pitch: 1.5, roll: 2.0, yaw: 1.0 },
+            bulletSpeed: 800,
+            missileSpeed: 400,
+            missileCount: 8,
+            enemySpeed: 100,
+            enemySpawnRate: 3000,
+            maxEnemies: 8,
+            worldSize: 5000
+        };
+
+        // ==================== 全局变量 ====================
+        let scene, camera, renderer;
+        let player, playerModel;
+        let enemies = [];
+        let bullets = [];
+        let missiles = [];
+        let particles = [];
+        let clouds = [];
+
+        let score = 0;
+        let kills = 0;
+        let health = 100;
+        let missileAmmo = CONFIG.missileCount;
+        let gameRunning = false;
+        let gamePaused = false;
+        let lockedTarget = null;
+
+        // ====== 联机系统 ======
+        let mpActive = false;
+        let mpMyId = null;
+        let mpIsHost = false;
+        let mpMyName = '玩家';
+        const remotePlayers = new Map();
+        const mpScores = new Map();
+        let mpSyncTimer = 0;
+        let mpEnemySyncTimer = 0;
+        let mpRemoteEnemies = [];  // 客户端：从主机同步的敌机数据
+        const MP_PLANE_COLORS = [0x3498db, 0xe67e22, 0x9b59b6, 0x1abc9c, 0xe91e63];
+
+        function mpSafeSend(data) {
+            if (window.electronAPI && window.electronAPI.mpSend) {
+                window.electronAPI.mpSend(data);
+            }
+        }
+
+        async function mpRestoreState() {
+            if (!window.electronAPI || !window.electronAPI.mpGetState) return;
+            try {
+                const state = await window.electronAPI.mpGetState();
+                if (state.active) {
+                    mpActive = true;
+                    mpMyId = state.myId;
+                    mpIsHost = state.isHost;
+                    mpMyName = state.myName || '玩家';
+                    mpScores.set(mpMyId, 0);
+                    document.getElementById('mpScoreboard').style.display = 'block';
+                    for (const peer of state.peers) {
+                        if (peer.id !== mpMyId && !remotePlayers.has(peer.id)) {
+                            mpCreateRemotePlayer(peer.id, peer.name);
+                        }
+                    }
+                    mpUpdateScoreboard();
+                }
+            } catch (e) {}
+        }
+
+        // 主机同步敌机状态
+        function mpSyncEnemyState() {
+            if (!mpIsHost || !mpActive) return;
+            const enemyData = enemies.map((e, idx) => ({
+                idx,
+                px: e.position.x, py: e.position.y, pz: e.position.z,
+                qx: e.quaternion.x, qy: e.quaternion.y,
+                qz: e.quaternion.z, qw: e.quaternion.w,
+                health: e.userData.health
+            }));
+            mpSafeSend({ type: 'enemy-sync', enemies: enemyData, count: enemies.length });
+        }
+
+        // 客户端应用敌机同步
+        function mpApplyEnemySync(data) {
+            // 主机发送了当前敌机数量，客户端对齐
+            while (enemies.length > data.count) {
+                scene.remove(enemies.pop());
+            }
+            for (const ed of data.enemies) {
+                if (ed.idx >= 0 && ed.idx < enemies.length) {
+                    const e = enemies[ed.idx];
+                    e.position.set(
+                        e.position.x + (ed.px - e.position.x) * 0.3,
+                        e.position.y + (ed.py - e.position.y) * 0.3,
+                        e.position.z + (ed.pz - e.position.z) * 0.3
+                    );
+                    e.quaternion.slerp(new THREE.Quaternion(ed.qx, ed.qy, ed.qz, ed.qw), 0.3);
+                    e.userData.health = ed.health;
+                } else if (ed.idx >= enemies.length) {
+                    // 客户端没有这个敌机，创建一个新的
+                    const enemy = new THREE.Group();
+                    const bodyGeometry = new THREE.ConeGeometry(1.5, 12, 8);
+                    const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x990000, shininess: 100 });
+                    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+                    body.rotation.x = Math.PI / 2;
+                    enemy.add(body);
+                    const wingGeometry = new THREE.BoxGeometry(15, 0.4, 5);
+                    const wing = new THREE.Mesh(wingGeometry, bodyMaterial);
+                    wing.position.z = 1.5;
+                    enemy.add(wing);
+                    const tailGeometry = new THREE.BoxGeometry(6, 0.3, 3);
+                    const tail = new THREE.Mesh(tailGeometry, bodyMaterial);
+                    tail.position.z = 5;
+                    enemy.add(tail);
+                    const vTailGeometry = new THREE.BoxGeometry(0.3, 4, 4);
+                    const vTail = new THREE.Mesh(vTailGeometry, bodyMaterial);
+                    vTail.position.set(0, 1.5, 5);
+                    enemy.add(vTail);
+                    enemy.position.set(ed.px, ed.py, ed.pz);
+                    enemy.quaternion.set(ed.qx, ed.qy, ed.qz, ed.qw);
+                    enemy.userData = { health: ed.health, speed: CONFIG.enemySpeed, lastShot: 0 };
+                    enemies.push(enemy);
+                    scene.add(enemy);
+                }
+            }
+        }
+
+        function mpHandleMessage(data) {
+            if (!mpActive && data.type !== 'your-id' && data.type !== 'disconnected' && data.type !== 'player-join' && data.type !== 'player-list' && data.type !== 'player-state' && data.type !== 'player-leave') return;
+            switch (data.type) {
+                case 'your-id':
+                    mpMyId = data.id;
+                    mpActive = true;
+                    mpScores.set(mpMyId, score);
+                    document.getElementById('mpScoreboard').style.display = 'block';
+                    mpUpdateScoreboard();
+                    break;
+                case 'player-join':
+                    if (!remotePlayers.has(data.id)) mpCreateRemotePlayer(data.id, data.name);
+                    break;
+                case 'player-list':
+                    for (const p of data.players) {
+                        if (!remotePlayers.has(p.id)) mpCreateRemotePlayer(p.id, p.name);
+                    }
+                    break;
+                case 'player-leave':
+                    mpRemoveRemotePlayer(data.id);
+                    break;
+                case 'player-state':
+                    if (data.id !== mpMyId) {
+                        if (!remotePlayers.has(data.id)) mpCreateRemotePlayer(data.id, data.name || ('Player ' + data.id));
+                        mpUpdateRemotePlayerState(data);
+                    }
+                    break;
+                case 'shoot-event':
+                    if (data.id !== mpMyId) mpRemotePlayerShoot(data);
+                    break;
+                case 'missile-event':
+                    if (data.id !== mpMyId) mpRemotePlayerMissile(data);
+                    break;
+                case 'kill-event':
+                    mpApplyKill(data);
+                    break;
+                case 'enemy-sync':
+                    if (!mpIsHost) mpApplyEnemySync(data);
+                    break;
+                case 'score-update':
+                    mpActive = false;
+                    for (const [id] of remotePlayers) mpRemoveRemotePlayer(id);
+                    document.getElementById('mpScoreboard').style.display = 'none';
+                    break;
+            }
+        }
+
+        function mpCreateRemotePlayer(id, name) {
+            const colorIdx = (id - 1) % MP_PLANE_COLORS.length;
+            const color = MP_PLANE_COLORS[colorIdx];
+            const group = new THREE.Group();
+            // 机身
+            const bodyGeo = new THREE.ConeGeometry(2, 15, 8);
+            const bodyMat = new THREE.MeshPhongMaterial({ color: color, shininess: 100 });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.rotation.x = Math.PI / 2;
+            group.add(body);
+            // 主翼
+            const wingGeo = new THREE.BoxGeometry(20, 0.5, 6);
+            const wing = new THREE.Mesh(wingGeo, bodyMat);
+            wing.position.z = 2;
+            group.add(wing);
+            // 尾翼
+            const tailGeo = new THREE.BoxGeometry(8, 0.4, 4);
+            const tail = new THREE.Mesh(tailGeo, bodyMat);
+            tail.position.z = 6;
+            group.add(tail);
+            // 垂直尾翼
+            const vTailGeo = new THREE.BoxGeometry(0.4, 5, 5);
+            const vTail = new THREE.Mesh(vTailGeo, bodyMat);
+            vTail.position.set(0, 2, 6);
+            group.add(vTail);
+            // 名牌
+            const canvas = document.createElement('canvas');
+            canvas.width = 256; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(0, 0, 256, 64);
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 28px Arial, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(name || ('Player ' + id), 128, 42);
+            const tex = new THREE.CanvasTexture(canvas);
+            const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+            const nametag = new THREE.Sprite(spriteMat);
+            nametag.position.y = 8;
+            nametag.scale.set(15, 4, 1);
+            group.add(nametag);
+
+            group.position.set(0, 500, 0);
+            scene.add(group);
+            mpScores.set(id, 0);
+            remotePlayers.set(id, {
+                group, nametag, name: name || ('Player ' + id),
+                targetPos: new THREE.Vector3(0, 500, 0),
+                targetQuat: new THREE.Quaternion()
+            });
+            mpUpdateScoreboard();
+        }
+
+        function mpRemoveRemotePlayer(id) {
+            const rp = remotePlayers.get(id);
+            if (rp) { scene.remove(rp.group); remotePlayers.delete(id); mpScores.delete(id); mpUpdateScoreboard(); }
+        }
+
+        function mpUpdateRemotePlayerState(data) {
+            const rp = remotePlayers.get(data.id);
+            if (rp) {
+                rp.targetPos.set(data.px, data.py, data.pz);
+                rp.targetQuat.set(data.qx, data.qy, data.qz, data.qw);
+            }
+        }
+
+        function mpInterpolateRemotePlayers() {
+            for (const [, rp] of remotePlayers) {
+                rp.group.position.lerp(rp.targetPos, 0.3);
+                rp.group.quaternion.slerp(rp.targetQuat, 0.3);
+            }
+        }
+
+        function mpRemotePlayerShoot(data) {
+            const dir = new THREE.Vector3(data.dx, data.dy, data.dz);
+            const pos = new THREE.Vector3(data.px, data.py, data.pz);
+            createBullet(pos, dir);
+        }
+
+        function mpRemotePlayerMissile(data) {
+            const rp = remotePlayers.get(data.id);
+            if (!rp) return;
+            const missileGroup = new THREE.Group();
+            const bodyGeo = new THREE.CylinderGeometry(0.3, 0.3, 4, 8);
+            const bodyMat = new THREE.MeshPhongMaterial({ color: 0x666666 });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.rotation.x = Math.PI / 2;
+            missileGroup.add(body);
+            const finGeo = new THREE.BoxGeometry(1.5, 0.1, 0.8);
+            const fin1 = new THREE.Mesh(finGeo, bodyMat);
+            fin1.position.z = 1.5;
+            missileGroup.add(fin1);
+            const fin2 = new THREE.Mesh(finGeo, bodyMat);
+            fin2.position.z = 1.5;
+            fin2.rotation.z = Math.PI / 2;
+            missileGroup.add(fin2);
+            missileGroup.position.set(data.px, data.py, data.pz);
+            missileGroup.quaternion.set(data.qx, data.qy, data.qz, data.qw);
+            missileGroup.userData = { target: null, speed: CONFIG.missileSpeed, turnRate: 2.0, lifetime: 10, owner: 'remote-' + data.id };
+            missiles.push(missileGroup);
+            scene.add(missileGroup);
+        }
+
+        function mpShowKillFeed(killer, target, points) {
+            const feed = document.getElementById('mpKillFeed');
+            if (!feed) return;
+            const entry = document.createElement('div');
+            entry.style.cssText = 'color:#fff;font-size:14px;margin-bottom:4px;opacity:1;transition:opacity 0.5s;text-shadow:1px 1px 2px #000;font-family:monospace;';
+            entry.textContent = killer + ' 击毁 ' + target + ' +' + points;
+            feed.appendChild(entry);
+            setTimeout(() => { entry.style.opacity = '0'; }, 3000);
+            setTimeout(() => { if (entry.parentNode) entry.parentNode.removeChild(entry); }, 3500);
+        }
+
+        function mpUpdateScoreboard() {
+            const sb = document.getElementById('mpScoreboard');
+            if (!sb || !mpActive) return;
+            let html = '<div style="font-weight:bold;margin-bottom:5px;border-bottom:1px solid #555;padding-bottom:5px;">计分板</div>';
+            const myScore = mpScores.get(mpMyId) || 0;
+            html += '<div style="color:#0f0;">' + mpMyName + (mpIsHost ? ' (主机)' : '') + ': ' + myScore + '</div>';
+            for (const [id, rp] of remotePlayers) {
+                html += '<div style="color:#3498db;">' + rp.name + ': ' + (mpScores.get(id) || 0) + '</div>';
+            }
+            sb.innerHTML = html;
+        }
+
+        function mpApplyKill(data) {
+            if (data.enemyIdx >= 0 && data.enemyIdx < enemies.length) {
+                const enemy = enemies[data.enemyIdx];
+                if (enemy) { createExplosion(enemy.position); scene.remove(enemy); enemies.splice(data.enemyIdx, 1); }
+            }
+            if (data.scores) {
+                for (const [id, s] of Object.entries(data.scores)) {
+                    mpScores.set(Number(id), s);
+                    if (Number(id) === mpMyId) score = s;
+                }
+            }
+            mpShowKillFeed(data.killerName, '敌机', data.points);
+            kills++;
+            mpUpdateScoreboard();
+            updateHUD();
+        }
+
+        // 输入状态
+        const keys = {};
+        let mouseX = 0, mouseY = 0;
+
+        // ==================== Three.js 初始化 ====================
+        function init() {
+            // 创建场景
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.Fog(0x87CEEB, 1000, 4000);
+
+            // 创建相机
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
+            camera.position.set(0, 560, 120);
+
+            // 创建渲染器
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('gameCanvas'), antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+            // 添加光照
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(500, 500, 500);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.camera.left = -1000;
+            directionalLight.shadow.camera.right = 1000;
+            directionalLight.shadow.camera.top = 1000;
+            directionalLight.shadow.camera.bottom = -1000;
+            scene.add(directionalLight);
+
+            // 创建地面
+            createGround();
+
+            // 创建云层
+            createClouds();
+
+            // 创建玩家飞机
+            createPlayer();
+
+            // 创建天空盒
+            createSkybox();
+
+            // 事件监听
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mousedown', onMouseDown);
+            document.getElementById('startBtn').addEventListener('click', startGame);
+            document.getElementById('restartBtn').addEventListener('click', restartGame);
+
+            // 联机消息监听
+            if (window.electronAPI && window.electronAPI.onMpMessage) {
+                window.electronAPI.onMpMessage((data) => mpHandleMessage(data));
+                mpRestoreState();
+            }
+        }
+
+        // ==================== 创建地面 ====================
+        function createGround() {
+            // 主地面
+            const groundGeometry = new THREE.PlaneGeometry(CONFIG.worldSize * 2, CONFIG.worldSize * 2, 100, 100);
+
+            // 添加地形起伏
+            const vertices = groundGeometry.attributes.position.array;
+            for (let i = 0; i < vertices.length; i += 3) {
+                vertices[i + 2] = Math.random() * 50 - 25;
+            }
+            groundGeometry.computeVertexNormals();
+
+            const groundMaterial = new THREE.MeshPhongMaterial({
+                color: 0x3d5c3d,
+                flatShading: true,
+                shininess: 10
+            });
+
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.y = -500;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // 网格辅助线
+            const gridHelper = new THREE.GridHelper(CONFIG.worldSize, 50, 0x00ff00, 0x004400);
+            gridHelper.position.y = -499;
+            scene.add(gridHelper);
+        }
+
+        // ==================== 创建云层 ====================
+        function createClouds() {
+            for (let i = 0; i < 50; i++) {
+                const cloudGroup = new THREE.Group();
+
+                // 创建多个球体组成云
+                for (let j = 0; j < 5; j++) {
+                    const cloudGeometry = new THREE.SphereGeometry(
+                        30 + Math.random() * 20,
+                        8, 8
+                    );
+                    const cloudMaterial = new THREE.MeshPhongMaterial({
+                        color: 0xffffff,
+                        transparent: true,
+                        opacity: 0.8
+                    });
+                    const cloudPart = new THREE.Mesh(cloudGeometry, cloudMaterial);
+                    cloudPart.position.set(
+                        Math.random() * 60 - 30,
+                        Math.random() * 20 - 10,
+                        Math.random() * 60 - 30
+                    );
+                    cloudGroup.add(cloudPart);
+                }
+
+                cloudGroup.position.set(
+                    Math.random() * CONFIG.worldSize - CONFIG.worldSize / 2,
+                    800 + Math.random() * 500,
+                    Math.random() * CONFIG.worldSize - CONFIG.worldSize / 2
+                );
+
+                clouds.push(cloudGroup);
+                scene.add(cloudGroup);
+            }
+        }
+
+        // ==================== 创建天空盒 ====================
+        function createSkybox() {
+            // 简单的渐变天空
+            const skyGeometry = new THREE.SphereGeometry(CONFIG.worldSize, 32, 32);
+            const skyMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    topColor: { value: new THREE.Color(0x0077ff) },
+                    bottomColor: { value: new THREE.Color(0x87CEEB) },
+                    offset: { value: 400 },
+                    exponent: { value: 0.6 }
+                },
+                vertexShader: `
+                    varying vec3 vWorldPosition;
+                    void main() {
+                        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                        vWorldPosition = worldPosition.xyz;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform vec3 topColor;
+                    uniform vec3 bottomColor;
+                    uniform float offset;
+                    uniform float exponent;
+                    varying vec3 vWorldPosition;
+                    void main() {
+                        float h = normalize(vWorldPosition + offset).y;
+                        gl_FragColor = vec4(mix(bottomColor, topColor, max(pow(max(h, 0.0), exponent), 0.0)), 1.0);
+                    }
+                `,
+                side: THREE.BackSide
+            });
+
+            const sky = new THREE.Mesh(skyGeometry, skyMaterial);
+            scene.add(sky);
+        }
+
+        // ==================== 创建玩家飞机 ====================
+        function createPlayer() {
+            player = new THREE.Group();
+
+            // 机身
+            const bodyGeometry = new THREE.ConeGeometry(2, 15, 8);
+            const bodyMaterial = new THREE.MeshPhongMaterial({
+                color: 0x666666,
+                shininess: 100
+            });
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.rotation.x = Math.PI / 2;
+            player.add(body);
+
+            // 主翼
+            const wingGeometry = new THREE.BoxGeometry(20, 0.5, 6);
+            const wing = new THREE.Mesh(wingGeometry, bodyMaterial);
+            wing.position.z = 2;
+            wing.castShadow = true;
+            player.add(wing);
+
+            // 尾翼
+            const tailGeometry = new THREE.BoxGeometry(8, 0.4, 4);
+            const tail = new THREE.Mesh(tailGeometry, bodyMaterial);
+            tail.position.z = 6;
+            tail.castShadow = true;
+            player.add(tail);
+
+            // 垂直尾翼
+            const vTailGeometry = new THREE.BoxGeometry(0.4, 5, 5);
+            const vTail = new THREE.Mesh(vTailGeometry, bodyMaterial);
+            vTail.position.set(0, 2, 6);
+            vTail.castShadow = true;
+            player.add(vTail);
+
+            // 驾驶舱
+            const cockpitGeometry = new THREE.SphereGeometry(1.5, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+            const cockpitMaterial = new THREE.MeshPhongMaterial({
+                color: 0x3333aa,
+                shininess: 150,
+                transparent: true,
+                opacity: 0.8
+            });
+            const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
+            cockpit.position.set(0, 1, -2);
+            player.add(cockpit);
+
+            // 引擎
+            const engineGeometry = new THREE.CylinderGeometry(0.8, 1, 3, 8);
+            const engineMaterial = new THREE.MeshPhongMaterial({ color: 0x444444 });
+            const engineLeft = new THREE.Mesh(engineGeometry, engineMaterial);
+            engineLeft.rotation.x = Math.PI / 2;
+            engineLeft.position.set(-2, 0, 3);
+            player.add(engineLeft);
+
+            const engineRight = new THREE.Mesh(engineGeometry, engineMaterial);
+            engineRight.rotation.x = Math.PI / 2;
+            engineRight.position.set(2, 0, 3);
+            player.add(engineRight);
+
+            player.position.set(0, 500, 0);
+            playerModel = player;
+            scene.add(player);
+        }
+
+        // ==================== 创建敌机 ====================
+        function createEnemy() {
+            const enemy = new THREE.Group();
+
+            // 敌机机身（红色）
+            const bodyGeometry = new THREE.ConeGeometry(1.5, 12, 8);
+            const bodyMaterial = new THREE.MeshPhongMaterial({
+                color: 0x990000,
+                shininess: 100
+            });
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.rotation.x = Math.PI / 2;
+            enemy.add(body);
+
+            // 主翼
+            const wingGeometry = new THREE.BoxGeometry(15, 0.4, 5);
+            const wing = new THREE.Mesh(wingGeometry, bodyMaterial);
+            wing.position.z = 1.5;
+            enemy.add(wing);
+
+            // 尾翼
+            const tailGeometry = new THREE.BoxGeometry(6, 0.3, 3);
+            const tail = new THREE.Mesh(tailGeometry, bodyMaterial);
+            tail.position.z = 5;
+            enemy.add(tail);
+
+            // 垂直尾翼
+            const vTailGeometry = new THREE.BoxGeometry(0.3, 4, 4);
+            const vTail = new THREE.Mesh(vTailGeometry, bodyMaterial);
+            vTail.position.set(0, 1.5, 5);
+            enemy.add(vTail);
+
+            // 随机位置生成
+            const angle = Math.random() * Math.PI * 2;
+            const distance = 1500 + Math.random() * 1500;
+            enemy.position.set(
+                player.position.x + Math.cos(angle) * distance,
+                player.position.y + (Math.random() - 0.5) * 500,
+                player.position.z + Math.sin(angle) * distance
+            );
+
+            enemy.userData = {
+                health: 30,
+                speed: CONFIG.enemySpeed,
+                lastShot: 0
+            };
+
+            enemies.push(enemy);
+            scene.add(enemy);
+        }
+
+        // ==================== 创建子弹 ====================
+        function createBullet(position, direction) {
+            const bulletGeometry = new THREE.SphereGeometry(0.3, 8, 8);
+            const bulletMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+            const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
+
+            bullet.position.copy(position);
+            bullet.userData = {
+                velocity: direction.clone().multiplyScalar(CONFIG.bulletSpeed),
+                lifetime: 2
+            };
+
+            bullets.push(bullet);
+            scene.add(bullet);
+        }
+
+        // ==================== 创建导弹 ====================
+        function createMissile(target) {
+            const missileGroup = new THREE.Group();
+
+            // 导弹机身
+            const bodyGeometry = new THREE.CylinderGeometry(0.3, 0.3, 4, 8);
+            const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x666666 });
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.rotation.x = Math.PI / 2;
+            missileGroup.add(body);
+
+            // 导弹尾翼
+            const finGeometry = new THREE.BoxGeometry(1.5, 0.1, 0.8);
+            const fin1 = new THREE.Mesh(finGeometry, bodyMaterial);
+            fin1.position.z = 1.5;
+            missileGroup.add(fin1);
+            const fin2 = new THREE.Mesh(finGeometry, bodyMaterial);
+            fin2.position.z = 1.5;
+            fin2.rotation.z = Math.PI / 2;
+            missileGroup.add(fin2);
+
+            missileGroup.position.copy(player.position);
+            // 导弹向前发射
+            const forwardDir = new THREE.Vector3();
+            player.getWorldDirection(forwardDir);
+            missileGroup.lookAt(player.position.clone().add(forwardDir.negate()));
+
+            missileGroup.userData = {
+                target: target,
+                speed: CONFIG.missileSpeed,
+                turnRate: 2.0,
+                lifetime: 10
+            };
+
+            missiles.push(missileGroup);
+            scene.add(missileGroup);
+        }
+
+        // ==================== 创建粒子效果 ====================
+        function createExplosion(position) {
+            for (let i = 0; i < 30; i++) {
+                const particleGeometry = new THREE.SphereGeometry(2, 8, 8);
+                const particleMaterial = new THREE.MeshBasicMaterial({
+                    color: Math.random() > 0.5 ? 0xff6600 : 0xffff00,
+                    transparent: true,
+                    opacity: 1
+                });
+                const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+
+                particle.position.copy(position);
+                particle.position.x += (Math.random() - 0.5) * 10;
+                particle.position.y += (Math.random() - 0.5) * 10;
+                particle.position.z += (Math.random() - 0.5) * 10;
+
+                particle.userData = {
+                    velocity: new THREE.Vector3(
+                        Math.random() - 0.5,
+                        Math.random() - 0.5,
+                        Math.random() - 0.5
+                    ).multiplyScalar(50),
+                    life: 1.0
+                };
+
+                particles.push(particle);
+                scene.add(particle);
+            }
+        }
+
+        // ==================== 输入处理 ====================
+        function onKeyDown(event) {
+            keys[event.code] = true;
+
+            if (event.code === 'Space' && gameRunning && !gamePaused) {
+                // 机炮射击（向前发射）
+                const direction = new THREE.Vector3();
+                player.getWorldDirection(direction);
+                createBullet(player.position.clone(), direction.negate());
+                // 联机广播射击
+                if (mpActive) {
+                    mpSafeSend({
+                        type: 'shoot-event', id: mpMyId,
+                        px: player.position.x, py: player.position.y, pz: player.position.z,
+                        dx: -direction.x, dy: -direction.y, dz: -direction.z
+                    });
+                }
+            }
+
+            if (event.code === 'KeyP' && gameRunning && !mpActive) {
+                gamePaused = !gamePaused;
+            }
+        }
+
+        function onKeyUp(event) {
+            keys[event.code] = false;
+        }
+
+        function onMouseMove(event) {
+            mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+            mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+        }
+
+        function onMouseDown(event) {
+            if (event.button === 0 && gameRunning && !gamePaused) {
+                // 发射导弹 - 自动锁定最近的敌机
+                if (missileAmmo > 0) {
+                    const target = findNearestEnemy();
+                    createMissile(target); // 即使没有目标也能发射，导弹会自动寻找
+                    missileAmmo--;
+                    updateHUD();
+                    // 联机广播导弹
+                    if (mpActive) {
+                        mpSafeSend({
+                            type: 'missile-event', id: mpMyId,
+                            px: player.position.x, py: player.position.y, pz: player.position.z,
+                            qx: player.quaternion.x, qy: player.quaternion.y,
+                            qz: player.quaternion.z, qw: player.quaternion.w
+                        });
+                    }
+                }
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // ==================== 游戏逻辑 ====================
+        function updatePlayer(delta) {
+            if (!player) return;
+
+            const moveSpeed = 200 * delta;
+            const rotSpeed = CONFIG.rotationSpeed;
+
+            // 俯仰 (W/S) - 机头上下
+            if (keys['KeyW']) player.rotateX(rotSpeed.pitch * delta);
+            if (keys['KeyS']) player.rotateX(-rotSpeed.pitch * delta);
+
+            // 偏航 (A/D) - 左右转向（带自动倾斜）
+            if (keys['KeyA']) {
+                player.rotateY(rotSpeed.yaw * delta);
+                player.rotateZ(rotSpeed.roll * 0.8 * delta); // 自动向左倾斜
+            }
+            if (keys['KeyD']) {
+                player.rotateY(-rotSpeed.yaw * delta);
+                player.rotateZ(-rotSpeed.roll * 0.8 * delta); // 自动向右倾斜
+            }
+
+            // 滚转 (Q/E) - 左右翻滚
+            if (keys['KeyQ']) player.rotateZ(rotSpeed.roll * delta);
+            if (keys['KeyE']) player.rotateZ(-rotSpeed.roll * delta);
+
+            // 速度控制
+            if (keys['ShiftLeft']) {
+                CONFIG.playerSpeed.default = Math.min(CONFIG.playerSpeed.max, CONFIG.playerSpeed.default + 50 * delta);
+            }
+            if (keys['ControlLeft']) {
+                CONFIG.playerSpeed.default = Math.max(CONFIG.playerSpeed.min, CONFIG.playerSpeed.default - 50 * delta);
+            }
+
+            // 移动（反转方向，因为飞机模型朝后）
+            const direction = new THREE.Vector3();
+            player.getWorldDirection(direction);
+            player.position.add(direction.multiplyScalar(-CONFIG.playerSpeed.default * delta));
+
+            // 限制高度
+            if (player.position.y < 100) player.position.y = 100;
+            if (player.position.y > 1500) player.position.y = 1500;
+
+            // 限制水平范围
+            const halfWorld = CONFIG.worldSize / 2;
+            player.position.x = THREE.MathUtils.clamp(player.position.x, -halfWorld, halfWorld);
+            player.position.z = THREE.MathUtils.clamp(player.position.z, -halfWorld, halfWorld);
+
+            // 更新相机位置（相机在飞机后上方）
+            const cameraOffset = new THREE.Vector3(0, 60, 120);
+            cameraOffset.applyQuaternion(player.quaternion);
+            camera.position.copy(player.position).add(cameraOffset);
+            camera.lookAt(player.position);
+        }
+
+        function updateEnemies(delta) {
+            enemies.forEach((enemy, index) => {
+                // 简单的追踪AI
+                const toPlayer = new THREE.Vector3().subVectors(player.position, enemy.position);
+                const distance = toPlayer.length();
+
+                if (distance < 2000) {
+                    // 转向玩家
+                    toPlayer.normalize();
+                    const targetPosition = player.position.clone();
+                    enemy.lookAt(targetPosition);
+
+                    // 移动
+                    const direction = new THREE.Vector3();
+                    enemy.getWorldDirection(direction);
+                    enemy.position.add(direction.multiplyScalar(enemy.userData.speed * delta));
+
+                    // 敌机射击
+                    enemy.userData.lastShot += delta * 1000;
+                    if (enemy.userData.lastShot > 2000 && distance < 500) {
+                        enemy.userData.lastShot = 0;
+                        const shootDirection = new THREE.Vector3().subVectors(player.position, enemy.position).normalize();
+                        createBullet(enemy.position.clone(), shootDirection);
+                    }
+                }
+
+                // 移除过远的敌机
+                if (enemy.position.distanceTo(player.position) > 5000) {
+                    scene.remove(enemy);
+                    enemies.splice(index, 1);
+                }
+            });
+        }
+
+        function updateBullets(delta) {
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                bullet.position.add(bullet.userData.velocity.clone().multiplyScalar(delta));
+                bullet.userData.lifetime -= delta;
+
+                // 移除过期子弹
+                if (bullet.userData.lifetime <= 0) {
+                    scene.remove(bullet);
+                    bullets.splice(i, 1);
+                }
+            }
+        }
+
+        function updateMissiles(delta) {
+            for (let i = missiles.length - 1; i >= 0; i--) {
+                const missile = missiles[i];
+
+                // 导弹追踪 - 改进的自动锁定
+                if (missile.userData.target && enemies.includes(missile.userData.target)) {
+                    const target = missile.userData.target;
+                    const toTarget = new THREE.Vector3().subVectors(target.position, missile.position).normalize();
+                    const currentDirection = new THREE.Vector3();
+                    missile.getWorldDirection(currentDirection);
+
+                    // 改进的比例导引 - 更快的转向速度
+                    const turnSpeed = missile.userData.turnRate * 3; // 增加3倍转向速度
+                    const newDirection = currentDirection.lerp(toTarget, turnSpeed * delta).normalize();
+                    missile.lookAt(missile.position.clone().add(newDirection));
+                } else if (enemies.length > 0) {
+                    // 如果目标丢失，自动寻找最近的敌机
+                    let nearestEnemy = null;
+                    let minDist = Infinity;
+
+                    enemies.forEach(enemy => {
+                        const dist = missile.position.distanceTo(enemy.position);
+                        if (dist < minDist && dist < 2000) {
+                            minDist = dist;
+                            nearestEnemy = enemy;
+                        }
+                    });
+
+                    if (nearestEnemy) {
+                        missile.userData.target = nearestEnemy;
+                    }
+                }
+
+                // 移动 - 导弹加速
+                const direction = new THREE.Vector3();
+                missile.getWorldDirection(direction);
+                // 导弹逐渐加速
+                missile.userData.speed = Math.min(missile.userData.speed * 1.01, 600); // 最高600
+                missile.position.add(direction.multiplyScalar(missile.userData.speed * delta));
+                missile.userData.lifetime -= delta;
+
+                // 添加导弹尾迹粒子
+                if (Math.random() < 0.3) {
+                    const trailGeometry = new THREE.SphereGeometry(0.5, 4, 4);
+                    const trailMaterial = new THREE.MeshBasicMaterial({
+                        color: 0xff6600,
+                        transparent: true,
+                        opacity: 0.6
+                    });
+                    const trail = new THREE.Mesh(trailGeometry, trailMaterial);
+                    trail.position.copy(missile.position);
+                    trail.userData = {
+                        velocity: new THREE.Vector3(0, 0, 0),
+                        life: 0.5
+                    };
+                    particles.push(trail);
+                    scene.add(trail);
+                }
+
+                // 移除过期导弹
+                if (missile.userData.lifetime <= 0) {
+                    scene.remove(missile);
+                    missiles.splice(i, 1);
+                }
+            }
+        }
+
+        function updateParticles(delta) {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const particle = particles[i];
+                particle.position.add(particle.userData.velocity.clone().multiplyScalar(delta));
+                particle.userData.life -= delta;
+                particle.material.opacity = particle.userData.life;
+                particle.scale.multiplyScalar(0.98);
+
+                if (particle.userData.life <= 0) {
+                    scene.remove(particle);
+                    particles.splice(i, 1);
+                }
+            }
+        }
+
+        function checkCollisions() {
+            // 子弹 vs 敌机
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                for (let j = enemies.length - 1; j >= 0; j--) {
+                    const bullet = bullets[i];
+                    const enemy = enemies[j];
+
+                    if (bullet.position.distanceTo(enemy.position) < 10) {
+                        // 击中
+                        enemy.userData.health -= 10;
+                        scene.remove(bullet);
+                        bullets.splice(i, 1);
+
+                        // 击中效果
+                        createExplosion(bullet.position);
+
+                        if (enemy.userData.health <= 0) {
+                            // 敌机被摧毁
+                            createExplosion(enemy.position);
+                            scene.remove(enemy);
+                            enemies.splice(j, 1);
+                            score += 100;
+                            kills++;
+                            if (mpActive) {
+                                const prevScore = mpScores.get(mpMyId) || 0;
+                                mpScores.set(mpMyId, prevScore + 100);
+                                mpSafeSend({ type: 'kill-event', enemyIdx: j, killerId: mpMyId, killerName: mpMyName, points: 100, scores: Object.fromEntries(mpScores) });
+                                mpShowKillFeed(mpMyName, '敌机', 100);
+                                mpUpdateScoreboard();
+                            }
+                            updateHUD();
+
+                            // 击杀敌机补充2枚导弹
+                            missileAmmo = Math.min(missileAmmo + 2, CONFIG.missileCount);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // 导弹 vs 敌机
+            for (let i = missiles.length - 1; i >= 0; i--) {
+                for (let j = enemies.length - 1; j >= 0; j--) {
+                    const missile = missiles[i];
+                    const enemy = enemies[j];
+
+                    if (missile.position.distanceTo(enemy.position) < 15) {
+                        // 导弹击中
+                        createExplosion(enemy.position);
+                        scene.remove(enemy);
+                        enemies.splice(j, 1);
+
+                        scene.remove(missile);
+                        missiles.splice(i, 1);
+
+                        score += 200;
+                        kills++;
+                        if (mpActive) {
+                            const prevScore = mpScores.get(mpMyId) || 0;
+                            mpScores.set(mpMyId, prevScore + 200);
+                            mpSafeSend({ type: 'kill-event', enemyIdx: j, killerId: mpMyId, killerName: mpMyName, points: 200, scores: Object.fromEntries(mpScores) });
+                            mpShowKillFeed(mpMyName, '敌机', 200);
+                            mpUpdateScoreboard();
+                        }
+
+                        // 导弹击杀补充3枚导弹
+                        missileAmmo = Math.min(missileAmmo + 3, CONFIG.missileCount);
+                        updateHUD();
+                        break;
+                    }
+                }
+            }
+
+            // 玩家 vs 敌机
+            enemies.forEach(enemy => {
+                if (player.position.distanceTo(enemy.position) < 15) {
+                    health -= 1;
+                    updateHUD();
+                    if (health <= 0) {
+                        gameOver();
+                    }
+                }
+            });
+        }
+
+        function findNearestEnemy() {
+            let nearest = null;
+            let minDistance = Infinity;
+
+            enemies.forEach(enemy => {
+                const distance = player.position.distanceTo(enemy.position);
+                // 增加锁定范围到3000，更容易锁定远处的敌机
+                if (distance < minDistance && distance < 3000) {
+                    minDistance = distance;
+                    nearest = enemy;
+                }
+            });
+
+            return nearest;
+        }
+
+        function spawnEnemies() {
+            if (enemies.length < CONFIG.maxEnemies && Math.random() < 0.02) {
+                createEnemy();
+            }
+        }
+
+        // ==================== HUD 更新 ====================
+        function updateHUD() {
+            document.getElementById('speed').textContent = Math.round(CONFIG.playerSpeed.default);
+            document.getElementById('altitude').textContent = Math.round(player.position.y);
+            document.getElementById('scoreValue').textContent = score;
+            document.getElementById('killsValue').textContent = kills;
+            document.getElementById('healthFill').style.width = health + '%';
+            document.getElementById('missileCount').textContent = missileAmmo;
+
+            // 锁定指示已禁用
+            // const nearestEnemy = findNearestEnemy();
+            // const lockIndicator = document.getElementById('lockIndicator');
+            // if (nearestEnemy && missileAmmo > 0) {
+            //     lockIndicator.style.display = 'block';
+            // } else {
+            //     lockIndicator.style.display = 'none';
+            // }
+
+            // 警告
+            const warning = document.getElementById('warning');
+            let nearbyEnemy = false;
+            enemies.forEach(enemy => {
+                if (player.position.distanceTo(enemy.position) < 500) {
+                    nearbyEnemy = true;
+                }
+            });
+            warning.style.display = nearbyEnemy ? 'block' : 'none';
+        }
+
+        // ==================== 游戏控制 ====================
+        function startGame() {
+            document.getElementById('startScreen').style.display = 'none';
+            gameRunning = true;
+            gamePaused = false;
+            score = 0;
+            kills = 0;
+            health = 100;
+            missileAmmo = CONFIG.missileCount;
+            CONFIG.playerSpeed.default = 150;
+
+            // 重置玩家位置
+            player.position.set(0, 500, 0);
+            player.rotation.set(0, 0, 0);
+
+            updateHUD();
+            animate();
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('finalKills').textContent = kills;
+            document.getElementById('gameOver').style.display = 'flex';
+        }
+
+        function restartGame() {
+            // 清除所有敌机
+            enemies.forEach(enemy => scene.remove(enemy));
+            enemies = [];
+
+            // 清除所有子弹和导弹
+            bullets.forEach(bullet => scene.remove(bullet));
+            bullets = [];
+
+            missiles.forEach(missile => scene.remove(missile));
+            missiles = [];
+
+            document.getElementById('gameOver').style.display = 'none';
+            startGame();
+        }
+
+        // ==================== 游戏循环 ====================
+        let lastTime = 0;
+        function animate(currentTime = 0) {
+            if (!gameRunning) return;
+            requestAnimationFrame(animate);
+
+            const delta = Math.min((currentTime - lastTime) / 1000, 0.1);
+            lastTime = currentTime;
+
+            if (!gamePaused) {
+                updatePlayer(delta);
+                // 联机：只有主机运行敌人AI
+                if (!mpActive || mpIsHost) {
+                    updateEnemies(delta);
+                    spawnEnemies();
+                }
+                updateBullets(delta);
+                updateMissiles(delta);
+                updateParticles(delta);
+                checkCollisions();
+                // 联机同步
+                if (mpActive) {
+                    mpSyncTimer += delta;
+                    if (mpSyncTimer >= 0.05) { // 20Hz
+                        mpSyncTimer = 0;
+                        mpSafeSend({
+                            type: 'player-state', id: mpMyId, name: mpMyName,
+                            px: player.position.x, py: player.position.y, pz: player.position.z,
+                            qx: player.quaternion.x, qy: player.quaternion.y,
+                            qz: player.quaternion.z, qw: player.quaternion.w
+                        });
+                    }
+                    mpInterpolateRemotePlayers();
+                    // 主机同步敌机状态
+                    if (mpIsHost) {
+                        mpEnemySyncTimer += delta;
+                        if (mpEnemySyncTimer >= 0.5) {
+                            mpEnemySyncTimer = 0;
+                            mpSyncEnemyState();
+                        }
+                    }
+                }
+                updateHUD();
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // ==================== 启动 ====================
+        init();
+    </script>
+</body>
+</html>
