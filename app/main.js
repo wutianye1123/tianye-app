@@ -235,32 +235,29 @@ function discoveryStartListening() {
     } catch (e) {}
   }
 
-  // 定期清理过期条目并重新扫描
+  // 定期清理过期条目并重新扫描（外层 setInterval 已是 5s，无需额外条件）
   discoveryCleanupTimer = setInterval(() => {
     const now = Date.now();
     for (const [key, server] of discoveredServers) {
       if (now - server.lastSeen > DISCOVERY_TIMEOUT) discoveredServers.delete(key);
     }
     discoverySendList();
-    // 每5秒重新扫描一次
-    if (Math.floor(now / 5000) % 1 === 0) {
-      const parts2 = localIP.split('.');
-      if (parts2.length === 4) {
-        const subnet2 = parts2[0] + '.' + parts2[1] + '.' + parts2[2] + '.';
-        for (let i = 1; i <= 254; i++) {
-          const targetIP = subnet2 + i;
-          if (targetIP === localIP) continue;
-          const url = 'http://' + targetIP + ':' + FIXED_PORT + '/mp-host-info';
-          fetch(url, { signal: AbortSignal.timeout(800) })
-            .then(r => r.json())
-            .then(data => {
-              if (data.name) {
-                discoveredServers.set(data.ip + ':' + data.port, { ...data, lastSeen: Date.now() });
-                discoverySendList();
-              }
-            })
-            .catch(() => {});
-        }
+    const parts2 = localIP.split('.');
+    if (parts2.length === 4) {
+      const subnet2 = parts2[0] + '.' + parts2[1] + '.' + parts2[2] + '.';
+      for (let i = 1; i <= 254; i++) {
+        const targetIP = subnet2 + i;
+        if (targetIP === localIP) continue;
+        const url = 'http://' + targetIP + ':' + FIXED_PORT + '/mp-host-info';
+        fetch(url, { signal: AbortSignal.timeout(800) })
+          .then(r => r.json())
+          .then(data => {
+            if (data.name) {
+              discoveredServers.set(data.ip + ':' + data.port, { ...data, lastSeen: Date.now() });
+              discoverySendList();
+            }
+          })
+          .catch(() => {});
       }
     }
   }, 5000);
@@ -481,6 +478,8 @@ function relayConnect() {
       relayWs = null;
       relayMode = false;
       relayPeers = [];
+      // 保留 mpMyPlayerId/mpMyPlayerName 让 UI 知道刚断开，但下次 host/join 会重置
+      if (win && !win.isDestroyed()) win.webContents.send('mp-message', { type: 'disconnected' });
     });
     relayWs.on('message', (raw) => {
       let data;
@@ -742,7 +741,8 @@ ipcMain.on('toggle-fullscreen', () => {
 // IPC: 启动游戏
 ipcMain.on('launch-game', async (event, gamePath) => {
   await triggerAutoSave();
-  recordGameStart(gamePath.split('/')[1]);
+  const segs = String(gamePath || '').split('/');
+  if (segs.length >= 2 && segs[1]) recordGameStart(segs[1]);
   // 中继模式下广播 game-start 给其他玩家
   if (relayMode && relayWs && relayWs.readyState === WebSocket.OPEN) {
     const pvp = gamePath.includes('pvp=1');
@@ -813,8 +813,8 @@ ipcMain.handle('mp-join', async (event, ip, port, name) => {
   try {
     if (relayMode) relayStop();
     mpStop();
-    // 4位数字房间号 → 互联网模式
-    if (ip && /^[0-9]{4}$/.test(String(ip))) {
+    // 4-6 位数字房间号 → 互联网中转模式
+    if (ip && /^[0-9]{4,6}$/.test(String(ip))) {
       const result = await relayJoin(ip, name);
       return result;
     }

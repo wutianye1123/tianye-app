@@ -5,20 +5,30 @@ const { WebSocketServer } = require('ws');
 const PORT = 18766;
 const MAX_PAYLOAD = 256 * 1024; // 单条消息上限 256KB
 const HOST_RECONNECT_WINDOW = 30000;
+const ROOMS_RATE_LIMIT_MS = 2000; // /rooms 接口每个 IP 最小间隔
 const rooms = new Map();
+const roomsLastQuery = new Map(); // ip -> timestamp
 
 const server = http.createServer((req, res) => {
-  res.writeHead(200, {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*'
-  });
   if (req.url === '/rooms') {
+    // 简单节流，防止枚举扫房
+    const ip = (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+    const now = Date.now();
+    const last = roomsLastQuery.get(ip) || 0;
+    if (now - last < ROOMS_RATE_LIMIT_MS) {
+      res.writeHead(429, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end('{"error":"rate_limited"}');
+      return;
+    }
+    roomsLastQuery.set(ip, now);
     const list = [];
     for (const [id, r] of rooms) {
       list.push({ roomId: id, hostName: r.hostName, gameName: r.gameName, players: r.clients.size });
     }
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
     res.end(JSON.stringify(list));
   } else {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
     res.end('{"ok":true}');
   }
 });
@@ -27,7 +37,7 @@ const wss = new WebSocketServer({ server, maxPayload: MAX_PAYLOAD });
 
 function genRoomId() {
   let id;
-  do { id = String(Math.floor(1000 + Math.random() * 9000)); } while (rooms.has(id));
+  do { id = String(Math.floor(100000 + Math.random() * 900000)); } while (rooms.has(id));
   return id;
 }
 

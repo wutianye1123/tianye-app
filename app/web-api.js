@@ -23,6 +23,15 @@
 
   // === 联机系统 ===
   var RELAY_HOST_TIMEOUT = 5000;
+  // HTTPS 页面必须用 wss（否则 Mixed Content 被浏览器拦截）；
+  // HTTP / file:// / Electron 内部用直连 IP。
+  var RELAY_WS_URL = (function() {
+    if (location.protocol === 'https:') {
+      // 走 nginx 反代 wss://<host>/ws → ws://127.0.0.1:18766
+      return 'wss://' + location.host + '/ws';
+    }
+    return 'ws://81.70.199.45:18766';
+  })();
   var relayWs = null;
   var mpState = 'idle';
   var mpMyId = null;
@@ -39,7 +48,7 @@
   function connectRelay() {
     return new Promise(function(resolve, reject) {
       if (relayWs && relayWs.readyState === 1) { resolve(relayWs); return; }
-      relayWs = new WebSocket('ws://81.70.199.45:18766');
+      relayWs = new WebSocket(RELAY_WS_URL);
       relayWs.onopen = function() {
         resolve(relayWs);
         // 仅在仍处于联机状态时 flush 队列，避免跨房间污染

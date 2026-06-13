@@ -476,7 +476,9 @@
         if (window.electronAPI && window.electronAPI.mpRelayRooms) {
           rooms = await window.electronAPI.mpRelayRooms();
         } else {
-          const res = await fetch('http://81.70.199.45:18766/rooms');
+          // HTTPS 页面必须走同源 /rooms（nginx 反代），HTTP 可直连中转服务器
+          const roomsUrl = location.protocol === 'https:' ? '/rooms' : 'http://81.70.199.45:18766/rooms';
+          const res = await fetch(roomsUrl);
           rooms = await res.json();
         }
         if (rooms.length === 0) {
@@ -722,5 +724,7 @@
       }, 150);
     })();
   </script>
+  <!-- 网页版（非 Electron）联机兼容层：在 Electron 下会被 preload 注入的 electronAPI 跳过 -->
+  <script src="web-api.js"></script>
 </body>
 </html>

@@ -2,3 +2,7 @@ node_modules/
 dist/
 .DS_Store
 *.app
+backup-*/
+_probe_ws.js
+_e2e.js
+_app_probe_ws.js
