@@ -148,8 +148,9 @@ export class PhysicsEngine {
         return r > 0 ? (position.x * velocity.x + position.y * velocity.y + position.z * velocity.z) / r : 0;
     }
 
-    computeOrbitalElements(position, velocity, mu) {
+    computeOrbitalElements(position, velocity, mu, bodyRadius) {
         mu = mu || CONFIG.PLANET_MU;
+        bodyRadius = bodyRadius != null ? bodyRadius : CONFIG.PLANET_RADIUS;
         const r = Math.sqrt(position.x ** 2 + position.y ** 2 + position.z ** 2);
         const v = Math.sqrt(velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2);
         if (r < 1) return null;
@@ -169,11 +170,11 @@ export class PhysicsEngine {
 
         let apoapsis = 0, periapsis = 0, period = 0;
         if (e < 1 && a > 0) {
-            apoapsis = a * (1 + e) - CONFIG.PLANET_RADIUS;
-            periapsis = a * (1 - e) - CONFIG.PLANET_RADIUS;
+            apoapsis = a * (1 + e) - bodyRadius;
+            periapsis = a * (1 - e) - bodyRadius;
             period = 2 * Math.PI * Math.sqrt(a * a * a / mu);
         } else if (e >= 1) {
-            periapsis = a * (1 - e) - CONFIG.PLANET_RADIUS;
+            periapsis = a * (1 - e) - bodyRadius;
             apoapsis = Infinity;
         }
 

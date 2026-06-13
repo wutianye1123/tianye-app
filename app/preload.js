@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPlayTimes: () => ipcRenderer.sendSync('get-play-times'),
   readFile: (filePath) => ipcRenderer.sendSync('read-file', filePath),
   resetCursor: () => ipcRenderer.send('reset-cursor'),
-  // 联机 API
+  // 局域网联机 API
   mpHost: (lobbyInfo) => ipcRenderer.invoke('mp-host', lobbyInfo),
   mpJoin: (ip, port, name) => ipcRenderer.invoke('mp-join', ip, port, name),
   mpSend: (data) => ipcRenderer.send('mp-send', data),
@@ -19,5 +19,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onMpMessage: (callback) => {
     ipcRenderer.removeAllListeners('mp-message');
     ipcRenderer.on('mp-message', (event, data) => callback(data));
-  }
+  },
+  // 互联网联机 API（中转服务器）
+  mpRelayHost: (lobbyInfo) => ipcRenderer.invoke('mp-relay-host', lobbyInfo),
+  mpRelayJoin: (roomId, name) => ipcRenderer.invoke('mp-relay-join', roomId, name),
+  mpRelaySend: (data) => ipcRenderer.send('mp-relay-send', data),
+  mpRelayRooms: () => ipcRenderer.invoke('mp-relay-rooms'),
 });

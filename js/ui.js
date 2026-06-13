@@ -208,6 +208,11 @@ export class UI {
         ctx.restore();
     }
 
-    _alt(m) { if (m === Infinity || m > 1e9) return '逃逸'; if (Math.abs(m) < 1000) return Math.round(m) + ' m'; return (m / 1000).toFixed(2) + ' km'; }
+    _alt(m) {
+        if (m === Infinity || m > 1e9) return '逃逸';
+        if (m < 0) return Math.round(m) + ' m';
+        if (m < 10000) return m.toFixed(1) + ' m';
+        return (m / 1000).toFixed(2) + ' km';
+    }
     _spd(m) { if (Math.abs(m) < 1000) return m.toFixed(1) + ' m/s'; return (m / 1000).toFixed(2) + ' km/s'; }
 }

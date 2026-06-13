@@ -63,7 +63,7 @@ export class Autopilot {
         const rr = Math.sqrt(rp.x**2 + rp.y**2 + rp.z**2);
         const rs = Math.sqrt(rv.x**2 + rv.y**2 + rv.z**2);
         const ma = rr - CONFIG.MUN_RADIUS;
-        const mo = ph.computeOrbitalElements(rp, rv, CONFIG.MUN_MU);
+        const mo = ph.computeOrbitalElements(rp, rv, CONFIG.MUN_MU, CONFIG.MUN_RADIUS);
         const vr = rr > 0 ? (rp.x*rv.x + rp.y*rv.y + rp.z*rv.z) / rr : 0;
         return { rp, rv, rr, rs, ma, mo, vr };
     }
@@ -76,7 +76,12 @@ export class Autopilot {
         if (up.dot(t) > 0.999) return;
 
         if (up.dot(t) < -0.95) {
-            rocket.applyRotation(1.0, 0, 0, dt);
+            const ref = new THREE.Vector3(0, 1, 0);
+            const axis = new THREE.Vector3().crossVectors(up, ref);
+            if (axis.lengthSq() < 0.001) axis.set(1, 0, 0);
+            axis.normalize();
+            rocket.orientation.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, 3.0 * dt));
+            rocket.orientation.normalize();
             return;
         }
 
@@ -112,7 +117,7 @@ export class Autopilot {
     }
 
     _maxThrust() { return this.game.rocket.parts.filter(p => p.canThrust()).reduce((s, p) => s + p.thrust, 0); }
-    _hasFuel() { return this.game.rocket.totalFuel > 0 || this._maxThrust() > 0; }
+    _hasFuel() { return this.game.rocket.totalFuel > 0 && this._maxThrust() > 0; }
 
     _setWarp(idx) {
         const g = this.game;
@@ -184,7 +189,7 @@ export class Autopilot {
 
         if (els.periapsis >= this.targetOrbitAlt * 0.9) {
             g.rocket.throttle = 0;
-            this.state = this.missionTarget === 'mun' ? 'MUN_TRANSFER' : 'IDLE';
+            this.state = this.missionTarget === 'mun' ? 'MUN_WAIT' : 'IDLE';
             this.data = {};
             this._updateStatus();
             return;
@@ -252,29 +257,57 @@ export class Autopilot {
 
     _updateMUN_WAIT(dt) {
         const g = this.game;
-        const els = g.physics.computeOrbitalElements(g.physState.position, g.physState.velocity);
-        const vSpd = g.physics.getVerticalSpeed(g.physState.position, g.physState.velocity);
+        g.rocket.throttle = 0;
+        this._steer(this._prograde(), dt);
+
+        const pos = g.physState.position;
+        const vel = g.physState.velocity;
+        const TWO_PI = 2 * Math.PI;
+
+        // Orbit node angle from angular momentum (conserved)
+        const hx = pos.y * vel.z - pos.z * vel.y;
+        const hz = pos.x * vel.y - pos.y * vel.x;
+        const nodeAngle = Math.atan2(hx, -hz);
+
+        // Hohmann transfer time
+        const r1 = Math.sqrt(pos.x**2 + pos.y**2 + pos.z**2);
+        const aT = (r1 + CONFIG.MUN_ORBIT_RADIUS) / 2;
+        const tTransfer = Math.PI * Math.sqrt(aT**3 / CONFIG.PLANET_MU);
+        const omegaMun = TWO_PI / CONFIG.MUN_ORBIT_PERIOD;
+
+        // Required Mun angles for transfer at each node
+        let munAng = ((g.physics.munAngle % TWO_PI) + TWO_PI) % TWO_PI;
+        const need1 = ((nodeAngle + Math.PI - omegaMun * tTransfer) % TWO_PI + TWO_PI) % TWO_PI;
+        const need2 = ((nodeAngle - omegaMun * tTransfer) % TWO_PI + TWO_PI) % TWO_PI;
+
+        // Forward distance: Mun must travel this far counterclockwise
+        let d1 = ((need1 - munAng) % TWO_PI + TWO_PI) % TWO_PI;
+        let d2 = ((need2 - munAng) % TWO_PI + TWO_PI) % TWO_PI;
+        const fwd = Math.min(d1, d2);
+
+        // Keep high warp — never drop below 10x until very close
         const alt = g.physics.getAltitude(g.physState.position);
-
-        if (vSpd >= -20 && vSpd <= 80) {
-            this._steer(this._prograde(), dt);
-            g.rocket.throttle = 1;
-            this._autoStage();
-        } else {
-            this._steer(this._prograde(), dt);
-            g.rocket.throttle = 0;
+        if (alt > CONFIG.ATMOSPHERE_HEIGHT) {
+            if (fwd > 0.3) this._setWarp(5);       // 100x
+            else if (fwd > 0.03) this._setWarp(3);  // 10x
+            else this._setWarp(1);                   // 2x
         }
 
-        const targetApo = CONFIG.MUN_ORBIT_RADIUS - CONFIG.PLANET_RADIUS;
-        if (els && els.apoapsis >= targetApo) {
-            g.rocket.throttle = 0;
-            this._setWarp(0);
-            this.state = 'COAST';
-            this.data = {};
-            this._updateStatus();
-            return;
+        // When phase is close, check alignment (combines Mun angle + spacecraft position)
+        // alignment = sin(θ) for this orbit geometry, peaks at ~0.99 at nodes when fwd < 0.15
+        if (fwd < 0.15) {
+            const apoDir = { x: -pos.x/r1, y: -pos.y/r1, z: -pos.z/r1 };
+            const arrAngle = g.physics.munAngle + omegaMun * tTransfer;
+            const munDir = { x: Math.cos(arrAngle), y: 0, z: Math.sin(arrAngle) };
+            const alignment = apoDir.x*munDir.x + apoDir.y*munDir.y + apoDir.z*munDir.z;
+
+            if (alignment > 0.985) {
+                this._setWarp(0);
+                this.state = 'MUN_TRANSFER';
+                this.data = {};
+                this._updateStatus();
+            }
         }
-        if (alt > CONFIG.ATMOSPHERE_HEIGHT && g.timeWarpIndex < 3) this._setWarp(3);
     }
 
     _updateMUN_CAPTURE(dt) {
@@ -303,6 +336,8 @@ export class Autopilot {
         if (maxT <= 0 || mass <= 0) { this.state = 'IDLE'; this._updateStatus(); return; }
 
         const grav = CONFIG.MUN_SURFACE_GRAVITY;
+        const maxDecel = maxT / mass;
+        const netDecel = Math.max(0.5, maxDecel - grav);
 
         if (this.data.phase === 'deorbit') {
             this._steer(this._munRetro(), dt);
@@ -312,27 +347,22 @@ export class Autopilot {
             return;
         }
 
-        const decel = maxT / mass;
-        const netDecel = Math.max(0.1, decel - grav);
-        const burnAlt = (ms.rs * ms.rs) / (2 * netDecel) * 1.3;
+        // Speed limit: max speed at which we can still stop before surface
+        const speedLimit = Math.sqrt(Math.max(1, 2 * netDecel * ms.ma * 0.8));
 
-        if (ms.ma > burnAlt + 500) {
+        if (ms.rs > speedLimit && ms.ma > 20) {
+            // Too fast for altitude: continuous retrograde burn (no oscillation)
             this._steer(this._munRetro(), dt);
-            g.rocket.throttle = 0;
-        } else if (ms.ma > 200) {
-            this._steer(this._munRetro(), dt);
-            g.rocket.throttle = Math.max(0.2, Math.min(1, ms.rs * mass / maxT * 1.5));
+            g.rocket.throttle = 1;
         } else {
-            this._steer(this._munRadialOut(), dt);
-            const tv = Math.max(2, ms.ma * 0.03);
-            if (ms.vr < -tv) {
-                g.rocket.throttle = Math.min(1, (grav + (Math.abs(ms.vr) - tv)) * mass / maxT);
-            } else {
-                g.rocket.throttle = 0.05;
-            }
+            // Speed under control: PD-controlled vertical descent
+            this._steer(ms.ma > 50 ? this._munRetro() : this._munRadialOut(), dt);
+            const targetVr = -Math.sqrt(Math.max(1, ms.ma * 0.5));
+            const err = targetVr - ms.vr;
+            g.rocket.throttle = Math.max(0, Math.min(1, (grav + err * 2) * mass / maxT));
         }
 
-        if (ms.ma < 20 && ms.rs < 8) {
+        if (ms.ma < 5 && Math.abs(ms.vr) < 2) {
             g.rocket.throttle = 0;
             this.state = 'IDLE';
             this._updateStatus();
@@ -373,8 +403,19 @@ export class Autopilot {
         const vSpd = g.physics.getVerticalSpeed(g.physState.position, g.physState.velocity);
         this._steer(this._radialOut(), dt);
         const maxT = this._maxThrust();
-        if (alt < 5000 && vSpd < -20 && maxT > 0) {
-            g.rocket.throttle = Math.min(1, (CONFIG.SURFACE_GRAVITY + Math.abs(vSpd) * 1.5) * g.rocket.totalMass / maxT);
+        const mass = g.rocket.totalMass;
+        if (maxT > 0 && mass > 0 && alt > 0) {
+            const grav = CONFIG.SURFACE_GRAVITY;
+            const maxDecel = maxT / mass;
+            const netDecel = Math.max(1, maxDecel - grav);
+            const speedLimit = Math.sqrt(Math.max(1, 2 * netDecel * alt * 0.5));
+            if (-vSpd > speedLimit) {
+                g.rocket.throttle = Math.min(1, (grav + Math.abs(vSpd) * 1.5) * mass / maxT);
+            } else {
+                const targetVr = -Math.sqrt(Math.max(1, alt * 0.3));
+                const err = targetVr - vSpd;
+                g.rocket.throttle = Math.max(0, Math.min(1, (grav + err * 2) * mass / maxT));
+            }
         } else {
             g.rocket.throttle = 0;
         }

@@ -64,6 +64,10 @@
       </svg>
       <input type="text" id="searchInput" placeholder="搜索游戏..." autocomplete="off">
     </div>
+    <a href="/download/游戏中心-2.0.0-Mac.dmg" id="downloadBtn" style="display:flex;align-items:center;gap:6px;padding:6px 14px;background:rgba(102,126,234,0.2);border:1px solid rgba(102,126,234,0.4);border-radius:6px;color:#667eea;text-decoration:none;font-size:13px;cursor:pointer;transition:background 0.2s;" onmouseover="this.style.background='rgba(102,126,234,0.35)'" onmouseout="this.style.background='rgba(102,126,234,0.2)'">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      下载本地版
+    </a>
   </nav>
 
   <div class="app-body">
@@ -144,6 +148,10 @@
               <h3>联机游戏</h3>
               <button class="mp-close-btn" id="mpCloseBtn">&times;</button>
             </div>
+            <div style="display:flex;gap:8px;margin-bottom:12px;padding:0 4px;">
+              <button id="mpModeInternet" class="mp-action-btn" style="flex:1;padding:8px;font-size:13px;background:rgba(102,126,234,0.25);border:2px solid #667eea;color:#667eea;">互联网联机</button>
+              <button id="mpModeLAN" class="mp-action-btn" style="flex:1;padding:8px;font-size:13px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#888;">局域网联机</button>
+            </div>
             <div class="mp-tabs">
               <button class="mp-tab active" data-tab="host">创建房间</button>
               <button class="mp-tab" data-tab="join">加入房间</button>
@@ -154,25 +162,12 @@
               <div class="mp-host-info" id="mpHostInfo" style="display:none">
                 <div class="mp-room-code">
                   <div id="mpCreateTip" style="display:none;opacity:0;transition:opacity 0.4s;background:rgba(34,197,94,0.15);color:#22c55e;padding:8px 12px;border-radius:6px;font-size:13px;margin-bottom:10px;border:1px solid rgba(34,197,94,0.3);"></div>
-                  <div style="display:flex;gap:12px;">
-                    <div style="flex:1;">
-                      <span class="mp-label">主机 IP 地址</span>
-                      <div class="mp-code-box">
-                        <code id="mpRoomIP">--</code>
-                        <button class="mp-copy-btn" id="mpCopyIpBtn" title="复制">
-                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                        </button>
-                      </div>
-                    </div>
-                    <div style="flex:1;">
-                      <span class="mp-label">端口</span>
-                      <div class="mp-code-box">
-                        <code id="mpRoomPort">--</code>
-                        <button class="mp-copy-btn" id="mpCopyPortBtn" title="复制">
-                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                        </button>
-                      </div>
-                    </div>
+                  <span class="mp-label">房间号（分享给好友即可加入）</span>
+                  <div class="mp-code-box" style="text-align:center;font-size:28px;letter-spacing:8px;padding:12px;">
+                    <code id="mpRoomCode">----</code>
+                    <button class="mp-copy-btn" id="mpCopyCodeBtn" title="复制房间号" style="vertical-align:middle;margin-left:8px;">
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    </button>
                   </div>
                 </div>
                 <div class="mp-players">
@@ -230,20 +225,19 @@
                   </div>
                 </div>
                 <div class="mp-field">
-                  <label>局域网房间</label>
-                  <div id="mpRoomList" style="max-height:220px;overflow-y:auto;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:4px;">
-                    <div style="color:#888;text-align:center;padding:12px;font-size:13px;">正在扫描局域网房间...</div>
+                  <label>互联网房间（自动刷新）</label>
+                  <div id="mpInternetRooms" style="max-height:200px;overflow-y:auto;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:4px;">
+                    <div style="color:#888;text-align:center;padding:12px;font-size:13px;">正在加载...</div>
                   </div>
                 </div>
-                <details style="margin-top:4px;text-align:left;">
-                  <summary style="color:#666;cursor:pointer;font-size:12px;">手动输入IP</summary>
-                  <div style="margin-top:6px;display:flex;gap:8px;align-items:end;">
-                    <div class="mp-field" style="flex:1;margin:0;"><input type="text" id="mpJoinIp" placeholder="IP地址"></div>
-                    <div class="mp-field" style="width:80px;margin:0;"><input type="text" id="mpJoinPort" placeholder="端口"></div>
-                    <button class="mp-action-btn" id="mpJoinBtn" style="padding:8px 16px;">加入</button>
+                <div class="mp-field">
+                  <label>手动输入房间号</label>
+                  <div style="display:flex;gap:8px;align-items:center;">
+                    <input type="text" id="mpJoinRoomCode" placeholder="4位房间号" maxlength="4" style="flex:1;font-size:24px;letter-spacing:12px;text-align:center;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.05);color:#fff;outline:none;">
+                    <button class="mp-action-btn" id="mpJoinBtn" style="padding:12px 20px;font-size:16px;">加入</button>
                   </div>
                   <div class="mp-join-status" id="mpJoinStatus" style="margin-top:4px;"></div>
-                </details>
+                </div>
               </div>
             </div>
           </div>
@@ -419,6 +413,21 @@
     let mpHostInfo = null; // { ip, port }
     let mpPlayers = [];
     let mpTeam = { host: 'red', join: 'red' };
+    let mpNetMode = 'internet'; // 'internet' | 'lan'
+
+    // 模式切换
+    document.getElementById('mpModeInternet').addEventListener('click', () => {
+      mpNetMode = 'internet';
+      document.getElementById('mpModeInternet').style.cssText = 'flex:1;padding:8px;font-size:13px;background:rgba(102,126,234,0.25);border:2px solid #667eea;color:#667eea;';
+      document.getElementById('mpModeLAN').style.cssText = 'flex:1;padding:8px;font-size:13px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#888;';
+      if (document.getElementById('mpInternetRooms')) document.getElementById('mpInternetRooms').parentElement.style.display = '';
+    });
+    document.getElementById('mpModeLAN').addEventListener('click', () => {
+      mpNetMode = 'lan';
+      document.getElementById('mpModeLAN').style.cssText = 'flex:1;padding:8px;font-size:13px;background:rgba(34,197,94,0.25);border:2px solid #22c55e;color:#22c55e;';
+      document.getElementById('mpModeInternet').style.cssText = 'flex:1;padding:8px;font-size:13px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#888;';
+      if (document.getElementById('mpInternetRooms')) document.getElementById('mpInternetRooms').parentElement.style.display = 'none';
+    });
 
     function selectMpTeam(panel, team) {
       mpTeam[panel] = team;
@@ -446,7 +455,6 @@
     });
 
     // Tab 切换
-    let roomScanTimer = null;
     document.querySelectorAll('.mp-tab').forEach(tab => {
       tab.addEventListener('click', () => {
         if (mpState !== 'idle') return;
@@ -454,84 +462,46 @@
         document.querySelectorAll('.mp-tab-content').forEach(c => c.classList.remove('active'));
         tab.classList.add('active');
         document.getElementById(tab.dataset.tab === 'host' ? 'mpHostTab' : 'mpJoinTab').classList.add('active');
-        // 切换到加入房间时开始扫描
-        if (tab.dataset.tab === 'join') {
-          scanRooms();
-          roomScanTimer = setInterval(scanRooms, 4000);
-        } else {
-          if (roomScanTimer) { clearInterval(roomScanTimer); roomScanTimer = null; }
-        }
+        if (tab.dataset.tab === 'join') fetchInternetRooms();
       });
     });
 
-    async function scanRooms() {
-      const list = document.getElementById('mpRoomList');
-      if (!list) return;
-      if (!list.querySelector('.mp-room-item') && !list.querySelector('.scanning')) {
-        list.innerHTML = '<div class="scanning" style="color:#888;text-align:center;padding:12px;font-size:13px;">正在扫描局域网...</div>';
-      }
-      let myIP = '';
+    // 互联网房间列表
+    let roomListTimer = null;
+    async function fetchInternetRooms() {
+      const el = document.getElementById('mpInternetRooms');
+      if (!el) return;
       try {
-        if (window.electronAPI && window.electronAPI.mpGetIP) myIP = await window.electronAPI.mpGetIP();
-      } catch (e) {}
-      if (!myIP || myIP === '127.0.0.1') {
-        list.innerHTML = '<div style="color:#f44;text-align:center;padding:12px;font-size:13px;">无法获取本机局域网IP</div>';
-        return;
-      }
-      const parts = myIP.split('.');
-      if (parts.length !== 4) return;
-      const subnet = parts[0] + '.' + parts[1] + '.' + parts[2] + '.';
-      const found = [];
-      const promises = [];
-      for (let i = 1; i <= 254; i++) {
-        const ip = subnet + i;
-        promises.push(
-          fetch('http://' + ip + ':18765/mp-host-info', { signal: AbortSignal.timeout(1200) })
-            .then(r => r.json())
-            .then(data => { if (data && data.name) found.push(data); })
-            .catch(() => {})
-        );
-      }
-      await Promise.allSettled(promises);
-      renderRoomList(found, myIP);
-    }
-
-    function renderRoomList(rooms, myIP) {
-      const list = document.getElementById('mpRoomList');
-      if (!list) return;
-      if (rooms.length === 0) {
-        list.innerHTML = '<div style="color:#888;text-align:center;padding:12px;font-size:13px;">未发现房间<br><span style="color:#666;font-size:11px;">本机IP: ' + (myIP || '') + ' | 自动刷新中...</span></div>';
-        return;
-      }
-      list.innerHTML = rooms.map(r =>
-        `<div class="mp-room-item" data-ip="${r.ip}" data-port="${r.port}" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;margin:3px 0;background:rgba(102,126,234,0.1);border:1px solid rgba(102,126,234,0.25);border-radius:6px;cursor:pointer;transition:background 0.2s;" onmouseover="this.style.background='rgba(102,126,234,0.2)'" onmouseout="this.style.background='rgba(102,126,234,0.1)'">
-          <div><span style="color:#a855f7;font-weight:600;">${r.name}</span>${r.game ? '<span style="color:#888;font-size:12px;margin-left:8px;">' + r.game + '</span>' : ''}</div>
-          <span style="color:#666;font-size:12px;">${r.ip}</span>
-        </div>`
-      ).join('');
-      list.querySelectorAll('.mp-room-item').forEach(el => {
-        el.addEventListener('click', () => joinRoom(el.dataset.ip, parseInt(el.dataset.port)));
-      });
-    }
-
-    async function joinRoom(ip, port) {
-      if (!window.electronAPI || !window.electronAPI.mpJoin) {
-        alert('联机功能仅在 Electron 环境下可用');
-        return;
-      }
-      const name = document.getElementById('mpJoinName').value.trim() || '玩家2';
-      if (roomScanTimer) { clearInterval(roomScanTimer); roomScanTimer = null; }
-      try {
-        await window.electronAPI.mpJoin(ip, port, name);
-        mpState = 'joined';
-        mpPlayers = [];
-        document.getElementById('mpJoinForm').style.display = 'none';
-        document.getElementById('mpJoinConnected').style.display = 'block';
-        renderPlayerList();
+        let rooms;
+        if (window.electronAPI && window.electronAPI.mpRelayRooms) {
+          rooms = await window.electronAPI.mpRelayRooms();
+        } else {
+          const res = await fetch('http://81.70.199.45:18766/rooms');
+          rooms = await res.json();
+        }
+        if (rooms.length === 0) {
+          el.innerHTML = '<div style="color:#888;text-align:center;padding:12px;font-size:13px;">暂无在线房间<br><span style="color:#666;font-size:11px;">刷新中...</span></div>';
+        } else {
+          el.innerHTML = rooms.map(r =>
+            `<div class="mp-internet-room" data-room="${r.roomId}" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;margin:3px 0;background:rgba(102,126,234,0.1);border:1px solid rgba(102,126,234,0.25);border-radius:6px;cursor:pointer;transition:background 0.2s;" onmouseover="this.style.background='rgba(102,126,234,0.2)'" onmouseout="this.style.background='rgba(102,126,234,0.1)'">
+              <div><span style="color:#a855f7;font-weight:600;">${r.hostName}</span>${r.gameName ? '<span style="color:#888;font-size:12px;margin-left:8px;">' + r.gameName + '</span>' : ''}</div>
+              <div><span style="color:#22c55e;font-size:12px;">${r.players}人</span><span style="color:#666;font-size:12px;margin-left:8px;">房间 ${r.roomId}</span></div>
+            </div>`
+          ).join('');
+          el.querySelectorAll('.mp-internet-room').forEach(item => {
+            item.addEventListener('click', async () => {
+              const roomId = item.dataset.room;
+              document.getElementById('mpJoinRoomCode').value = roomId;
+            });
+          });
+        }
       } catch (e) {
-        alert('连接失败: ' + e.message);
+        el.innerHTML = '<div style="color:#f44;text-align:center;padding:12px;font-size:13px;">无法连接中转服务器</div>';
       }
     }
+    // 自动刷新
+    clearInterval(roomListTimer);
+    roomListTimer = setInterval(fetchInternetRooms, 3000);
 
     // 监听消息
     if (window.electronAPI && window.electronAPI.onMpMessage) {
@@ -557,7 +527,8 @@
           const team = mpTeam.join;
           const sep = selectedGame.file.includes('?') ? '&' : '?';
           let params = '';
-          if (team) params += 'team=' + team;
+          if (msg.pvp) params += 'pvp=1';
+          if (team) params += (params ? '&' : '') + 'team=' + team;
           const gamePath = `games/${selectedGame.id}/${selectedGame.file}${params ? sep + params : ''}`;
           if (window.electronAPI && window.electronAPI.launchGame) {
             window.electronAPI.launchGame(gamePath);
@@ -582,21 +553,24 @@
     // 创建房间
     document.getElementById('mpCreateBtn').addEventListener('click', async () => {
       if (!window.electronAPI || !window.electronAPI.mpHost) {
-        alert('联机功能仅在 Electron 环境下可用');
-        return;
+        alert('联机功能不可用'); return;
       }
       try {
         const name = document.getElementById('mpHostName').value.trim() || '玩家1';
-        mpHostInfo = await window.electronAPI.mpHost({ name });
+        const mode = mpNetMode === 'internet' ? 'internet' : undefined;
+        mpHostInfo = await window.electronAPI.mpHost({ name, gameName: selectedGame ? selectedGame.name : '', mode });
+        if (mpHostInfo.error) { alert('创建房间失败: ' + mpHostInfo.error); return; }
         mpState = 'hosting';
         mpPlayers = [];
         document.getElementById('mpHostSetup').style.display = 'none';
         document.getElementById('mpHostInfo').style.display = 'block';
-        document.getElementById('mpRoomIP').textContent = mpHostInfo.ip;
-        document.getElementById('mpRoomPort').textContent = mpHostInfo.port;
-        // 创建成功提示
+        if (mpHostInfo.roomId) {
+          document.getElementById('mpRoomCode').textContent = mpHostInfo.roomId;
+        } else {
+          document.getElementById('mpRoomCode').textContent = (mpHostInfo.ip || '') + ':' + (mpHostInfo.port || '');
+        }
         const tip = document.getElementById('mpCreateTip');
-        tip.textContent = '房间创建成功！将地址分享给好友即可加入';
+        tip.textContent = mpNetMode === 'internet' ? '互联网房间创建成功！分享房间号给好友' : '局域网房间创建成功！';
         tip.style.display = 'block';
         tip.style.opacity = '1';
         setTimeout(() => { tip.style.opacity = '0'; setTimeout(() => tip.style.display = 'none', 400); }, 3000);
@@ -605,20 +579,12 @@
       }
     });
 
-    // 复制 IP
-    document.getElementById('mpCopyIpBtn').addEventListener('click', () => {
-      const text = document.getElementById('mpRoomIP').textContent;
+    // 复制房间号
+    document.getElementById('mpCopyCodeBtn').addEventListener('click', () => {
+      const text = document.getElementById('mpRoomCode').textContent;
       navigator.clipboard.writeText(text).then(() => {
-        document.getElementById('mpCopyIpBtn').classList.add('copied');
-        setTimeout(() => document.getElementById('mpCopyIpBtn').classList.remove('copied'), 1500);
-      });
-    });
-    // 复制端口
-    document.getElementById('mpCopyPortBtn').addEventListener('click', () => {
-      const text = document.getElementById('mpRoomPort').textContent;
-      navigator.clipboard.writeText(text).then(() => {
-        document.getElementById('mpCopyPortBtn').classList.add('copied');
-        setTimeout(() => document.getElementById('mpCopyPortBtn').classList.remove('copied'), 1500);
+        document.getElementById('mpCopyCodeBtn').classList.add('copied');
+        setTimeout(() => document.getElementById('mpCopyCodeBtn').classList.remove('copied'), 1500);
       });
     });
 
@@ -666,16 +632,14 @@
     // 加入房间
     document.getElementById('mpJoinBtn').addEventListener('click', async () => {
       if (!window.electronAPI || !window.electronAPI.mpJoin) {
-        alert('联机功能仅在 Electron 环境下可用');
-        return;
+        alert('联机功能不可用'); return;
       }
-      const ip = document.getElementById('mpJoinIp').value.trim();
-      const port = document.getElementById('mpJoinPort').value.trim();
+      const roomCode = document.getElementById('mpJoinRoomCode').value.trim();
       const name = document.getElementById('mpJoinName').value.trim() || '玩家2';
       const statusEl = document.getElementById('mpJoinStatus');
 
-      if (!ip || !port) {
-        statusEl.textContent = '请输入主机 IP 和端口';
+      if (!roomCode) {
+        statusEl.textContent = '请输入房间号';
         statusEl.style.color = 'var(--red)';
         return;
       }
@@ -683,7 +647,7 @@
       statusEl.style.color = 'var(--yellow)';
 
       try {
-        await window.electronAPI.mpJoin(ip, parseInt(port), name);
+        await window.electronAPI.mpJoin(roomCode, 0, name);
         mpState = 'joined';
         mpPlayers = [];
         document.getElementById('mpJoinForm').style.display = 'none';

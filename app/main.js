@@ -60,7 +60,10 @@ async function triggerAutoSave() {
   } catch (e) {
     console.error('triggerAutoSave executeJavaScript failed:', e);
   }
-  try { mpStop(); } catch (e) {}
+  // 注意：不要在这里调用 mpStop()/relayStop()。
+  // 切换游戏（launch-game / back-to-launcher / F2）时应保持联机会话，
+  // 游戏页面通过 mpGetState() 恢复联机状态。
+  // 只有用户主动点"关闭房间"或退出整个应用时才真正断开。
 }
 
 // 导航后清理渲染进程缓存，释放残留内存
@@ -131,6 +134,15 @@ let mpIsHost = false;
 let mpMyPlayerId = null;   // 本机在联机中的 ID
 let mpMyPlayerName = '';   // 本机玩家名
 let mpLastGameStart = null; // 缓存game-start消息，供joiner页面恢复用
+
+// === 互联网联机（中转服务器）===
+const RELAY_SERVER = 'ws://81.70.199.45:18766';
+const RELAY_HOST_TIMEOUT = 5000;
+let relayWs = null;
+let relayMode = false;
+let relayRoomId = null;
+let relayHostToken = null;  // 主机重连用 token
+let relayPeers = [];  // 中继模式下的其他玩家
 
 // === LAN Discovery (HTTP 扫描) ===
 const DISCOVERY_PORT = 19876;
@@ -459,6 +471,129 @@ function mpStop() {
   discoveryCleanup();
 }
 
+// === 互联网中转联机 ===
+function relayConnect() {
+  return new Promise((resolve, reject) => {
+    relayWs = new WebSocket(RELAY_SERVER);
+    relayWs.on('open', () => resolve(relayWs));
+    relayWs.on('error', () => reject(new Error('无法连接中转服务器')));
+    relayWs.on('close', () => {
+      relayWs = null;
+      relayMode = false;
+      relayPeers = [];
+    });
+    relayWs.on('message', (raw) => {
+      let data;
+      try { data = JSON.parse(raw.toString()); } catch(e) { return; }
+      if (data.type === 'hosted') {
+        relayRoomId = data.roomId;
+        relayHostToken = data.token || null;
+        mpMyPlayerId = 0;
+      } else if (data.type === 'joined') {
+        mpMyPlayerId = data.playerId;
+        relayRoomId = data.roomId;
+        if (data.players) {
+          relayPeers = data.players.filter(p => p.id !== mpMyPlayerId);
+        }
+      } else if (data.type === 'player-join') {
+        if (data.id !== mpMyPlayerId && !relayPeers.some(p => p.id === data.id)) {
+          relayPeers.push({ id: data.id, name: data.name });
+        }
+        if (win && !win.isDestroyed()) win.webContents.send('mp-message', data);
+      } else if (data.type === 'player-leave') {
+        relayPeers = relayPeers.filter(p => p.id !== data.id);
+        if (win && !win.isDestroyed()) win.webContents.send('mp-message', data);
+      } else if (data.type === 'player-list') {
+        if (data.players) {
+          relayPeers = data.players.filter(p => p.id !== mpMyPlayerId);
+        }
+        if (win && !win.isDestroyed()) win.webContents.send('mp-message', data);
+      } else if (data.type === 'host-disconnected') {
+        if (win && !win.isDestroyed()) win.webContents.send('mp-message', { type: 'disconnected' });
+        relayMode = false;
+        relayPeers = [];
+      } else if (data.type === 'host-paused') {
+        if (win && !win.isDestroyed()) win.webContents.send('mp-message', { type: 'host-paused' });
+      } else if (data.type === 'host-reconnected') {
+        if (win && !win.isDestroyed()) win.webContents.send('mp-message', { type: 'host-reconnected' });
+      } else {
+        // 转发所有其他消息到 renderer
+        if (win && !win.isDestroyed()) win.webContents.send('mp-message', data);
+      }
+    });
+  });
+}
+
+function relayHost(lobbyInfo) {
+  return relayConnect().then(ws => {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const handler = (raw) => {
+        let data; try { data = JSON.parse(raw.toString()); } catch(e) { return; }
+        if (data.type === 'hosted' && !settled) {
+          settled = true;
+          ws.removeEventListener('message', handler);
+          relayMode = true;
+          mpIsHost = true;
+          mpMyPlayerName = (lobbyInfo && lobbyInfo.name) || '主机';
+          resolve({ roomId: data.roomId, ip: '81.70.199.45', port: 18766 });
+        } else if (data.type === 'error' && !settled) {
+          settled = true;
+          ws.removeEventListener('message', handler);
+          reject(new Error(data.msg));
+        }
+      };
+      ws.addEventListener('message', handler);
+      ws.send(JSON.stringify({ type: 'host', name: (lobbyInfo && lobbyInfo.name) || '主机', gameName: (lobbyInfo && lobbyInfo.gameName) || '' }));
+      setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          ws.removeEventListener('message', handler);
+          reject(new Error('创建房间超时，请检查网络'));
+        }
+      }, RELAY_HOST_TIMEOUT);
+    });
+  });
+}
+
+function relayJoin(roomId, playerName) {
+  return relayConnect().then(ws => {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const handler = (raw) => {
+        let data; try { data = JSON.parse(raw.toString()); } catch(e) { return; }
+        if (data.type === 'joined' && !settled) {
+          settled = true;
+          ws.removeEventListener('message', handler);
+          relayMode = true;
+          mpMyPlayerName = playerName || '玩家';
+          resolve({ connected: true, id: data.playerId });
+        } else if (data.type === 'error' && !settled) {
+          settled = true;
+          ws.removeEventListener('message', handler);
+          reject(new Error(data.msg));
+        }
+      };
+      ws.addEventListener('message', handler);
+      ws.send(JSON.stringify({ type: 'join', roomId: String(roomId), name: playerName || '玩家' }));
+      setTimeout(() => { if (!settled) { settled = true; reject(new Error('连接超时')); } }, 5000);
+    });
+  });
+}
+
+function relaySend(data) {
+  if (!relayWs || relayWs.readyState !== WebSocket.OPEN) return;
+  relayWs.send(JSON.stringify({ type: 'relay', data }));
+}
+
+function relayStop() {
+  if (relayWs) { relayWs.close(); relayWs = null; }
+  relayMode = false;
+  relayRoomId = null;
+  relayHostToken = null;
+  relayPeers = [];
+}
+
 // 防火墙：启动时静默添加端口规则（不弹窗）
 function addFirewallPortRule() {
   if (process.platform !== 'win32') return;
@@ -608,6 +743,11 @@ ipcMain.on('toggle-fullscreen', () => {
 ipcMain.on('launch-game', async (event, gamePath) => {
   await triggerAutoSave();
   recordGameStart(gamePath.split('/')[1]);
+  // 中继模式下广播 game-start 给其他玩家
+  if (relayMode && relayWs && relayWs.readyState === WebSocket.OPEN) {
+    const pvp = gamePath.includes('pvp=1');
+    relayWs.send(JSON.stringify({ type: 'relay', data: { type: 'game-start', gamePath: gamePath, pvp: pvp } }));
+  }
   win.loadURL('http://localhost:' + port + '/' + gamePath);
   purgeAfterNavigation();
 });
@@ -656,6 +796,13 @@ ipcMain.on('reset-cursor', () => {
 // IPC: 联机 - 主机
 ipcMain.handle('mp-host', async (event, lobbyInfo) => {
   try {
+    // 切换模式时先彻底清理旧会话，避免 LAN/互联网模式残留
+    if (relayMode) relayStop();
+    mpStop();
+    if (lobbyInfo && lobbyInfo.mode === 'internet') {
+      const result = await relayHost(lobbyInfo);
+      return result;
+    }
     const result = await mpHostGame(lobbyInfo);
     return result;
   } catch (e) { return { error: e.message }; }
@@ -664,6 +811,13 @@ ipcMain.handle('mp-host', async (event, lobbyInfo) => {
 // IPC: 联机 - 加入
 ipcMain.handle('mp-join', async (event, ip, port, name) => {
   try {
+    if (relayMode) relayStop();
+    mpStop();
+    // 4位数字房间号 → 互联网模式
+    if (ip && /^[0-9]{4}$/.test(String(ip))) {
+      const result = await relayJoin(ip, name);
+      return result;
+    }
     const result = await mpJoinGame(ip, port, name);
     return result;
   } catch (e) { return { error: e.message }; }
@@ -671,13 +825,15 @@ ipcMain.handle('mp-join', async (event, ip, port, name) => {
 
 // IPC: 联机 - 发送消息
 ipcMain.on('mp-send', (event, data) => {
-  if (mpIsHost) {
-    // 主机广播给所有客户端，附带主机ID
+  if (relayMode) {
+    // 互联网模式：通过中转服务器转发
+    relaySend(data);
+  } else if (mpIsHost) {
+    // 局域网主机模式：广播给所有客户端
     const msg = JSON.stringify({ ...data, id: mpMyPlayerId });
     for (const [, client] of mpClients) {
       if (client.ws && client.ws.readyState === WebSocket.OPEN) client.ws.send(msg);
     }
-    // 缓存game-start消息
     if (data.type === 'game-start') {
       mpLastGameStart = { ...data, id: mpMyPlayerId };
     }
@@ -688,8 +844,43 @@ ipcMain.on('mp-send', (event, data) => {
 
 // IPC: 联机 - 停止
 ipcMain.handle('mp-stop', async () => {
-  mpStop();
+  if (relayMode) relayStop(); else mpStop();
   return { stopped: true };
+});
+
+// IPC: 互联网联机 - 创建房间
+ipcMain.handle('mp-relay-host', async (event, lobbyInfo) => {
+  try {
+    const result = await relayHost(lobbyInfo);
+    return result;
+  } catch (e) { return { error: e.message }; }
+});
+
+// IPC: 互联网联机 - 加入房间
+ipcMain.handle('mp-relay-join', async (event, roomId, name) => {
+  try {
+    const result = await relayJoin(roomId, name);
+    return result;
+  } catch (e) { return { error: e.message }; }
+});
+
+// IPC: 互联网联机 - 发送消息
+ipcMain.on('mp-relay-send', (event, data) => {
+  if (relayMode) relaySend(data);
+});
+
+// IPC: 互联网联机 - 获取房间列表
+ipcMain.handle('mp-relay-rooms', async () => {
+  try {
+    const http = require('http');
+    return new Promise((resolve) => {
+      http.get('http://81.70.199.45:18766/rooms', (res) => {
+        let body = '';
+        res.on('data', (d) => body += d);
+        res.on('end', () => { try { resolve(JSON.parse(body)); } catch(e) { resolve([]); } });
+      }).on('error', () => resolve([]));
+    });
+  } catch (e) { return []; }
 });
 
 // IPC: 联机 - 获取本机IP
@@ -699,6 +890,16 @@ ipcMain.handle('mp-get-ip', async () => {
 
 // IPC: 联机 - 获取当前联机状态（游戏页面加载时恢复）
 ipcMain.handle('mp-get-state', async () => {
+  if (relayMode) {
+    return {
+      active: true,
+      isHost: mpIsHost,
+      myId: mpMyPlayerId,
+      myName: mpMyPlayerName,
+      peers: relayPeers,
+      lastGameStart: mpLastGameStart
+    };
+  }
   return mpGetState();
 });
 

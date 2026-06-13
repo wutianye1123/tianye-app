@@ -303,9 +303,41 @@ class Game {
                     this.timeWarpIndex = 0;
                 }
             }
+
+            // Mun surface collision
+            const munPos = this.physics.getMunPosition();
+            const mdx = this.physState.position.x - munPos.x;
+            const mdy = this.physState.position.y - munPos.y;
+            const mdz = this.physState.position.z - munPos.z;
+            const munDist = Math.sqrt(mdx * mdx + mdy * mdy + mdz * mdz);
+            if (munDist < CONFIG.MUN_RADIUS) {
+                const mrhat = { x: mdx / munDist, y: mdy / munDist, z: mdz / munDist };
+                const mvr = this.physState.velocity.x * mrhat.x + this.physState.velocity.y * mrhat.y + this.physState.velocity.z * mrhat.z;
+                const mImpactSpeed = Math.abs(mvr);
+                // Snap to Mun surface
+                const ms = CONFIG.MUN_RADIUS / munDist;
+                this.physState.position.x = munPos.x + mdx * ms;
+                this.physState.position.y = munPos.y + mdy * ms;
+                this.physState.position.z = munPos.z + mdz * ms;
+
+                if (mImpactSpeed > 50 && !this.crashed) {
+                    this._crash();
+                    didCrash = true;
+                    break;
+                }
+                if (mvr < 0) {
+                    this.physState.velocity.x -= mvr * mrhat.x;
+                    this.physState.velocity.y -= mvr * mrhat.y;
+                    this.physState.velocity.z -= mvr * mrhat.z;
+                }
+                this.timeWarp = 1;
+                this.timeWarpIndex = 0;
+            }
         }
 
         if (didCrash) return;
+
+        const alt = this.physics.getAltitude(this.physState.position);
 
         // Visuals
         if (this.state === 'flight') this._updateFlightVisuals(dt);
@@ -340,21 +372,39 @@ class Game {
         this.celestial.updateClouds(dt);
         this.celestial.updateMun(this.physics.munAngle, CONFIG.PLANET_RADIUS * CONFIG.RENDER_SCALE_FLIGHT, this.state === 'map');
 
-        // HUD
-        const els = this.physics.computeOrbitalElements(this.physState.position, this.physState.velocity);
+        // HUD — switch to Mun-relative when in Mun SOI
+        let hudAlt = alt, hudSpd, hudOrbSpd, hudEls;
+        if (this.physics.isInMunSOI(this.physState.position)) {
+            const mp = this.physics.getMunPosition();
+            const munV = 2 * Math.PI * CONFIG.MUN_ORBIT_RADIUS / CONFIG.MUN_ORBIT_PERIOD;
+            const a = this.physics.munAngle;
+            const mv = { x: -munV * Math.sin(a), y: 0, z: munV * Math.cos(a) };
+            const rp = { x: this.physState.position.x - mp.x, y: this.physState.position.y - mp.y, z: this.physState.position.z - mp.z };
+            const rv = { x: this.physState.velocity.x - mv.x, y: this.physState.velocity.y - mv.y, z: this.physState.velocity.z - mv.z };
+            const rr = Math.sqrt(rp.x**2 + rp.y**2 + rp.z**2);
+            hudAlt = rr - CONFIG.MUN_RADIUS;
+            hudSpd = Math.sqrt(rv.x**2 + rv.y**2 + rv.z**2);
+            const vr = rr > 0 ? (rp.x*rv.x + rp.y*rv.y + rp.z*rv.z) / rr : 0;
+            hudOrbSpd = Math.sqrt(Math.max(0, hudSpd*hudSpd - vr*vr));
+            hudEls = this.physics.computeOrbitalElements(rp, rv, CONFIG.MUN_MU, CONFIG.MUN_RADIUS);
+        } else {
+            hudSpd = this.physics.getSpeed(this.physState.velocity);
+            hudOrbSpd = this.physics.getOrbitalSpeed(this.physState.position, this.physState.velocity);
+            hudEls = this.physics.computeOrbitalElements(this.physState.position, this.physState.velocity);
+        }
         this.ui.updateHUD({
-            altitude: alt, speed: this.physics.getSpeed(this.physState.velocity),
-            orbitalSpeed: this.physics.getOrbitalSpeed(this.physState.position, this.physState.velocity),
+            altitude: hudAlt, speed: hudSpd,
+            orbitalSpeed: hudOrbSpd,
             throttle: this.rocket.throttle, fuelFraction: this.rocket.fuelFraction,
-            apoapsis: els?.apoapsis || 0, periapsis: els?.periapsis || 0,
+            apoapsis: hudEls?.apoapsis || 0, periapsis: hudEls?.periapsis || 0,
             gForce: this.physState.gForce, timeWarp: this.timeWarp,
         });
         this.ui.updateStaging(this.rocket.getStageInfo());
         this.ui.updateNavball(this.rocket.orientation);
         this.ui.updateMapHUD({
-            apoapsis: els?.apoapsis || 0, periapsis: els?.periapsis || 0,
-            orbitalSpeed: this.physics.getOrbitalSpeed(this.physState.position, this.physState.velocity),
-            period: els?.period || 0, eccentricity: els?.eccentricity || 0,
+            apoapsis: hudEls?.apoapsis || 0, periapsis: hudEls?.periapsis || 0,
+            orbitalSpeed: hudOrbSpd,
+            period: hudEls?.period || 0, eccentricity: hudEls?.eccentricity || 0,
         });
     }
 
