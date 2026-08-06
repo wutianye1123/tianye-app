@@ -635,9 +635,14 @@
                 enemy.x += enemy.velocityX;
 
                 platforms.forEach(platform => {
-                    if (enemy.x <= platform.x || enemy.x + enemy.width >= platform.x + platform.width) {
-                        if (enemy.y + enemy.height === platform.y) {
-                            enemy.velocityX *= -1;
+                    if (enemy.y + enemy.height === platform.y) {
+                        // 到平台边缘：强制朝向 + 钳回平台内，避免反复翻转抖动/走掉
+                        if (enemy.x <= platform.x) {
+                            enemy.velocityX = Math.abs(enemy.velocityX);
+                            enemy.x = platform.x;
+                        } else if (enemy.x + enemy.width >= platform.x + platform.width) {
+                            enemy.velocityX = -Math.abs(enemy.velocityX);
+                            enemy.x = platform.x + platform.width - enemy.width;
                         }
                     }
                 });

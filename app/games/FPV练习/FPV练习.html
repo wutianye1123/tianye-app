@@ -906,8 +906,8 @@ function checkGatePass() {
 
     const gate = gates[currentGate];
     // 转换到门的局部坐标系（门面向下一个航点，局部Z轴=门前方）
-    const localPos = drone.position.clone().sub(gate.position);
-    gate.worldToLocal(localPos);
+    // 转到门的局部坐标系：worldToLocal 已含门的位置+旋转变换，不能再先 .sub(gate.position)（会双重偏移、穿门检测错位）
+    const localPos = gate.worldToLocal(drone.position.clone());
 
     const localX = Math.abs(localPos.x); // 横向偏移（门宽方向）
     const localZ = Math.abs(localPos.z); // 前后偏移（门深度方向）
@@ -990,6 +990,7 @@ function respawnDrone() {
     drone.throttle = 0;
     keyboardThrottle = 0;
     motorOutput = 0;
+    collisionGrace = 2.0;   // 复活给短暂无敌，否则刚撞的障碍立刻再撞 → 连环坠毁/卡死
     batteryLevel = Math.max(batteryLevel, 10);
     gameState = GameState.FLYING;
     document.getElementById('osdWarning').style.display = 'none';

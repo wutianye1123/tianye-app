@@ -396,7 +396,7 @@ function addPart(){
 
 // 点击火箭堆外区域添加部件
 document.getElementById('rocketStack').addEventListener('dblclick', addPart);
-document.getElementById('partsList').addEventListener('dblclick', addPart);
+// partsList 的双击添加由下方 click+detail===2 处理器负责；这里再绑 dblclick 会和它双触发、双击加两份部件
 
 // ===== 物理模拟 =====
 function getActiveEngineThrust(){

@@ -1110,7 +1110,8 @@ class Game {
                 if (data.fishes && Array.isArray(data.fishes)) {
                     data.fishes.forEach(fishData => {
                         try {
-                            const fishType = FISH_TYPES[fishData.rarity][fishData.typeIndex];
+                            const fishType = FISH_TYPES[fishData.rarity] && FISH_TYPES[fishData.rarity][fishData.typeIndex];
+                            if (!fishType) return;   // 鱼种索引失效（-1/越界）→ 跳过，避免 new Fish(undefined) 崩
                             const fish = new Fish(fishType, fishData.x, fishData.y, fishData.isBaby);
                             fish.growth = fishData.growth || 0;
                             fish.hunger = fishData.hunger || 100;
