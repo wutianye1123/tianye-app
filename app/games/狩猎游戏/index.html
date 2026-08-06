@@ -1694,6 +1694,7 @@ camera.position.set(0, 1.7, 0);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -1707,7 +1708,7 @@ scene.add(ambientLight);
 const sunLight = new THREE.DirectionalLight(0xffeedd, 1.5);
 sunLight.position.set(50, 80, 30);
 sunLight.castShadow = true;
-sunLight.shadow.mapSize.set(4096, 4096);
+sunLight.shadow.mapSize.set(2048, 2048);
 sunLight.shadow.camera.near = 0.5;
 sunLight.shadow.camera.far = 200;
 sunLight.shadow.camera.left = -60;

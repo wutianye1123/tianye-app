@@ -499,6 +499,7 @@ let playerDeaths = 0;
 let teamKills = {red: 0, blue: 0};
 let roundTimeLeft = ROUND_TIME;
 let roundOver = false;
+let gamePaused = false; // Esc 退出指针锁时暂停（bot/计时不动）
 let roundEndTimer = 0;
 let tabDown = false;
 let wheelDown = false;
@@ -1262,6 +1263,7 @@ camera.position.set(SPAWN_RED.x, EYE_STAND, SPAWN_RED.z);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
@@ -2486,7 +2488,7 @@ function drawMinimap() {
   if (mpActive) {
     remotePlayers.forEach(rp => {
       if (rp.dead) return;
-      const rx = size/2 + (rp.group.position.x - cz) * scale;
+      const rx = size/2 + (rp.group.position.x - cx) * scale;
       const rz = size/2 + (rp.group.position.z - cz) * scale;
       if (rx < -5 || rx > size+5 || rz < -5 || rz > size+5) return;
       ctx.fillStyle = '#44ff44';
@@ -2729,6 +2731,11 @@ function animate() {
     return;
   }
 
+  if (gamePaused) {   // Esc 暂停：只渲染，不推进 bot/计时
+    renderer.render(scene, camera);
+    return;
+  }
+
   const dt = Math.min(clock.getDelta(), 0.1);
 
   if (roundOver) {
@@ -2900,12 +2907,24 @@ document.getElementById('nextRoundBtn').addEventListener('click', () => {
   clock.getDelta();
 });
 
-// Pointer Lock
+// Pointer Lock：游戏中失去锁定→暂停；重新锁定→恢复
 document.addEventListener('pointerlockchange', () => {
-  if (!document.pointerLockElement && gameStarted && !roundOver) {
-    // 暂停提示
+  if (document.pointerLockElement) {
+    if (gamePaused) { gamePaused = false; clock.getDelta(); hidePauseOverlay(); }
+  } else if (gameStarted && !roundOver) {
+    gamePaused = true;
+    showPauseOverlay();
   }
 });
+function showPauseOverlay() {
+  let o = document.getElementById('__cs_pause');
+  if (!o) { o = document.createElement('div'); o.id = '__cs_pause'; o.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);color:#fff;font:22px sans-serif;z-index:2147483647;'; document.body.appendChild(o); }
+  o.textContent = '已暂停 — 点击画面继续';
+  o.style.display = 'flex';
+}
+function hidePauseOverlay() {
+  const o = document.getElementById('__cs_pause'); if (o) o.style.display = 'none';
+}
 
 // 点击重新获取pointer lock
 document.addEventListener('click', () => {

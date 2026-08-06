@@ -2018,6 +2018,19 @@
                 soundSystem.playHurt();
                 updateStats();
             }
+
+            // 死亡：血量归零 → 复活到出生点（之前血量可无限为负、永不死）
+            if (player.health <= 0) {
+                const sx = Math.floor(CONFIG.WORLD_WIDTH / 2);
+                player.x = sx * CONFIG.BLOCK_SIZE;
+                player.y = (findGroundLevel(sx) - 3) * CONFIG.BLOCK_SIZE;
+                player.vx = 0;
+                player.vy = 0;
+                player.onGround = false;
+                player.health = CONFIG.MAX_HEALTH;
+                soundSystem.playHurt();
+                updateStats();
+            }
         }
 
         function checkHorizontalCollision() {

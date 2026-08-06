@@ -63,7 +63,7 @@ function initGraphics() {
   camera.position.set(-14, 8, 16);
 
   renderer = new THREE.WebGLRenderer();
-  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
   container.appendChild(renderer.domElement);

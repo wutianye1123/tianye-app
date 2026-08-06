@@ -2072,19 +2072,25 @@ function setupInput() {
     S.keys[e.key.toLowerCase()] = false;
   });
 
-  // Mouse always rotates view — movementX/Y always captured
+  // 未锁定时不累积视角（避免锁失败/光标移动导致视角漂移）
   document.addEventListener('mousemove', e => {
+    if (!document.pointerLockElement) return;
     S.mouse.dx += e.movementX || 0;
     S.mouse.dy += e.movementY || 0;
   });
 
-  // Request pointer lock on first canvas interaction
+  // 用 click（完整手势）请求指针锁：mousedown 触发的 requestPointerLock 在 Electron 首次常失败；
+  // 未锁定时显示光标，锁定后才隐藏（避免锁失败却看不见、误以为已锁）
+  document.body.classList.add('show-cursor');
+  document.addEventListener('pointerlockchange', () => {
+    document.body.classList.toggle('show-cursor', document.pointerLockElement !== canvas);
+  });
+  canvas.addEventListener('click', () => {
+    if (!document.pointerLockElement) { try { canvas.requestPointerLock(); } catch (e) {} }
+  });
   canvas.addEventListener('mousedown', e => {
     e.preventDefault();
-    if (!document.pointerLockElement) {
-      canvas.requestPointerLock();
-      return;
-    }
+    if (!document.pointerLockElement) return;   // 还没锁：交给上面的 click 处理器
     if (e.button === 0) { S.mouse.down = true; handleClick(e); }
     if (e.button === 2) { handleRightClick(e); }
   });

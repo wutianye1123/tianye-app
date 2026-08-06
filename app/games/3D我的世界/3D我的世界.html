@@ -1678,7 +1678,7 @@
                 alpha: false
             });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(1);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             renderer.setClearColor(0x64B5F6, 1.0);
             renderer.shadowMap.enabled = true;
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;

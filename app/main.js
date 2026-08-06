@@ -859,6 +859,14 @@ function createWindow() {
         });
       }
     }
+    // F3 全局静音/恢复（对所有游戏生效——静音页面全部音频输出）
+    if (input.key === 'F3' && input.type === 'keyDown') {
+      const muted = !win.webContents.isAudioMuted();
+      win.webContents.setAudioMuted(muted);
+      win.webContents.executeJavaScript(
+        "(function(){var t=document.getElementById('__mute_toast');if(!t){t=document.createElement('div');t.id='__mute_toast';t.style.cssText='position:fixed;top:16px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.78);color:#fff;padding:8px 18px;border-radius:8px;font:15px sans-serif;z-index:2147483647;pointer-events:none;transition:opacity .2s;';document.body.appendChild(t);}t.textContent=" + (muted ? "'🔇 已静音 (F3 恢复)'" : "'🔊 已恢复'") + ";t.style.opacity='1';clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity='0';},1200);})()"
+      ).catch(function () {});
+    }
   });
 
   // 窗口关闭前自动存档
