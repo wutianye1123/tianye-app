@@ -25,4 +25,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
   mpRelayJoin: (roomId, name) => ipcRenderer.invoke('mp-relay-join', roomId, name),
   mpRelaySend: (data) => ipcRenderer.send('mp-relay-send', data),
   mpRelayRooms: () => ipcRenderer.invoke('mp-relay-rooms'),
+  mpDiscoverStart: () => ipcRenderer.invoke('mp-discover-start'),
+  mpDiscoverStop: () => ipcRenderer.invoke('mp-discover-stop'),
+  onMpDiscover: (callback) => {
+    ipcRenderer.removeAllListeners('mp-discover');
+    ipcRenderer.on('mp-discover', (event, servers) => callback(servers));
+  },
+  // 好友系统 API（与 web-api.js 保持一致 // PARITY）
+  frGetProfile: () => ipcRenderer.invoke('fr-get-profile'),
+  frSetProfile: (name) => ipcRenderer.invoke('fr-set-profile', name),
+  frSaveCode: (code) => ipcRenderer.invoke('fr-save-code', code),
+  frConnect: () => ipcRenderer.invoke('fr-connect'),
+  frList: () => ipcRenderer.invoke('fr-list'),
+  frAddRequest: (code) => ipcRenderer.invoke('fr-add-request', code),
+  frAccept: (code) => ipcRenderer.invoke('fr-accept', code),
+  frReject: (code) => ipcRenderer.invoke('fr-reject', code),
+  frRemove: (code) => ipcRenderer.invoke('fr-remove', code),
+  frInvite: (code) => ipcRenderer.invoke('fr-invite', code),
+  frJoin: (roomId, name) => ipcRenderer.invoke('fr-join', roomId, name),
+  frRegister: (name, password) => ipcRenderer.invoke('fr-register', name, password),
+  frLogin: (name, password) => ipcRenderer.invoke('fr-login', name, password),
+  frDeleteAccount: () => ipcRenderer.invoke('fr-delete-account'),
+  frClearProfile: () => ipcRenderer.invoke('fr-clear-profile'),
+  frLogout: () => ipcRenderer.invoke('fr-logout'),
+  frIsConnected: () => ipcRenderer.invoke('fr-is-connected'),
+  onFrMessage: (callback) => {
+    ipcRenderer.removeAllListeners('fr-message');
+    ipcRenderer.on('fr-message', (event, data) => callback(data));
+  },
 });

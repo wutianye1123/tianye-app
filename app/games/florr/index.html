@@ -1,0 +1,1883 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>花朵大作战 · florr</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#1b2a1b;
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    color:#eaf2e6; user-select:none; -webkit-user-select:none; }
+  #c { position:fixed; inset:0; width:100%; height:100%; display:block; z-index:0; cursor:crosshair; }
+
+  /* HUD */
+  #hud { position:fixed; inset:0; z-index:5; pointer-events:none; }
+  .panel { position:absolute; }
+  #topleft { top:14px; left:14px; width:280px; }
+  .bar { height:16px; border-radius:8px; background:rgba(0,0,0,0.45); overflow:hidden; border:1px solid rgba(255,255,255,0.12); position:relative; }
+  .bar > i { display:block; height:100%; width:50%; transition:width .12s linear; }
+  #hpBar > i { background:linear-gradient(90deg,#e74c3c,#ff7b6b); }
+  #xpBar { height:11px; margin-top:6px; }
+  #xpBar > i { background:linear-gradient(90deg,#43d35a,#9be15d); }
+  .bar .lbl { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; text-shadow:0 1px 2px #000; letter-spacing:.5px; }
+  #stats { margin-top:8px; font-size:13px; line-height:1.5; text-shadow:0 1px 2px #000; }
+  #stats b { color:#ffd34d; }
+
+  #slots { bottom:16px; left:50%; transform:translateX(-50%); display:flex; gap:8px; }
+  .slot { width:46px; height:46px; border-radius:10px; background:rgba(0,0,0,0.4); border:2px dashed rgba(255,255,255,0.14); display:flex; align-items:center; justify-content:center; }
+  .slot.full { border-style:solid; border-color:rgba(255,255,255,0.3); }
+  .slot canvas { width:40px; height:40px; }
+
+  #minimap { top:14px; right:14px; width:150px; height:150px; border-radius:10px; background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.14); }
+
+  #scoreboard { top:174px; right:14px; width:150px; background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.14); border-radius:10px; padding:8px; font-size:12px; display:none; }
+  #scoreboard h4 { font-size:11px; color:#9fb0a0; margin-bottom:4px; text-transform:uppercase; letter-spacing:1px; }
+  #scoreboard .row { display:flex; justify-content:space-between; padding:1px 0; }
+  #scoreboard .me { color:#43d35a; font-weight:700; }
+
+  #killfeed { top:14px; left:304px; width:240px; font-size:12px; }
+  #killfeed .kf { background:rgba(0,0,0,0.4); border-radius:6px; padding:4px 8px; margin-bottom:4px; text-shadow:0 1px 2px #000; transition:opacity .5s; }
+
+  #toast { position:fixed; bottom:80px; left:50%; transform:translateX(-50%); z-index:6; pointer-events:none; }
+  #toast .t { background:rgba(0,0,0,0.6); border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:6px 14px; margin-top:6px; font-size:13px; animation:tfade 2.4s forwards; }
+  #tip { position:fixed; display:none; z-index:20; pointer-events:none; background:rgba(20,30,24,0.96); border:1px solid rgba(255,255,255,0.2); border-radius:10px; padding:8px 12px; max-width:230px; box-shadow:0 6px 18px rgba(0,0,0,0.5); }
+  @keyframes tfade { 0%{opacity:0;transform:translateY(6px);} 12%{opacity:1;transform:none;} 75%{opacity:1;} 100%{opacity:0;} }
+
+  /* Overlays */
+  .overlay { position:fixed; inset:0; z-index:10; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(circle at 50% 32%,rgba(90,170,100,.5),rgba(18,38,22,.93)); backdrop-filter:blur(3px); text-align:center; }
+  .overlay.hidden { display:none; }
+  .card { max-width:520px; padding:36px 40px; }
+  .card h1 { font-size:46px; letter-spacing:4px; color:#8ef07e; text-shadow:0 2px 22px rgba(110,220,120,.55); margin-bottom:6px; }
+  .card .sub { color:#9fb0a0; font-size:14px; letter-spacing:2px; margin-bottom:22px; }
+  .card p { color:#c4d4bc; font-size:14px; line-height:1.7; margin:8px 0; }
+  .card .how { background:rgba(0,0,0,.3); border:1px solid rgba(255,255,255,.1); border-radius:10px; padding:14px 18px; margin:18px 0; text-align:left; font-size:13px; color:#bcd0b3; }
+  .card .how b { color:#ffd34d; }
+  .btn { cursor:pointer; border:none; border-radius:10px; padding:13px 30px; font-size:17px; font-weight:700; letter-spacing:2px;
+    background:linear-gradient(180deg,#54e07a,#2db95f); color:#06210f; box-shadow:0 6px 18px rgba(45,185,95,.4); transition:transform .1s; margin:4px; }
+  .btn:hover { transform:translateY(-1px); }
+  .btn.ghost { background:rgba(255,255,255,.08); color:#dfe8da; box-shadow:none; border:1px solid rgba(255,255,255,.16); }
+  #deathStats { font-size:15px; color:#eaf2e6; margin:14px 0 20px; }
+  #deathStats span { color:#ffd34d; font-weight:700; }
+
+  #backBtn { position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:8; pointer-events:auto;
+    background:rgba(0,0,0,.4); border:1px solid rgba(255,255,255,.16); color:#cfe8c0; border-radius:8px; padding:6px 14px; font-size:13px; cursor:pointer; }
+  #backBtn:hover { background:rgba(255,255,255,.12); }
+
+  /* 花瓣管理面板（背包/装配 + 图鉴） */
+  #petalBtns { position:fixed; bottom:16px; left:14px; z-index:6; display:flex; gap:8px; pointer-events:auto; }
+  .pbtn { background:rgba(0,0,0,.45); border:1px solid rgba(255,255,255,.16); color:#cfe8c0; border-radius:8px; padding:8px 12px; font-size:13px; cursor:pointer; }
+  .pbtn:hover { background:rgba(70,196,104,.25); }
+  #petalPanel { position:fixed; inset:0; z-index:11; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.55); }
+  #petalPanel.open { display:flex; }
+  .petal-card { background:#212e25; border:1px solid rgba(255,255,255,.14); border-radius:14px; padding:18px; width:600px; max-width:92vw; max-height:84vh; overflow:auto; }
+  .petal-head { display:flex; align-items:center; gap:8px; margin-bottom:14px; }
+  .petal-head h3 { flex:1; font-size:18px; color:#cfe8c0; }
+  .petal-tabs { display:flex; gap:6px; }
+  .petal-tabs button { padding:6px 12px; border-radius:7px; border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.05); color:#bcd0b3; cursor:pointer; font-size:13px; }
+  .petal-tabs button.active { background:rgba(70,196,104,.25); border-color:#46c468; color:#9be15d; }
+  .pclose { background:rgba(255,255,255,.05)!important; border:1px solid rgba(255,255,255,.14)!important; }
+  .pclose:hover { background:rgba(255,80,80,.25)!important; }
+  .sec-label { color:#9fb0a0; font-size:12px; letter-spacing:1px; margin:4px 0 8px; text-transform:uppercase; }
+  .grid8 { display:grid; grid-template-columns:repeat(8,1fr); gap:8px; }
+  .cell { aspect-ratio:1; border-radius:9px; background:rgba(0,0,0,.32); border:1px solid rgba(255,255,255,.08); display:flex; align-items:center; justify-content:center; cursor:pointer; position:relative; transition:transform .08s, border-color .08s; }
+  .cell:hover { transform:scale(1.06); border-color:rgba(255,255,255,.3); }
+  .cell.locked { cursor:default; }
+  .cell.locked:hover { transform:none; }
+  .cell canvas { width:100%; height:100%; }
+  .cell .tag { position:absolute; bottom:2px; left:0; right:0; font-size:8px; text-align:center; color:#cfe8c0; text-shadow:0 1px 2px #000; }
+  .mode-tabs { display:flex; gap:6px; margin-bottom:10px; }
+  .mode-tabs button { flex:1; padding:7px; border-radius:7px; border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.05); color:#bcd0b3; cursor:pointer; font-size:13px; }
+  .mode-tabs button.active { background:rgba(70,196,104,.25); border-color:#46c468; color:#9be15d; }
+  .fuse-row { display:flex; align-items:center; gap:8px; justify-content:center; margin-bottom:14px; flex-wrap:wrap; }
+  .fuse-slot { width:54px; height:54px; border-radius:10px; background:rgba(0,0,0,.32); border:2px dashed rgba(255,255,255,.18); display:flex; align-items:center; justify-content:center; cursor:pointer; position:relative; }
+  .fuse-slot.full { border-style:solid; border-color:rgba(255,255,255,.3); }
+  .fuse-slot.result { border-style:solid; border-color:rgba(255,216,77,.55); box-shadow:0 0 14px rgba(255,216,77,.25); cursor:default; }
+  .fuse-slot canvas { width:46px; height:46px; }
+  .fuse-op { color:#9fb0a0; font-size:20px; font-weight:700; }
+  #fuseBtn { padding:8px 18px; font-size:14px; }
+  #fuseBtn:disabled { opacity:.4; cursor:default; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <div id="topleft" class="panel">
+    <div class="bar" id="hpBar"><i></i><div class="lbl" id="hpLbl"></div></div>
+    <div class="bar" id="xpBar"><i></i><div class="lbl" id="xpLbl"></div></div>
+    <div id="stats"></div>
+  </div>
+  <canvas id="minimap" class="panel" width="150" height="150"></canvas>
+  <div id="scoreboard" class="panel"><h4>击杀榜</h4><div id="sbBody"></div></div>
+  <div id="killfeed" class="panel"></div>
+  <div id="slots" class="panel"></div>
+</div>
+
+<div id="toast"></div>
+<div id="tip"></div>
+<div id="petalBtns">
+  <button class="pbtn" id="btnBack">🎒 装配 (B)</button>
+  <button class="pbtn" id="btnGallery">📋 图鉴 (G)</button>
+</div>
+<div id="petalPanel">
+  <div class="petal-card">
+    <div class="petal-head">
+      <h3>🌸 花瓣管理</h3>
+      <div class="petal-tabs">
+        <button id="tabBack" class="active">🎒 装配</button>
+        <button id="tabGallery">📋 图鉴</button>
+        <button id="petalClose" class="pclose">✕</button>
+      </div>
+    </div>
+    <div id="backTab">
+      <div class="mode-tabs">
+        <button id="modeEquip" class="active">🛡 装配模式</button>
+        <button id="modeFuse">⚗ 合成模式</button>
+      </div>
+      <div class="sec-label" id="equipLabel">已装备 · 点击卸下到背包</div>
+      <div class="grid8" id="equipGrid"></div>
+      <div class="sec-label" style="margin-top:14px;" id="fuseHint">合成台 · 切到"合成模式"后，点背包花瓣放入（需 3 个相同）</div>
+      <div class="fuse-row">
+        <div class="fuse-slot" id="fuse0"></div>
+        <span class="fuse-op">+</span>
+        <div class="fuse-slot" id="fuse1"></div>
+        <span class="fuse-op">+</span>
+        <div class="fuse-slot" id="fuse2"></div>
+        <span class="fuse-op">▶</span>
+        <div class="fuse-slot result" id="fuseResult"></div>
+        <button class="btn" id="fuseBtn" disabled>合成</button>
+      </div>
+      <div class="sec-label" id="backLabel">背包 · 点击装备到空槽（满则替换最弱）</div>
+      <div class="grid8" id="backGrid"></div>
+    </div>
+    <div id="galleryTab" style="display:none;">
+      <div class="sec-label" id="galleryCount"></div>
+      <div class="grid8" id="galleryGrid"></div>
+    </div>
+  </div>
+</div>
+<button id="backBtn" class="hidden">← 返回中心 (F2)</button>
+
+<div id="menu" class="overlay">
+  <div class="card">
+    <h1>🌸 花朵大作战</h1>
+    <div class="sub">F L O R R · 生 存 对 战</div>
+    <div class="how">
+      <p>🖱️ <b>鼠标</b> 控制花朵移动方向（也可用 <b>WASD</b>）</p>
+      <p>🤏 <b>按住鼠标左键</b> 把花瓣甩远，增大攻击范围</p>
+      <p>🌸 <b>花瓣</b> 自动环绕攻击靠近的怪物</p>
+      <p>🟢 击杀怪物掉落 <b>经验</b>，升级解锁更多花瓣槽</p>
+      <p>💎 怪物有几率掉落 <b>稀有花瓣</b>（普通/稀有/史诗）</p>
+      <p>⌨️ <b>Esc</b> 暂停 · <b>F2</b> 返回</p>
+    </div>
+    <button class="btn" id="playBtn">开始游戏 ▶</button>
+    <button class="btn ghost" id="newGameBtn" style="display:none;">🗑 重新开始</button>
+  </div>
+</div>
+
+<div id="pause" class="overlay hidden">
+  <div class="card">
+    <h1 style="font-size:34px;">已暂停</h1>
+    <button class="btn" id="resumeBtn">继续 ▶</button>
+    <button class="btn ghost" id="quitBtn">返回中心</button>
+  </div>
+</div>
+
+<div id="death" class="overlay hidden">
+  <div class="card">
+    <h1 style="font-size:40px;color:#ff8b7a;">你阵亡了</h1>
+    <div id="deathStats"></div>
+    <button class="btn" id="againBtn">再来一局 ↻</button>
+    <button class="btn ghost" id="dquitBtn">返回中心</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ============================================================
+//  花朵大作战 — 仿 florr.io （单文件 canvas 2D，无依赖）
+//  单人核心 + 联机 PvP（联机模式仿照 坦克大战 实现）
+// ============================================================
+const TAU = Math.PI * 2;
+const clamp = (v,a,b)=> v<a?a : v>b?b : v;
+const rand = (a,b)=> a + Math.random()*(b-a);
+const dist2 = (ax,ay,bx,by)=>{ const dx=ax-bx, dy=ay-by; return dx*dx+dy*dy; };
+
+// ---- 世界 ----
+const WORLD = 5200, HALF = WORLD/2;
+
+// ---- 定义表 ----
+const PETAL_TYPES = {
+  basic:  { name:'基础',  dmg:15, hp:30,  reload:1.3, r:14, color:'#f2f2f2', heal:0  },
+  fast:   { name:'快速',  dmg:7,  hp:16,  reload:0.6, r:11, color:'#ffe24d', heal:0  },
+  heavy:  { name:'重型',  dmg:30, hp:65,  reload:2.6, r:19, color:'#9aa3ad', heal:0  },
+  heal:   { name:'治疗',  dmg:5,  hp:24,  reload:1.2, r:13, color:'#7ee787', heal:10 },
+  iris:   { name:'虹膜',  dmg:6,  hp:20,  reload:1.2, r:13, color:'#c06bff', heal:0, ranged:true, projDmg:16, projRate:1.1, projRange:540 },
+  cactus: { name:'仙人掌',dmg:7,  hp:120, reload:2.5, r:21, color:'#5fa347', heal:0, reflect:0.6 },
+  stinger:{ name:'尖刺',  dmg:42, hp:9,   reload:0.7, r:11, color:'#3ce0d6', heal:0 },
+  pollen: { name:'花粉',  dmg:4,  hp:20,  reload:1.0, r:14, color:'#d8e36b', heal:0, slow:1.4 },
+  garlic: { name:'毒蒜',  dmg:5,  hp:26,  reload:1.3, r:14, color:'#d9c47a', heal:0, poison:[9, 2.5] }, // [dps, 持续秒]
+  rock:   { name:'岩石',  dmg:3,  hp:170, reload:3.5, r:20, color:'#9a9288', heal:0 },
+};
+const RARITIES = [
+  { name:'普通', mult:1.00, ring:'#b8c0cc' },
+  { name:'罕见', mult:1.35, ring:'#5fd489' },
+  { name:'稀有', mult:1.80, ring:'#4aa3ff' },
+  { name:'史诗', mult:2.40, ring:'#b06bff' },
+  { name:'传奇', mult:3.20, ring:'#ffb14d' },
+  { name:'神话', mult:4.30, ring:'#ff5db1' },
+  { name:'超凡', mult:5.80, ring:'#ff4d4d' },
+  { name:'究极', mult:7.50, ring:'#ffd84d' },
+];
+// 掉落稀有度权重（普通多、究极少），与 florr 一致
+const RARITY_WEIGHTS = [50, 26, 13, 6.5, 3, 1.2, 0.4, 0.1];
+function rollRarity(){
+  const total = RARITY_WEIGHTS.reduce((a,b)=>a+b,0);
+  let r = Math.random()*total;
+  for (let i=0;i<RARITY_WEIGHTS.length;i++){ r -= RARITY_WEIGHTS[i]; if (r<=0) return i; }
+  return 0;
+}
+const MOB_TYPES = {
+  ant:     { name:'蚂蚁',   hp:16,  dmg:5,  speed:84,  r:13, xp:4,  body:6,  color:'#e05555', beh:'chase'   },
+  lady:    { name:'瓢虫',   hp:40,  dmg:8,  speed:68,  r:18, xp:9,  body:10, color:'#d8362a', beh:'chase'   },
+  beetle:  { name:'甲虫',   hp:95,  dmg:13, speed:48,  r:25, xp:20, body:14, color:'#5e4c3a', beh:'chase'   },
+  hornet:  { name:'黄蜂',   hp:50,  dmg:14, speed:118, r:17, xp:14, body:11, color:'#f0a020', beh:'chase'   },
+  fly:     { name:'苍蝇',   hp:14,  dmg:4,  speed:130, r:11, xp:3,  body:5,  color:'#9aa0a6', beh:'erratic' },
+  spider:  { name:'蜘蛛',   hp:62,  dmg:14, speed:72,  r:18, xp:16, body:12, color:'#5b4a8a', beh:'dasher'  },
+  firefly: { name:'萤火虫', hp:34,  dmg:6,  speed:44,  r:14, xp:12, body:8,  color:'#7be0c2', beh:'drift'   },
+  crab:    { name:'螃蟹',   hp:90,  dmg:15, speed:62,  r:21, xp:18, body:14, color:'#e08a5a', beh:'strafe'  },
+  moth:    { name:'飞蛾',   hp:140, dmg:16, speed:54,  r:24, xp:26, body:14, color:'#bfa9d6', beh:'chase'   },
+  scorpion:{ name:'蝎子',   hp:80,  dmg:22, speed:96,  r:20, xp:24, body:16, color:'#c9a23a', beh:'chase'   },
+};
+const ORBIT_GAP = 34;          // 花瓣环绕半径 = bodyR + ORBIT_GAP
+const PETAL_EXTEND = 74;       // 按住左键时花瓣外推的额外距离
+const PLAYER_SPEED = 232;
+const MAX_SLOTS = 8;
+const ORB_ATTRACT = 150;
+
+// ---- DOM ----
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const miniCv = document.getElementById('minimap');
+const miniCtx = miniCv.getContext('2d');
+let CW = 0, CH = 0, DPR = 1;
+function resize(){
+  DPR = Math.min(window.devicePixelRatio||1, 2);
+  CW = window.innerWidth; CH = window.innerHeight;
+  cv.width = CW*DPR; cv.height = CH*DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize', resize); resize();
+
+// ---- 输入 ----
+const keys = {};
+const mouse = { x:CW/2, y:CH/2, down:false };
+window.addEventListener('keydown', e=>{
+  keys[e.key.toLowerCase()] = true;
+  const k = e.key.toLowerCase();
+  if (e.key === 'Escape'){ if (panelOpen) closePanel(); else togglePause(); }
+  if (e.key === 'F2'){ e.preventDefault(); goBack(); }
+  if (k==='b' && G && G.state==='playing'){ e.preventDefault(); panelOpen ? closePanel() : openPanel('back'); }
+  if (k==='g' && G && G.state==='playing'){ e.preventDefault(); panelOpen ? closePanel() : openPanel('gallery'); }
+});
+window.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()] = false; });
+cv.addEventListener('mousemove', e=>{ mouse.x = e.clientX; mouse.y = e.clientY; });
+cv.addEventListener('mousedown', e=>{ if(e.button===0) mouse.down=true; });
+window.addEventListener('mouseup', e=>{ if(e.button===0) mouse.down=false; });
+window.addEventListener('blur', ()=>{ mouse.down=false; });
+cv.addEventListener('contextmenu', e=> e.preventDefault());
+// 触屏
+cv.addEventListener('touchmove', e=>{ if(e.touches[0]){ mouse.x=e.touches[0].clientX; mouse.y=e.touches[0].clientY; } }, {passive:true});
+
+// ---- 游戏状态 ----
+let G = null;
+let lastT = 0;
+let cam = { x:0, y:0 };
+let shake = 0;
+const particles = [];
+
+function needXp(level){ return 6 + level*5; }
+
+function makePetal(type, rarity){
+  const t = PETAL_TYPES[type], rar = RARITIES[rarity];
+  const hp = Math.round(t.hp * rar.mult);
+  const pe = { type, rarity,
+    dmg:+(t.dmg*rar.mult).toFixed(1), maxHp:hp, hp, reload:t.reload,
+    r:t.r, color:t.color, heal:(t.heal||0)*rar.mult,
+    dead:false, respawn:0, hitCd:0, recoil:0, projT:Math.random() };
+  if (t.ranged){ pe.ranged=true; pe.projDmg=+(t.projDmg*rar.mult).toFixed(1); pe.projRate=t.projRate; pe.projRange=t.projRange; }
+  if (t.reflect) pe.reflect=t.reflect;
+  if (t.slow) pe.slow=t.slow;
+  if (t.poison) pe.poison=[+(t.poison[0]*rar.mult).toFixed(1), t.poison[1]];
+  return pe;
+}
+function newPlayer(){
+  return { x:0, y:0, r:22, hp:85, maxHp:85, level:1, xp:0, kills:0, score:0,
+           iframes:0, spin:0, slots:[makePetal('basic',0),makePetal('heal',0),makePetal('basic',0)],
+           alive:true, lastDmgBy:null, respawn:0, color:'#2ecc71',
+           orbitRCur:22+ORBIT_GAP, _ext:0, backpack:[], portalCd:0 };
+}
+
+// ---- 存档：离开时保存，下次继续（仅单机进度）----
+const SAVE_KEY = 'florr_save_v1';
+function serializePlayer(p){
+  return {
+    level:p.level, xp:p.xp, maxHp:p.maxHp, score:p.score, kills:p.kills,
+    x:p.alive?p.x:0, y:p.alive?p.y:0,
+    slots:p.slots.map(s=> s? {type:s.type, rarity:s.rarity}:null),
+    backpack:p.backpack.map(s=> ({type:s.type, rarity:s.rarity}))
+  };
+}
+function deserializePlayer(d){
+  const p = newPlayer();
+  p.level=d.level||1; p.xp=d.xp||0; p.maxHp=d.maxHp||85; p.hp=p.maxHp;
+  p.score=d.score||0; p.kills=d.kills||0; p.x=d.x||0; p.y=d.y||0; p.orbitRCur=22+ORBIT_GAP;
+  if (Array.isArray(d.slots) && d.slots.length){ p.slots = d.slots.map(s=> s? makePetal(s.type,s.rarity):null); }
+  p.backpack = (d.backpack||[]).map(s=> makePetal(s.type,s.rarity));
+  return p;
+}
+function saveGame(){
+  if (mpActive || !G || !G.player) return;        // 联机会话不覆盖单机存档
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(serializePlayer(G.player))); } catch(e){}
+}
+function loadSavedPlayer(){
+  try { const d = JSON.parse(localStorage.getItem(SAVE_KEY)||'null'); return d?deserializePlayer(d):null; } catch(e){ return null; }
+}
+function clearSave(){ try { localStorage.removeItem(SAVE_KEY); } catch(e){} }
+let savedPlayer = loadSavedPlayer();
+
+// ============================================================
+//  联机系统（仿照 坦克大战/坦克大战.html）
+// ============================================================
+let mpActive=false, mpMyId=null, mpIsHost=false, mpMyName='玩家';
+const remotePlayers = new Map();   // id -> {x,y,tx,ty,r,tr,hp,maxHp,level,rot,dead,name,color,petals,petalsReq}
+const mpScores = new Map();
+let mpSyncTimer=0, mpMobSyncTimer=0, mpPetalsDefTimer=0;
+let mobIdSeq = 1;
+const MP_COLORS = ['#3498db','#e67e22','#9b59b6','#1abc9c','#e91e63','#f1c40f','#16a085','#e74c3c'];
+
+function mpSafeSend(data){
+  if (window.electronAPI && window.electronAPI.mpSend) {
+    try { window.electronAPI.mpSend(data); } catch(e){}
+  }
+}
+async function mpRestoreState(){
+  if (!window.electronAPI || !window.electronAPI.mpGetState) return;
+  try {
+    const state = await window.electronAPI.mpGetState();
+    if (state && state.active) {
+      mpActive = true; mpMyId = state.myId; mpIsHost = state.isHost;
+      mpMyName = state.myName || ('玩家'+state.myId);
+      mpScores.set(mpMyId, 0);
+      document.getElementById('scoreboard').style.display = 'block';
+      for (const peer of (state.peers||[])) {
+        if (peer.id !== mpMyId) mpCreateRemote(peer.id, peer.name);
+      }
+      // 告知他人我的花瓣布局 + 请求对方的
+      mpBroadcastPetalsDef();
+      mpSafeSend({ type:'petals-req' });
+      mpUpdateScoreboard();
+      toast('🌐 联机模式 · ' + (mpIsHost?'你是主机':'已加入房间') + ' · ' + mpMyName);
+    }
+  } catch(e){}
+}
+function mpCreateRemote(id, name){
+  if (remotePlayers.has(id)) return;
+  remotePlayers.set(id, {
+    x:0, y:0, tx:0, ty:0, r:22, tr:22, hp:60, maxHp:60, level:1, rot:0, dead:false,
+    name: name || ('玩家'+id), color: MP_COLORS[(id-1)%MP_COLORS.length], petals:[],
+    ext:0, orbitRCur:22+ORBIT_GAP
+  });
+  if (!mpScores.has(id)) mpScores.set(id, 0);
+  mpSafeSend({ type:'petals-req' }); // 请求其花瓣布局
+  mpUpdateScoreboard();
+}
+function mpRemoveRemote(id){
+  const rp = remotePlayers.get(id);
+  if (rp) { remotePlayers.delete(id); mpUpdateScoreboard(); }
+}
+function mpBroadcastPetalsDef(){
+  if (!mpActive || !G) return;
+  mpSafeSend({ type:'petals-def', id:mpMyId,
+    petals: G.player.slots.map(p=> p? {type:p.type, rarity:p.rarity} : null) });
+}
+function mpHandleMessage(data){
+  if (!mpActive && ['your-id','disconnected','host-disconnected','player-join','player-list','player-state','player-leave'].indexOf(data.type) < 0) return;
+  switch (data.type) {
+    case 'your-id':
+      mpMyId = data.id; mpActive = true;
+      if (!mpScores.has(mpMyId)) mpScores.set(mpMyId, 0);
+      if (mpIsHost) sendFullSync();
+      mpBroadcastPetalsDef();
+      break;
+    case 'player-join':
+      mpCreateRemote(data.id, data.name);
+      mpBroadcastPetalsDef(); // 让新玩家看到我的花瓣
+      break;
+    case 'player-list':
+      for (const p of (data.players||[])) { if (p.id !== mpMyId) mpCreateRemote(p.id, p.name); }
+      break;
+    case 'player-leave':
+      if (data.id != null) mpRemoveRemote(data.id);
+      break;
+    case 'disconnected':
+      mpActive = false; remotePlayers.clear();
+      document.getElementById('scoreboard').style.display = 'none';
+      toast('⚠ 联机已断开，切换为单机');
+      break;
+    case 'host-disconnected':
+      mpActive = false; remotePlayers.clear();
+      document.getElementById('scoreboard').style.display = 'none';
+      toast('⚠ 主机已断开，切换为单机');
+      break;
+    case 'player-state':
+      if (data.id !== mpMyId) {
+        if (!remotePlayers.has(data.id)) mpCreateRemote(data.id, data.name);
+        const rp = remotePlayers.get(data.id);
+        rp.tx = data.x; rp.ty = data.y; rp.tr = data.r; rp.rot = data.rot;
+        rp.hp = data.hp; rp.maxHp = data.maxHp; rp.level = data.level; rp.dead = !!data.dead;
+        if (data.ext!=null) rp.ext = data.ext;
+        if (data.name) rp.name = data.name;
+      }
+      break;
+    case 'petals-def':
+      if (data.id !== mpMyId) {
+        if (!remotePlayers.has(data.id)) mpCreateRemote(data.id, null);
+        const rp = remotePlayers.get(data.id);
+        rp.petals = (data.petals||[]).filter(Boolean);
+      }
+      break;
+    case 'petals-req':
+      mpBroadcastPetalsDef();
+      break;
+    case 'mob-hit':
+      if (mpIsHost) mpHostProcessMobHit(data);
+      break;
+    case 'kill-event':
+      mpApplyKill(data);
+      break;
+    case 'mob-sync':
+      if (!mpIsHost) mpApplyMobSync(data.mobs);
+      break;
+    case 'full-sync':
+      if (!mpIsHost && data.mobs) mpApplyMobSync(data.mobs, true);
+      if (data.scores) { for (const k in data.scores) mpScores.set(Number(k), data.scores[k]); }
+      mpUpdateScoreboard();
+      break;
+    case 'pvp-hit':
+      if (data.to === mpMyId && G && G.player.alive) {
+        damageLocalPlayer(data.dmg, data.from);
+      }
+      break;
+    case 'player-death': {
+      const killer = data.killerName || '???';
+      const victim = nameOf(data.deadId);
+      if (data.killerId === mpMyId) {
+        G && (G.player.kills++);
+        mpScores.set(mpMyId, (mpScores.get(mpMyId)||0)+1);
+        G && (G.player.score += 25);
+      }
+      if (data.scores) { for (const k in data.scores) mpScores.set(Number(k), data.scores[k]); }
+      killFeed(killer, victim);
+      mpUpdateScoreboard();
+      break;
+    }
+  }
+}
+function nameOf(id){ if (id==null) return '环境'; if (id===mpMyId) return mpMyName; const rp=remotePlayers.get(id); return rp?rp.name:('玩家'+id); }
+
+function mpHostProcessMobHit(data){
+  if (!G) return;
+  const m = G.mobs.find(mo => mo.id === data.mobId);
+  if (!m || m.dead) return;
+  // 主机校验：打击者大致在该怪物附近（容差较大，防作弊/防漂移）
+  m.hp -= data.dmg;
+  m.lastHitBy = data.from;
+  m.flash = 0.12;
+  if (m.hp <= 0) mpHostKillMob(m);
+}
+function mpHostKillMob(m){
+  m.dead = true;
+  const killerId = m.lastHitBy;
+  const killerName = nameOf(killerId);
+  // 主机自己击杀：直接奖励
+  if (killerId === mpMyId) { G.player.score += m.xp; G.player.kills++; G.player.xp += m.xp; levelUpCheck(); }
+  mpScores.set(killerId, (mpScores.get(killerId)||0)+1);
+  burst(m.x, m.y, m.color, 16);
+  killFeed(killerName, (MOB_TYPES[m.type]||{}).name || '怪物');   // 主机本地击杀反馈
+  mpSafeSend({ type:'kill-event', mobId:m.id, killerId, killerName, xp:m.xp, scores:Object.fromEntries(mpScores) });
+  G.mobs = G.mobs.filter(x=>x!==m);
+  mpUpdateScoreboard();
+}
+function mpApplyKill(data){
+  if (!G) return;
+  // 移除该怪物
+  const m = G.mobs.find(mo => mo.id === data.mobId);
+  if (m) { burst(m.x, m.y, m.color, 14); G.mobs = G.mobs.filter(x=>x!==m); }
+  // 击杀者是自己 → 获得经验/分数
+  if (data.killerId === mpMyId) { G.player.xp += data.xp; G.player.score += data.xp; levelUpCheck(); }
+  if (data.scores) { for (const k in data.scores) mpScores.set(Number(k), data.scores[k]); }
+  killFeed(data.killerName, '怪物');
+  mpUpdateScoreboard();
+}
+function mpApplyMobSync(list, full){
+  if (!G) return;
+  const seen = new Set();
+  for (const md of (list||[])) {
+    seen.add(md.id);
+    let m = G.mobs.find(mo => mo.id === md.id);
+    if (!m) {
+      m = { id:md.id, type:md.type, x:md.x, y:md.y, r:md.r, hp:md.hp, maxHp:md.maxHp,
+            color:(MOB_TYPES[md.type]||{}).color||'#888', flash:0, dead:false, lastHitBy:null };
+      G.mobs.push(m);
+    } else {
+      const k = full?1:0.25;
+      m.x += (md.x - m.x)*k; m.y += (md.y - m.y)*k;
+      m.hp = md.hp; m.maxHp = md.maxHp; m.type = md.type; m.r = md.r;
+    }
+  }
+  // 移除消失的怪物
+  G.mobs = G.mobs.filter(m => m.id==null || seen.has(m.id) || m.flash>0);
+  // 注意：本地造的怪（无 id）不应残留 —— 联机下非主机不应自己造怪
+}
+function mpSyncMobs(){
+  if (!mpIsHost || !G) return;
+  const arr = G.mobs.filter(m=>!m.dead).map(m=>({ id:m.id, x:m.x, y:m.y, r:m.r, hp:m.hp, maxHp:m.maxHp, type:m.type }));
+  mpSafeSend({ type:'mob-sync', mobs:arr });
+}
+function sendFullSync(){
+  if (!G) return;
+  const arr = G.mobs.filter(m=>!m.dead).map(m=>({ id:m.id, x:m.x, y:m.y, r:m.r, hp:m.hp, maxHp:m.maxHp, type:m.type }));
+  mpSafeSend({ type:'full-sync', mobs:arr, scores:Object.fromEntries(mpScores) });
+}
+function mpUpdateScoreboard(){
+  const sb = document.getElementById('sbBody');
+  if (!sb || !mpActive) return;
+  const rows = [];
+  rows.push({ id:mpMyId, name:mpMyName+'(你)'+(mpIsHost?'★':''), s:mpScores.get(mpMyId)||0, me:true });
+  for (const [id,rp] of remotePlayers) rows.push({ id, name:rp.name, s:mpScores.get(id)||0, me:false });
+  rows.sort((a,b)=>b.s-a.s);
+  sb.innerHTML = rows.map(r=>`<div class="row ${r.me?'me':''}"><span>${r.name}</span><span>${r.s}</span></div>`).join('');
+}
+function killFeed(killer, victim){
+  const f = document.getElementById('killfeed');
+  if (!f) return;
+  const el = document.createElement('div');
+  el.className = 'kf';
+  el.textContent = `${killer}  ☠  ${victim}`;
+  f.appendChild(el);
+  setTimeout(()=>{ el.style.opacity='0'; }, 2500);
+  setTimeout(()=>{ if (el.parentNode) el.parentNode.removeChild(el); }, 3100);
+}
+
+// ============================================================
+//  粒子 / 反馈
+// ============================================================
+function burst(x,y,color,n){
+  for (let i=0;i<n;i++){
+    const a = Math.random()*TAU, s = rand(40,200);
+    particles.push({ x,y, vx:Math.cos(a)*s, vy:Math.sin(a)*s, life:rand(.3,.7), max:.7, color, size:rand(2,5) });
+  }
+}
+function toast(msg){
+  const box = document.getElementById('toast');
+  const el = document.createElement('div');
+  el.className = 't'; el.textContent = msg;
+  box.appendChild(el);
+  setTimeout(()=>{ if (el.parentNode) el.parentNode.removeChild(el); }, 2500);
+}
+
+// ---- 花瓣悬浮信息 ----
+function petalInfoHTML(pe){
+  const def=PETAL_TYPES[pe.type], rar=RARITIES[pe.rarity];
+  let s = `<div style="color:${rar.ring};font-weight:700;font-size:14px;">${rar.name} · ${def.name}</div>`;
+  s += `<div style="color:#cfe8c0;font-size:12px;margin-top:3px;">伤害 <b>${pe.dmg}</b> · 血量 <b>${pe.maxHp}</b> · 装填 <b>${pe.reload}s</b></div>`;
+  let trait='';
+  if (pe.heal>0) trait='💚 持续治疗 +'+pe.heal.toFixed(1)+'/秒';
+  else if (pe.ranged) trait='🔮 远程弹幕 伤害 '+pe.projDmg+' / '+pe.projRate+'s';
+  else if (pe.reflect) trait='🌵 反刺 反伤 '+Math.round(pe.reflect*100)+'%';
+  else if (pe.slow) trait='🌼 命中减速 '+pe.slow+' 秒';
+  else if (pe.poison) trait='🧄 中毒 '+pe.poison[0]+'/秒 × '+pe.poison[1]+' 秒';
+  if (trait) s += `<div style="color:#9be15d;font-size:12px;margin-top:2px;">${trait}</div>`;
+  return s;
+}
+function showTip(html,x,y){
+  const t=document.getElementById('tip');
+  t.innerHTML=html; t.style.display='block';
+  const w=t.offsetWidth, h=t.offsetHeight;
+  t.style.left = Math.min(x+14, window.innerWidth-w-10)+'px';
+  t.style.top = Math.max(10, y-h-12)+'px';
+}
+function hideTip(){ document.getElementById('tip').style.display='none'; }
+
+// ============================================================
+//  玩家受伤（SP & MP 通用：作用于本地玩家）
+// ============================================================
+function damageLocalPlayer(dmg, fromId){
+  const p = G.player;
+  if (!p.alive || p.iframes>0) return;
+  p.hp -= dmg; p.iframes = 0.9; p.lastDmgBy = fromId;
+  shake = Math.max(shake, 6);
+  burst(p.x, p.y, '#ff6b6b', 10);
+  if (p.hp <= 0) onPlayerDeath();
+}
+function onPlayerDeath(){
+  const p = G.player;
+  p.hp = 0; p.alive = false;
+  burst(p.x, p.y, p.color, 40);
+  shake = 14;
+  // 死亡惩罚：掉落约 35% 的花瓣（可重新拾回）
+  const filled = p.slots.filter(s=>s);
+  if (filled.length){
+    for (let i=filled.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [filled[i],filled[j]]=[filled[j],filled[i]]; }
+    const dropping = filled.slice(0, Math.max(1, Math.round(filled.length*0.35)));
+    if (!mpActive){
+      for (const pe of dropping){
+        G.drops.push({ kind:'petal', x:p.x, y:p.y, vx:rand(-160,160), vy:rand(-160,160),
+          petal:{type:pe.type,rarity:pe.rarity}, life:40, color:RARITIES[pe.rarity].ring, spin:Math.random()*TAU });
+      }
+    }
+    p.slots = p.slots.filter(s=> !(s && dropping.indexOf(s)>=0));
+  }
+  if (mpActive){
+    mpSafeSend({ type:'player-death', deadId:mpMyId, killerId:p.lastDmgBy,
+                 killerName: nameOf(p.lastDmgBy), scores:Object.fromEntries(mpScores) });
+    p.respawn = 3;
+    toast('💀 被 ' + nameOf(p.lastDmgBy) + ' 击败，3 秒后重生');
+  } else {
+    p.respawn = 2;
+    toast('💀 阵亡！2 秒后在中心重生（掉落部分花瓣）');
+  }
+  saveGame();   // 死亡惩罚立即存档，防止关掉后回档
+}
+
+// ============================================================
+//  升级
+// ============================================================
+function levelUpCheck(){
+  const p = G.player;
+  let leveled = false;
+  while (p.xp >= needXp(p.level)) {
+    p.xp -= needXp(p.level);
+    p.level++;
+    p.maxHp += 10; p.hp = p.maxHp;
+    if (p.slots.length < MAX_SLOTS) p.slots.push(makePetal('basic',0));
+    burst(p.x, p.y, '#ffd34d', 22);
+    leveled = true;
+  }
+  if (leveled && mpActive) mpBroadcastPetalsDef();
+}
+
+// ============================================================
+//  刷怪（仅单机 / 联机主机）
+// ============================================================
+// ---- 生物群系（同心圆 zone，越远越难）----
+const BIOMES = [
+  { name:'草地', rMax:820,  tint:'rgba(150,225,150,0.06)', mobs:{ant:0.35,lady:0.18,fly:0.32,firefly:0.15}, hpMul:1.0, xpMul:1.0 },
+  { name:'森林', rMax:1650, tint:'rgba(26,86,46,0.45)',   mobs:{lady:0.22,beetle:0.22,spider:0.24,moth:0.12,fly:0.2}, hpMul:1.6, xpMul:1.4 },
+  { name:'沙漠', rMax:2500, tint:'rgba(228,185,80,0.48)', mobs:{beetle:0.22,hornet:0.24,crab:0.26,scorpion:0.28}, hpMul:2.3, xpMul:1.9 },
+  { name:'熔岩', rMax:Infinity, tint:'rgba(168,40,30,0.54)', mobs:{hornet:0.3,scorpion:0.35,moth:0.35}, hpMul:3.4, xpMul:2.6 },
+];
+function biomeAt(x,y){ const d=Math.hypot(x,y); for(let i=0;i<BIOMES.length;i++) if(d<=BIOMES[i].rMax) return i; return BIOMES.length-1; }
+// 传送门（成对，踩入即传送到搭档位置）。草地↔沙漠、森林↔熔岩
+const PORTALS = [
+  { x:0,    y:620,   pair:1, r:30, color:'#6ad0ff' },  // 草地边缘
+  { x:0,    y:-2080, pair:0, r:30, color:'#e0c068' },  // 沙漠
+  { x:1320, y:0,     pair:3, r:30, color:'#7fd09a' },  // 森林
+  { x:-2720,y:0,     pair:2, r:30, color:'#ff7060' },  // 熔岩
+];
+// 地物装饰（草灌木/树/仙人掌/岩石），确定性生成，稳定布局
+let PROPS = [];
+function buildProps(){
+  PROPS = [];
+  let s = 12345;
+  for (let i=0;i<110;i++){
+    s = (s*1664525 + 1013904223) >>> 0;
+    const r1 = (s%10000)/10000;
+    s = (s*1664525 + 1013904223) >>> 0;
+    const r2 = (s%10000)/10000;
+    const ang = r1*TAU, rad = 240 + r2*(HALF-360);
+    const x = Math.cos(ang)*rad, y = Math.sin(ang)*rad;
+    PROPS.push({ x, y, b:biomeAt(x,y), k:r2 });
+  }
+}
+function pickMobTypeBiome(b){
+  const t=BIOMES[b].mobs, keys=Object.keys(t); let r=Math.random(), acc=0;
+  for(const k of keys){ acc+=t[k]; if(r<=acc) return k; }
+  return keys[0];
+}
+function spawnMob(){
+  if (!G) return;
+  const p = G.player;
+  const a = Math.random()*TAU, d = rand(620, 900);
+  let x = p.x + Math.cos(a)*d, y = p.y + Math.sin(a)*d;
+  x = clamp(x, -HALF+40, HALF-40); y = clamp(y, -HALF+40, HALF-40);
+  const b = biomeAt(x,y);
+  const type = pickMobTypeBiome(b);
+  const def = MOB_TYPES[type];
+  const hpMul = BIOMES[b].hpMul + (mpActive?0.2:0);
+  G.mobs.push({
+    id: mpActive ? (mobIdSeq++) : null,   // 联机下主机分配 id
+    type, x, y, r:def.r, hp:def.hp*hpMul, maxHp:def.hp*hpMul,
+    xp:Math.round(def.xp*BIOMES[b].xpMul), dmg:def.dmg, color:def.color, flash:0, dead:false, lastHitBy:null,
+    wobble:Math.random()*TAU
+  });
+}
+
+// ============================================================
+//  主更新
+// ============================================================
+function findNearestFlower(x,y){
+  // 候选 = 本地玩家(存活) + 远程玩家(存活)
+  let best=null, bd=Infinity;
+  if (G.player.alive){
+    const d = dist2(x,y,G.player.x,G.player.y);
+    if (d<bd){ bd=d; best={x:G.player.x,y:G.player.y}; }
+  }
+  if (mpActive){
+    for (const [,rp] of remotePlayers){
+      if (rp.dead) continue;
+      const d = dist2(x,y,rp.x,rp.y);
+      if (d<bd){ bd=d; best={x:rp.x,y:rp.y}; }
+    }
+  }
+  return best;
+}
+
+function update(dt){
+  const p = G.player;
+
+  // 重生（单机 & 联机通用：死亡 → 倒计时 → 在中心复活）
+  if (!p.alive){
+    if (p.respawn>0){
+      p.respawn -= dt;
+      if (p.respawn<=0){
+        p.alive=true; p.hp=p.maxHp; p.x=0; p.y=0; p.iframes=1.6;
+        p.lastDmgBy=null; p.orbitRCur=22+ORBIT_GAP;
+        burst(0,0,'#ffffff',24);
+        toast('✨ 重生！');
+      }
+    }
+    return;   // 死亡期间不更新移动/战斗
+  }
+
+  // ---- 移动 ----
+  if (p.iframes>0) p.iframes -= dt;
+  // 鼠标 -> 世界坐标目标
+  const tx = cam.x + (mouse.x - CW/2);
+  const ty = cam.y + (mouse.y - CH/2);
+  let mx=0,my=0;
+  const dxm = tx-p.x, dym = ty-p.y, dm = Math.hypot(dxm,dym);
+  if (dm>6){ mx += dxm/dm; my += dym/dm; }
+  // WASD 叠加
+  let wx=0,wy=0;
+  if (keys['w']||keys['arrowup']) wy-=1;
+  if (keys['s']||keys['arrowdown']) wy+=1;
+  if (keys['a']||keys['arrowleft']) wx-=1;
+  if (keys['d']||keys['arrowright']) wx+=1;
+  if (wx||wy){ const wl=Math.hypot(wx,wy); mx+=wx/wl; my+=wy/wl; }
+  const ml = Math.hypot(mx,my);
+  if (ml>0){ mx/=ml; my/=ml; p.x += mx*PLAYER_SPEED*dt; p.y += my*PLAYER_SPEED*dt; }
+  p.x = clamp(p.x, -HALF, HALF); p.y = clamp(p.y, -HALF, HALF);
+
+  // 传送门
+  if (p.portalCd>0) p.portalCd -= dt;
+  else {
+    for (const pt of PORTALS){
+      const rr = p.r + pt.r;
+      if (dist2(p.x,p.y,pt.x,pt.y) <= rr*rr){
+        const dst = PORTALS[pt.pair];
+        burst(pt.x, pt.y, pt.color, 18);
+        p.x = dst.x; p.y = dst.y; p.portalCd = 2.5;
+        p.iframes = Math.max(p.iframes, 1.2);
+        burst(dst.x, dst.y, dst.color, 24); shake = 6;
+        toast('🌀 传送！');
+        break;
+      }
+    }
+  }
+
+  // ---- 花瓣 ----
+  p.spin += 1.7*dt;
+  for (const pe of p.slots){
+    if (!pe) continue;
+    if (pe.dead){ pe.respawn -= dt; if (pe.respawn<=0){ pe.dead=false; pe.hp=pe.maxHp; } continue; }
+    if (pe.hitCd>0) pe.hitCd -= dt;
+    if (pe.recoil>0) pe.recoil -= dt*6;
+    if (pe.heal>0){ p.hp = Math.min(p.maxHp, p.hp + pe.heal*dt); }
+    if (pe.ranged){                       // 虹膜：周期性向最近怪物发射弹幕
+      pe.projT -= dt;
+      if (pe.projT<=0){
+        pe.projT = pe.projRate;
+        let best=null, bd=pe.projRange*pe.projRange;
+        for (const m of G.mobs){ if(m.dead)continue; const d2=dist2(p.x,p.y,m.x,m.y); if(d2<bd){bd=d2;best=m;} }
+        if (best){ const a=Math.atan2(best.y-p.y,best.x-p.x);
+          G.projectiles.push({ x:pe._x||p.x, y:pe._y||p.y, vx:Math.cos(a)*460, vy:Math.sin(a)*460,
+            dmg:pe.projDmg, life:1.4, color:pe.color }); }
+      }
+    }
+  }
+
+  // 活跃花瓣（用于均匀分布角度；已死亡的不占位）。位置存在花瓣对象上。
+  const alive = p.slots.filter(s=>s && !s.dead);
+  // 按住左键 → 花瓣外推（攻击范围更大），松开收回。平滑过渡。
+  p._ext = mouse.down ? 1 : 0;
+  const orbitTarget = p.r + ORBIT_GAP + (mouse.down ? PETAL_EXTEND : 0);
+  p.orbitRCur += (orbitTarget - p.orbitRCur) * 0.2;
+  alive.forEach((pe,i)=>{
+    const ang = p.spin + i*(TAU/alive.length);   // 统一自转，保证均匀间距
+    const recoilK = pe.recoil>0 ? 1 - pe.recoil*0.45 : 1;
+    pe._x = p.x + Math.cos(ang)*p.orbitRCur*recoilK;
+    pe._y = p.y + Math.sin(ang)*p.orbitRCur*recoilK;
+  });
+
+  // ---- 怪物（仅 SP / 主机做 AI 与刷怪）----
+  const simulateMobs = !mpActive || mpIsHost;
+  if (simulateMobs){
+    G.spawnT -= dt;
+    const cap = 12 + p.level*2;
+    if (G.spawnT<=0 && G.mobs.length < cap){
+      G.spawnT = rand(0.9, 1.7);
+      spawnMob();
+    }
+    for (const m of G.mobs){
+      if (m.flash>0) m.flash -= dt;
+      m.wobble += dt*4;
+      if (m.slowT>0) m.slowT -= dt;
+      if (m.poisonT>0){                                       // 毒蒜 DoT
+        m.poisonT -= dt; m.hp -= (m.poisonDps||0)*dt; if (m.flash<0.08) m.flash=0.08;
+        if (m.hp<=0){ if (mpActive) mpHostKillMob(m); else killMobLocal(m); }
+      }
+      if (m.dead) continue;
+      const tgt = findNearestFlower(m.x,m.y);
+      if (tgt){
+        const dx=tgt.x-m.x, dy=tgt.y-m.y, d=Math.hypot(dx,dy)||1;
+        const nx=dx/d, ny=dy/d;
+        const base = MOB_TYPES[m.type].speed;
+        const slowK = m.slowT>0 ? 0.45 : 1;
+        const beh = MOB_TYPES[m.type].beh;
+        let mvx=0, mvy=0;
+        if (beh==='erratic'){            // 苍蝇：追击 + 强抖动
+          mvx = nx + Math.cos(m.wobble*1.7)*0.85; mvy = ny + Math.sin(m.wobble*1.3)*0.85;
+        } else if (beh==='dasher'){      // 蜘蛛：周期冲刺
+          m.dashT = (m.dashT||0) - dt;
+          if (m.dashT<=0){ m.dashing=0.45; m.dashT=rand(1.8,2.6); }
+          const mul = m.dashing>0 ? 2.8 : 1; if (m.dashing>0) m.dashing -= dt;
+          mvx = nx*mul; mvy = ny*mul;
+        } else if (beh==='drift'){       // 萤火虫：缓慢 + 轻飘
+          mvx = nx*0.6 + Math.cos(m.wobble*0.8)*0.35; mvy = ny*0.6 + Math.sin(m.wobble*0.6)*0.35;
+        } else if (beh==='strafe'){      // 螃蟹：靠近 + 侧移
+          mvx = nx + (-ny)*Math.cos(m.wobble)*0.6; mvy = ny + nx*Math.cos(m.wobble)*0.6;
+        } else { mvx = nx; mvy = ny; }   // chase
+        const ml = Math.hypot(mvx,mvy)||1;
+        m.x += mvx/ml*base*slowK*dt; m.y += mvy/ml*base*slowK*dt;
+      }
+      m.x = clamp(m.x,-HALF,HALF); m.y = clamp(m.y,-HALF,HALF);
+    }
+  } else {
+    for (const m of G.mobs){ if (m.flash>0) m.flash -= dt; m.wobble += dt*4; }
+  }
+
+  // ---- 碰撞：花瓣 vs 怪物 ----
+  for (const pe of alive){
+    if (pe.hitCd>0) continue;
+    for (const m of G.mobs){
+      if (m.dead) continue;
+      const rr = (pe.r + m.r);
+      if (dist2(pe._x,pe._y,m.x,m.y) <= rr*rr){
+        let dmg = pe.dmg;
+        if (pe.reflect) dmg += MOB_TYPES[m.type].body * pe.reflect;   // 仙人掌反刺
+        if (simulateMobs){ m.hp -= dmg; if(m.flash<0.12)m.flash=0.12; m.lastHitBy = mpMyId; }
+        else { mpSafeSend({ type:'mob-hit', mobId:m.id, dmg, from:mpMyId }); if(m.flash<0.1)m.flash=0.1; }
+        if (pe.slow) m.slowT = Math.max(m.slowT||0, pe.slow);          // 花粉减速
+        if (pe.poison){ m.poisonDps = pe.poison[0]; m.poisonT = Math.max(m.poisonT||0, pe.poison[1]); } // 毒蒜
+        pe.hp -= MOB_TYPES[m.type].body;
+        pe.hitCd = 0.16; pe.recoil = 1;
+        burst(pe._x, pe._y, pe.ranged ? '#c06bff' : m.color, 5);
+        const dx=m.x-pe._x, dy=m.y-pe._y, d=Math.hypot(dx,dy)||1;
+        m.x += dx/d*6; m.y += dy/d*6;
+        if (pe.hp<=0){ pe.dead=true; pe.respawn=pe.reload; burst(pe._x,pe._y,pe.color,8); }
+        if (simulateMobs && m.hp<=0){ if (mpActive) mpHostKillMob(m); else killMobLocal(m); }
+        break;
+      }
+    }
+  }
+  if (simulateMobs) G.mobs = G.mobs.filter(m=>!m.dead);
+
+  // ---- 弹幕（虹膜等远程花瓣）----
+  for (const pr of G.projectiles){
+    pr.x += pr.vx*dt; pr.y += pr.vy*dt; pr.life -= dt;
+    for (const m of G.mobs){
+      if (m.dead) continue;
+      const rr = m.r + 6;
+      if (dist2(pr.x,pr.y,m.x,m.y) <= rr*rr){
+        applyMobDamage(m, pr.dmg, mpMyId);
+        burst(pr.x, pr.y, pr.color, 6);
+        pr.life = 0; break;
+      }
+    }
+  }
+  G.projectiles = G.projectiles.filter(pr=> pr.life>0 && pr.x>-HALF-200 && pr.x<HALF+200 && pr.y>-HALF-200 && pr.y<HALF+200);
+
+  // ---- 碰撞：怪物 vs 玩家本体 ----
+  for (const m of G.mobs){
+    if (m.dead) continue;
+    const rr = m.r + p.r;
+    if (dist2(m.x,m.y,p.x,p.y) <= rr*rr){
+      damageLocalPlayer(MOB_TYPES[m.type].dmg, null);
+      break;
+    }
+  }
+
+  // ---- 碰撞：花瓣 vs 远程玩家（PvP）----
+  if (mpActive){
+    for (const pe of alive){
+      if (pe.hitCd>0) continue;
+      for (const [rid,rp] of remotePlayers){
+        if (rp.dead) continue;
+        const rr = pe.r + rp.r;
+        if (dist2(pe._x,pe._y,rp.x,rp.y) <= rr*rr){
+          mpSafeSend({ type:'pvp-hit', from:mpMyId, to:rid, dmg:pe.dmg });
+          pe.hitCd = 0.16; pe.recoil = 1;
+          burst(pe._x,pe._y,'#ffffff',5);
+          break;
+        }
+      }
+    }
+  }
+
+  // ---- 掉落（仅单机；联机下经验随击杀直接发放）----
+  if (!mpActive){
+    for (const o of G.drops){
+      o.life -= dt;
+      if (o.vx||o.vy){ o.x+=o.vx*dt; o.y+=o.vy*dt; o.vx*=0.9; o.vy*=0.9; }
+      const d2 = dist2(o.x,o.y,p.x,p.y);
+      if (d2 < ORB_ATTRACT*ORB_ATTRACT){
+        const d=Math.sqrt(d2)||1;
+        o.x += (p.x-o.x)/d*260*dt; o.y += (p.y-o.y)/d*260*dt;
+      }
+    }
+    // 拾取
+    const keep=[];
+    for (const o of G.drops){
+      const rr = p.r + 10;
+      if (o.life>0 && dist2(o.x,o.y,p.x,p.y) > rr*rr){ keep.push(o); continue; }
+      if (o.kind==='xp'){ p.xp += o.value; levelUpCheck(); }
+      else if (o.kind==='petal'){ pickupPetal(o.petal); }
+    }
+    G.drops = keep;
+  }
+
+  // ---- 粒子 / 相机 / 震动 ----
+  for (const pt of particles){ pt.life-=dt; pt.x+=pt.vx*dt; pt.y+=pt.vy*dt; pt.vx*=0.92; pt.vy*=0.92; }
+  for (let i=particles.length-1;i>=0;i--) if (particles[i].life<=0) particles.splice(i,1);
+  cam.x += (p.x-cam.x)*0.12; cam.y += (p.y-cam.y)*0.12;
+  if (shake>0) shake = Math.max(0, shake-dt*30);
+
+  // ---- 远程玩家插值 ----
+  if (mpActive){
+    for (const [,rp] of remotePlayers){
+      rp.x += (rp.tx-rp.x)*0.3; rp.y += (rp.ty-rp.y)*0.3; rp.r += (rp.tr-rp.r)*0.2;
+    }
+    // 同步定时器
+    mpSyncTimer += dt*1000;
+    if (mpSyncTimer >= 50){
+      mpSyncTimer = 0;
+      mpSafeSend({ type:'player-state', id:mpMyId, x:p.x, y:p.y, r:p.r, rot:p.spin,
+                   hp:Math.max(0,Math.round(p.hp)), maxHp:p.maxHp, level:p.level,
+                   dead:!p.alive, ext:p._ext?1:0, name:mpMyName });
+    }
+    if (mpIsHost){
+      mpMobSyncTimer += dt*1000;
+      if (mpMobSyncTimer >= 250){ mpMobSyncTimer = 0; mpSyncMobs(); }
+    }
+    mpPetalsDefTimer += dt*1000;
+    if (mpPetalsDefTimer >= 2000){ mpPetalsDefTimer = 0; mpBroadcastPetalsDef(); }
+  }
+
+  // 定时自动存档（单机）
+  G._saveT = (G._saveT||15) - dt;
+  if (G._saveT<=0){ G._saveT=15; saveGame(); }
+
+  updateHUD();
+}
+
+// 统一怪物伤害结算（弹幕/毒等复用）：主机/单机直接扣，非主机发 mob-hit
+function applyMobDamage(m, dmg, source){
+  const sim = !mpActive || mpIsHost;
+  if (sim){
+    m.hp -= dmg; if (m.flash<0.12) m.flash=0.12; m.lastHitBy = source;
+    if (m.hp<=0){ if (mpActive) mpHostKillMob(m); else killMobLocal(m); }
+  } else {
+    mpSafeSend({ type:'mob-hit', mobId:m.id, dmg, from:source }); if (m.flash<0.1) m.flash=0.1;
+  }
+}
+
+function killMobLocal(m){
+  m.dead = true;
+  burst(m.x,m.y,m.color,16);
+  G.player.score += m.xp; G.player.kills++;
+  // 掉落经验球
+  const orbs = 1 + (Math.random()<0.35?1:0);
+  const each = m.xp/orbs;
+  for (let i=0;i<orbs;i++){
+    const a=Math.random()*TAU, s=rand(40,120);
+    G.drops.push({ kind:'xp', x:m.x, y:m.y, vx:Math.cos(a)*s, vy:Math.sin(a)*s, value:each, life:20, color:'#9be15d' });
+  }
+  // 掉花瓣（约 32% 概率）
+  if (Math.random() < 0.32){
+    const types = Object.keys(PETAL_TYPES);
+    const type = types[Math.floor(Math.random()*types.length)];
+    const r = rollRarity();
+    const a=Math.random()*TAU, s=rand(20,60);
+    G.drops.push({ kind:'petal', x:m.x, y:m.y, vx:Math.cos(a)*s, vy:Math.sin(a)*s, petal:{type,rarity:r}, life:30, color:RARITIES[r].ring, spin:Math.random()*TAU });
+  }
+}
+function pickupPetal(def){
+  discover(def.type, def.rarity);
+  const pe = makePetal(def.type, def.rarity);
+  // 先填空槽位；否则进背包；背包满才替换最弱的已装备花瓣
+  let empty = -1;
+  for (let i=0;i<G.player.slots.length;i++){ if (!G.player.slots[i]){ empty=i; break; } }
+  if (G.player.slots.length < MAX_SLOTS){ G.player.slots.push(pe); }
+  else if (empty>=0){ G.player.slots[empty]=pe; }
+  else if (G.player.backpack.length < 30){ G.player.backpack.push(pe); }
+  else {
+    let wi=0; for (let i=1;i<G.player.slots.length;i++){ if (G.player.slots[i].dmg < G.player.slots[wi].dmg) wi=i; }
+    G.player.slots[wi] = pe;
+  }
+  if (mpActive) mpBroadcastPetalsDef();
+  toast(`🌸 获得 ${RARITIES[def.rarity].name}${PETAL_TYPES[def.type].name}`);
+  if (panelOpen) renderPetalPanel();
+}
+
+// ---- 花瓣图鉴（localStorage 持久化）----
+function loadGallery(){ try { return JSON.parse(localStorage.getItem('florr_gallery_v1')||'[]'); } catch(e){ return []; } }
+function saveGallery(){ try { localStorage.setItem('florr_gallery_v1', JSON.stringify([...gallery])); } catch(e){} }
+function discover(type, rarity){ const k=type+'-'+rarity; if (!gallery.has(k)){ gallery.add(k); saveGallery(); } }
+const gallery = new Set(loadGallery());
+
+// ---- 花瓣管理面板（装配 + 图鉴）----
+let panelOpen=false, panelTab='back';
+let backMode='equip';                 // 'equip' | 'fuse'
+const fuseBench=[null,null,null];     // 合成台 3 个输入位
+function openPanel(tab){
+  panelTab=tab; panelOpen=true;
+  document.getElementById('petalPanel').classList.add('open');
+  document.getElementById('tabBack').classList.toggle('active', tab==='back');
+  document.getElementById('tabGallery').classList.toggle('active', tab==='gallery');
+  document.getElementById('backTab').style.display = tab==='back' ? '' : 'none';
+  document.getElementById('galleryTab').style.display = tab==='gallery' ? '' : 'none';
+  renderPetalPanel();
+}
+function closePanel(){
+  // 关闭前把合成台里的花瓣退回背包，避免丢失
+  if (panelOpen){ for (let i=0;i<3;i++){ if (fuseBench[i]){ G.player.backpack.push(fuseBench[i]); fuseBench[i]=null; } } }
+  panelOpen=false; document.getElementById('petalPanel').classList.remove('open');
+}
+function renderPetalPanel(){ if (!panelOpen) return; if (panelTab==='back') renderBackTab(); else renderGalleryTab(); }
+
+function drawPetalIcon(c, type, rarity){
+  const x=c.getContext('2d'), S=c.width;
+  x.clearRect(0,0,S,S);
+  const def = PETAL_TYPES[type], rar = RARITIES[rarity];
+  const r = S*0.30, cx=S/2, cy=S/2;
+  x.shadowColor = type==='heal' ? '#7ee787' : rar.ring; x.shadowBlur = 7;
+  x.fillStyle = def.color;
+  x.beginPath(); x.arc(cx,cy,r,0,TAU); x.fill();
+  x.shadowBlur = 0;
+  x.lineWidth = S*0.05; x.strokeStyle = rar.ring; x.stroke();
+  x.fillStyle='rgba(255,255,255,0.32)';
+  x.beginPath(); x.ellipse(cx-r*0.3, cy-r*0.3, r*0.3, r*0.2, -0.6, 0, TAU); x.fill();
+}
+
+function renderBackTab(){
+  const p = G.player;
+  document.getElementById('modeEquip').classList.toggle('active', backMode==='equip');
+  document.getElementById('modeFuse').classList.toggle('active', backMode==='fuse');
+  document.getElementById('backLabel').textContent = backMode==='fuse'
+    ? '背包 · 点击花瓣放入合成台（需相同类型+稀有度）'
+    : '背包 · 点击装备到空槽（满则替换最弱）';
+  // 已装备
+  const eg = document.getElementById('equipGrid'); eg.innerHTML='';
+  for (let i=0;i<MAX_SLOTS;i++){
+    const pe = p.slots[i];
+    const cell = document.createElement('div'); cell.className='cell';
+    const cv = document.createElement('canvas'); cv.width=64; cv.height=64;
+    if (pe){
+      drawPetalIcon(cv, pe.type, pe.rarity);
+      cell.addEventListener('click', ()=>unequipToBackpack(i));
+      cell.addEventListener('mousemove', e=> showTip(petalInfoHTML(pe), e.clientX, e.clientY));
+      cell.addEventListener('mouseleave', hideTip);
+    }
+    else { cell.classList.add('locked'); const x=cv.getContext('2d'); x.strokeStyle='rgba(255,255,255,0.13)'; x.lineWidth=2; x.setLineDash([4,4]); x.strokeRect(8,8,48,48); x.setLineDash([]); }
+    cell.appendChild(cv); eg.appendChild(cell);
+  }
+  // 合成台
+  renderFuseBench();
+  // 背包
+  const bg = document.getElementById('backGrid'); bg.innerHTML='';
+  if (!p.backpack.length){
+    bg.innerHTML='<div style="grid-column:1/-1;color:#7a8a78;text-align:center;padding:14px;font-size:13px;">背包是空的 — 击杀怪物收集更多花瓣吧</div>';
+    return;
+  }
+  p.backpack.forEach((pe,idx)=>{
+    const cell=document.createElement('div'); cell.className='cell';
+    const cv=document.createElement('canvas'); cv.width=64; cv.height=64;
+    drawPetalIcon(cv, pe.type, pe.rarity);
+    cell.appendChild(cv);
+    cell.addEventListener('click', ()=> backMode==='fuse' ? addToFuse(idx) : equipFromBackpack(idx));
+    cell.addEventListener('mousemove', e=> showTip(petalInfoHTML(pe), e.clientX, e.clientY));
+    cell.addEventListener('mouseleave', hideTip);
+    bg.appendChild(cell);
+  });
+}
+
+function renderFuseBench(){
+  for (let i=0;i<3;i++){
+    const slot=document.getElementById('fuse'+i);
+    slot.innerHTML=''; slot.className='fuse-slot'+(fuseBench[i]?' full':'');
+    const cv=document.createElement('canvas'); cv.width=54; cv.height=54;
+    if (fuseBench[i]){
+      drawPetalIcon(cv, fuseBench[i].type, fuseBench[i].rarity);
+      slot.addEventListener('click', ()=>removeFromFuse(i));
+      slot.addEventListener('mousemove', e=> showTip(petalInfoHTML(fuseBench[i]), e.clientX, e.clientY));
+      slot.addEventListener('mouseleave', hideTip);
+    }
+    else { const x=cv.getContext('2d'); x.fillStyle='rgba(255,255,255,0.04)'; x.fillRect(4,4,46,46); }
+    slot.appendChild(cv);
+  }
+  const filled = fuseBench.filter(x=>x);
+  const resSlot=document.getElementById('fuseResult'); resSlot.innerHTML='';
+  const rCv=document.createElement('canvas'); rCv.width=54; rCv.height=54;
+  const btn=document.getElementById('fuseBtn');
+  const canFuse = filled.length===3 && filled.every(x=>x.type===filled[0].type && x.rarity===filled[0].rarity) && filled[0].rarity < RARITIES.length-1;
+  if (canFuse){
+    drawPetalIcon(rCv, filled[0].type, filled[0].rarity+1); btn.disabled=false;
+    resSlot.addEventListener('mousemove', e=> showTip(petalInfoHTML(makePetal(filled[0].type, filled[0].rarity+1)), e.clientX, e.clientY));
+    resSlot.addEventListener('mouseleave', hideTip);
+  }
+  else { const x=rCv.getContext('2d'); x.fillStyle='rgba(255,255,255,0.05)'; x.fillRect(4,4,46,46); x.fillStyle='rgba(255,255,255,0.18)'; x.font='bold 24px sans-serif'; x.textAlign='center'; x.textBaseline='middle'; x.fillText('?',27,28); btn.disabled=true; }
+  resSlot.appendChild(rCv);
+}
+
+function addToFuse(idx){
+  const pe = G.player.backpack[idx]; if(!pe) return;
+  let slot=-1; for(let i=0;i<3;i++){ if(!fuseBench[i]){slot=i;break;} }
+  if (slot<0){ toast('合成台已满'); return; }
+  const ref = fuseBench.find(x=>x);
+  if (ref && (ref.type!==pe.type || ref.rarity!==pe.rarity)){ toast('需相同类型+稀有度的花瓣'); return; }
+  G.player.backpack.splice(idx,1);
+  fuseBench[slot]=pe;
+  renderPetalPanel();
+}
+function removeFromFuse(i){
+  const pe = fuseBench[i]; if(!pe) return;
+  fuseBench[i]=null; G.player.backpack.push(pe);
+  renderPetalPanel();
+}
+function doFuse(){
+  const filled = fuseBench.filter(x=>x);
+  if (filled.length!==3) return;
+  const t=filled[0].type, r=filled[0].rarity;
+  if (!filled.every(x=>x.type===t && x.rarity===r)){ toast('需 3 个相同花瓣'); return; }
+  if (r >= RARITIES.length-1){ toast('已达最高稀有度'); return; }
+  for(let i=0;i<3;i++) fuseBench[i]=null;
+  const result = makePetal(t, r+1);
+  G.player.backpack.push(result);
+  discover(t, r+1);
+  toast('⚗ 合成成功！获得 '+RARITIES[r+1].name+PETAL_TYPES[t].name);
+  if (mpActive) mpBroadcastPetalsDef();
+  saveGame();
+  renderPetalPanel();
+}
+
+function renderGalleryTab(){
+  const types = Object.keys(PETAL_TYPES);
+  const total = types.length * RARITIES.length;
+  document.getElementById('galleryCount').textContent = `已收集 ${gallery.size} / ${total}`;
+  const gg = document.getElementById('galleryGrid'); gg.innerHTML='';
+  types.forEach(type=>{
+    RARITIES.forEach((rar,ri)=>{
+      const cell=document.createElement('div'); cell.className='cell';
+      const cv=document.createElement('canvas'); cv.width=64; cv.height=64;
+      const got = gallery.has(type+'-'+ri);
+      if (got){
+        drawPetalIcon(cv, type, ri);
+        const tag=document.createElement('div'); tag.className='tag'; tag.textContent=rar.name; cell.appendChild(tag);
+        cell.addEventListener('mousemove', e=> showTip(petalInfoHTML(makePetal(type,ri)), e.clientX, e.clientY));
+        cell.addEventListener('mouseleave', hideTip);
+      } else {
+        cell.classList.add('locked');
+        const x=cv.getContext('2d');
+        x.fillStyle='rgba(255,255,255,0.07)'; x.beginPath(); x.arc(32,32,16,0,TAU); x.fill();
+        x.fillStyle='rgba(255,255,255,0.18)'; x.font='bold 22px sans-serif'; x.textAlign='center'; x.textBaseline='middle'; x.fillText('?',32,33);
+      }
+      cell.appendChild(cv); gg.appendChild(cell);
+    });
+  });
+}
+
+function equipFromBackpack(idx){
+  const pe = G.player.backpack.splice(idx,1)[0];
+  let empty=-1; for (let i=0;i<G.player.slots.length;i++){ if(!G.player.slots[i]){ empty=i; break; } }
+  if (G.player.slots.length < MAX_SLOTS){ G.player.slots.push(pe); }
+  else if (empty>=0){ G.player.slots[empty]=pe; }
+  else { let wi=0; for(let i=1;i<G.player.slots.length;i++) if(G.player.slots[i].dmg<G.player.slots[wi].dmg) wi=i; G.player.backpack.push(G.player.slots[wi]); G.player.slots[wi]=pe; }
+  if (mpActive) mpBroadcastPetalsDef();
+  renderPetalPanel();
+}
+function unequipToBackpack(idx){
+  const pe = G.player.slots[idx]; if(!pe) return;
+  if (G.player.backpack.length>=30){ toast('背包已满'); return; }
+  G.player.slots[idx]=null; G.player.backpack.push(pe);
+  if (mpActive) mpBroadcastPetalsDef();
+  renderPetalPanel();
+}
+
+// ============================================================
+//  渲染
+// ============================================================
+function render(){
+  // 背景（世界外的虚空）
+  ctx.fillStyle = '#1d2b1d';
+  ctx.fillRect(0,0,CW,CH);
+
+  ctx.save();
+  let sx=0, sy=0;
+  if (shake>0){ sx = rand(-shake,shake); sy = rand(-shake,shake); }
+  ctx.translate(CW/2 - cam.x + sx, CH/2 - cam.y + sy);
+
+  // 世界边界 + 网格
+  drawWorld();
+
+  // 掉落
+  if (!mpActive){
+    for (const o of G.drops) drawDrop(o);
+  }
+
+  // 传送门
+  for (const pt of PORTALS) drawPortal(pt);
+
+  // 怪物
+  for (const m of G.mobs) drawMob(m);
+
+  // 弹幕
+  for (const pr of G.projectiles){
+    ctx.fillStyle = pr.color;
+    ctx.shadowColor = pr.color; ctx.shadowBlur = 10;
+    ctx.beginPath(); ctx.arc(pr.x, pr.y, 6, 0, TAU); ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  // 远程玩家
+  if (mpActive) for (const [,rp] of remotePlayers) drawFlower(rp, false);
+
+  // 本地玩家 + 花瓣
+  drawFlower(G.player, true);
+
+  // 粒子
+  for (const pt of particles){
+    ctx.globalAlpha = clamp(pt.life/pt.max,0,1);
+    ctx.fillStyle = pt.color;
+    ctx.beginPath(); ctx.arc(pt.x,pt.y,pt.size,0,TAU); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // 重生中遮罩
+  if (G && !G.player.alive){
+    ctx.save();
+    ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(0,0,CW,CH);
+    ctx.textAlign='center';
+    ctx.fillStyle='#ff8b7a'; ctx.font='bold 44px sans-serif';
+    ctx.fillText('你阵亡了', CW/2, CH/2 - 14);
+    ctx.fillStyle='#9be15d'; ctx.font='22px sans-serif';
+    ctx.fillText(Math.max(0,Math.ceil(G.player.respawn)) + ' 秒后在中心重生', CW/2, CH/2 + 26);
+    ctx.restore();
+  }
+
+  drawMinimap();
+}
+
+// 棋盘格草地底纹（florr 风格），只构建一次
+let bgPattern = undefined; // undefined=未构建, null=失败
+function getBgPattern(){
+  if (bgPattern !== undefined) return bgPattern;
+  try {
+    const c = document.createElement('canvas'); c.width=140; c.height=140;
+    const x = c.getContext('2d');
+    x.fillStyle='#b6dca6'; x.fillRect(0,0,140,140);
+    x.fillStyle='#a7cf94'; x.fillRect(0,0,70,70); x.fillRect(70,70,70,70);
+    bgPattern = ctx.createPattern(c,'repeat') || null;
+  } catch(e){ bgPattern = null; }
+  return bgPattern;
+}
+
+function drawWorld(){
+  // 棋盘格草地底
+  const pat = getBgPattern();
+  ctx.fillStyle = pat ? pat : '#b6dca6';
+  ctx.fillRect(-HALF,-HALF,WORLD,WORLD);
+  // 生物群系同心圆（从外到内叠加，中心区会被内圈覆盖）
+  for (let i=BIOMES.length-1; i>=0; i--){
+    const r = BIOMES[i].rMax===Infinity ? HALF : BIOMES[i].rMax;
+    ctx.fillStyle = BIOMES[i].tint;
+    ctx.beginPath(); ctx.arc(0,0,r,0,TAU); ctx.fill();
+  }
+  // 地物装饰
+  for (const pr of PROPS) drawProp(pr);
+  // 区域边界圈
+  ctx.strokeStyle='rgba(255,255,255,0.18)'; ctx.lineWidth=3;
+  for (let i=0;i<BIOMES.length-1;i++){
+    ctx.beginPath(); ctx.arc(0,0,BIOMES[i].rMax,0,TAU); ctx.stroke();
+  }
+  // 世界边界：红底 + 白色警戒斜纹
+  ctx.save();
+  ctx.strokeStyle='rgba(220,70,70,0.9)'; ctx.lineWidth=12;
+  ctx.strokeRect(-HALF,-HALF,WORLD,WORLD);
+  ctx.strokeStyle='rgba(255,255,255,0.55)'; ctx.lineWidth=4;
+  ctx.setLineDash([20,18]); ctx.strokeRect(-HALF,-HALF,WORLD,WORLD);
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawProp(pr){
+  ctx.save(); ctx.translate(pr.x, pr.y);
+  ctx.fillStyle='rgba(0,0,0,0.18)'; ctx.beginPath(); ctx.ellipse(0,8,15,6,0,0,TAU); ctx.fill();
+  if (pr.b===1){                                   // 森林：树
+    ctx.fillStyle='#6b4a2a'; ctx.fillRect(-3,-2,6,18);
+    ctx.fillStyle='#3f8f4e'; ctx.beginPath(); ctx.arc(0,-12,15,0,TAU); ctx.fill();
+    ctx.fillStyle='#357a42'; ctx.beginPath(); ctx.arc(-6,-7,9,0,TAU); ctx.arc(7,-10,10,0,TAU); ctx.fill();
+  } else if (pr.b===2){                            // 沙漠：仙人掌
+    ctx.fillStyle='#4f8f4a'; ctx.fillRect(-5,-20,10,26); ctx.fillRect(-13,-12,7,7); ctx.fillRect(6,-16,7,7);
+    ctx.fillStyle='rgba(255,255,255,0.12)'; ctx.fillRect(-4,-19,2,24);
+  } else if (pr.b===3){                            // 熔岩：岩石
+    ctx.fillStyle='rgba(255,110,70,0.28)'; ctx.beginPath(); ctx.arc(0,0,20,0,TAU); ctx.fill();
+    ctx.fillStyle='#6a5a52'; ctx.beginPath(); ctx.arc(0,0,13,0,TAU); ctx.fill();
+    ctx.fillStyle='#52463f'; ctx.beginPath(); ctx.arc(4,-3,5,0,TAU); ctx.fill();
+  } else {                                         // 草地：花丛
+    ctx.fillStyle='#2f7d3a'; ctx.beginPath(); ctx.arc(0,0,11,0,TAU); ctx.fill();
+    const fc = ['#ff6b6b','#ffd34d','#ff8de0','#9be15d'][(Math.floor(pr.k*4))%4];
+    ctx.fillStyle=fc;
+    for (let a=0;a<5;a++){ const ang=a/5*TAU; ctx.beginPath(); ctx.arc(Math.cos(ang)*5,Math.sin(ang)*5,3,0,TAU); ctx.fill(); }
+  }
+  ctx.restore();
+}
+
+function drawPortal(pt){
+  const t = (typeof performance!=='undefined'?performance.now():0)*0.003;
+  ctx.save(); ctx.translate(pt.x, pt.y);
+  ctx.shadowColor = pt.color; ctx.shadowBlur = 18;
+  ctx.strokeStyle = pt.color; ctx.lineWidth = 4;
+  for (let k=0;k<3;k++){
+    const off = t + k*0.9;
+    ctx.beginPath(); ctx.arc(0,0, pt.r - k*4, off, off+Math.PI*1.4); ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+  ctx.fillStyle='rgba(255,255,255,0.10)'; ctx.beginPath(); ctx.arc(0,0,pt.r*0.5,0,TAU); ctx.fill();
+  ctx.restore();
+}
+
+function drawDrop(o){
+  ctx.globalAlpha = clamp(o.life/2,0.3,1);
+  if (o.kind === 'petal'){
+    const def = PETAL_TYPES[o.petal.type], rar = RARITIES[o.petal.rarity];
+    const t = (typeof performance!=='undefined'?performance.now():0) * 0.006;
+    const pulse = 1 + Math.sin(t + o.x*0.05 + o.y*0.05)*0.12;
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.rotate(o.spin = (o.spin||0) + 0.04);
+    ctx.shadowColor = rar.ring; ctx.shadowBlur = 14;
+    ctx.fillStyle = def.color;
+    ctx.beginPath(); ctx.ellipse(0, 0, 14*pulse, 9*pulse, 0, 0, TAU); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 2.5; ctx.strokeStyle = rar.ring; ctx.stroke();
+    ctx.restore();
+  } else {
+    // 经验球
+    ctx.fillStyle = o.color;
+    ctx.shadowColor = o.color; ctx.shadowBlur = 8;
+    ctx.beginPath(); ctx.arc(o.x, o.y, 6, 0, TAU); ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+  ctx.globalAlpha = 1;
+}
+
+function shade(hex, amt){
+  let c = String(hex).replace('#',''); if(c.length===3) c=c.split('').map(x=>x+x).join('');
+  let r=parseInt(c.substr(0,2),16)||0, g=parseInt(c.substr(2,2),16)||0, b=parseInt(c.substr(4,2),16)||0;
+  r=clamp(r+amt,0,255); g=clamp(g+amt,0,255); b=clamp(b+amt,0,255);
+  return 'rgb('+r+','+g+','+b+')';
+}
+
+function drawMob(m){
+  const def = MOB_TYPES[m.type] || {color:'#888', name:'?'};
+  const ang = Math.atan2(G.player.y - m.y, G.player.x - m.x);   // 朝向玩家
+  ctx.save();
+  ctx.translate(m.x, m.y);
+  // 地面阴影
+  ctx.fillStyle='rgba(0,0,0,0.18)';
+  ctx.beginPath(); ctx.ellipse(0, m.r*0.8, m.r*0.95, m.r*0.42, 0, 0, TAU); ctx.fill();
+  ctx.rotate(ang + Math.PI/2); // 让"前方"朝上绘制（头在 -y）
+  const flash = m.flash>0;
+  if (m.type==='ant') drawAnt(m, def, flash);
+  else if (m.type==='lady') drawLadybug(m, def, flash);
+  else if (m.type==='beetle') drawBeetle(m, def, flash);
+  else if (m.type==='hornet') drawHornet(m, def, flash);
+  else if (m.type==='fly') drawFly(m, def, flash);
+  else if (m.type==='spider') drawSpider(m, def, flash);
+  else if (m.type==='firefly') drawFirefly(m, def, flash);
+  else if (m.type==='crab') drawCrab(m, def, flash);
+  else if (m.type==='moth') drawMoth(m, def, flash);
+  else if (m.type==='scorpion') drawScorpion(m, def, flash);
+  else { ctx.fillStyle=flash?'#fff':def.color; ctx.beginPath(); ctx.arc(0,0,m.r,0,TAU); ctx.fill(); }
+  ctx.restore();
+  // 血条
+  if (m.hp < m.maxHp){
+    const w=m.r*2.2, hpf=clamp(m.hp/m.maxHp,0,1);
+    ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(m.x-w/2, m.y-m.r-12, w, 5);
+    ctx.fillStyle = hpf>0.5?'#5fd36b':hpf>0.25?'#ffcf4d':'#e8463a';
+    ctx.fillRect(m.x-w/2, m.y-m.r-12, w*hpf, 5);
+  }
+}
+
+// 以下怪物均"头朝上"绘制（已平移+旋转到怪物位置/朝向）
+function seg(x,y,rx,ry){ ctx.beginPath(); ctx.ellipse(x,y,rx,ry,0,0,TAU); ctx.fill(); ctx.stroke(); }
+function drawAnt(m, def, flash){
+  const R=m.r, c=flash?'#fff':def.color;
+  ctx.strokeStyle='#5a1a1a'; ctx.lineWidth=2; ctx.lineCap='round';
+  ctx.beginPath();
+  for(const sx of [-1,1]) for(const yy of [-R*0.1,R*0.15,R*0.4]){
+    ctx.moveTo(sx*R*0.3, yy); ctx.lineTo(sx*R*1.4, yy-R*0.45);
+    ctx.moveTo(sx*R*0.3, yy); ctx.lineTo(sx*R*1.4, yy+R*0.45);
+  }
+  ctx.stroke();
+  ctx.fillStyle=c; ctx.strokeStyle='#6e2020'; ctx.lineWidth=2;
+  seg(0, R*0.55, R*0.95, R*0.82);   // 腹部
+  seg(0, -R*0.12, R*0.42, R*0.36);  // 胸部
+  seg(0, -R*0.72, R*0.5, R*0.48);   // 头部
+  ctx.beginPath(); ctx.moveTo(-R*0.2,-R*0.95); ctx.lineTo(-R*0.55,-R*1.5);
+  ctx.moveTo(R*0.2,-R*0.95); ctx.lineTo(R*0.55,-R*1.5); ctx.stroke();
+  ctx.fillStyle='#1a1a1a';
+  ctx.beginPath(); ctx.arc(-R*0.2,-R*0.8,R*0.1,0,TAU); ctx.arc(R*0.2,-R*0.8,R*0.1,0,TAU); ctx.fill();
+}
+function drawLadybug(m, def, flash){
+  const R=m.r, c=flash?'#fff':def.color;
+  ctx.strokeStyle='#2a1410'; ctx.lineWidth=2; ctx.lineCap='round';
+  ctx.beginPath();
+  for(const yy of [-R*0.25,R*0.3]){
+    ctx.moveTo(-R*0.7,yy); ctx.lineTo(-R*1.35,yy-R*0.25);
+    ctx.moveTo(R*0.7,yy); ctx.lineTo(R*1.35,yy-R*0.25);
+  }
+  ctx.stroke();
+  ctx.fillStyle='#232020'; ctx.beginPath(); ctx.ellipse(0,-R*0.62,R*0.55,R*0.46,0,0,TAU); ctx.fill(); // 头
+  ctx.fillStyle=c; ctx.strokeStyle='#5a1010'; ctx.lineWidth=2.5;
+  ctx.beginPath(); ctx.ellipse(0,R*0.15,R*0.96,R*0.86,0,0,TAU); ctx.fill(); ctx.stroke();
+  ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(0,-R*0.45); ctx.lineTo(0,R*0.95); ctx.stroke(); // 中缝
+  ctx.fillStyle='#1a1a1a';
+  for(const [sx,sy] of [[-0.45,0.0],[0.45,0.0],[-0.38,0.55],[0.38,0.55]]){ ctx.beginPath(); ctx.arc(sx*R,sy*R,R*0.14,0,TAU); ctx.fill(); }
+  ctx.fillStyle='rgba(255,255,255,0.28)'; ctx.beginPath(); ctx.ellipse(-R*0.34,-R*0.08,R*0.3,R*0.18,-0.5,0,TAU); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-R*0.22,-R*0.62,R*0.12,0,TAU); ctx.arc(R*0.22,-R*0.62,R*0.12,0,TAU); ctx.fill();
+  ctx.fillStyle='#111'; ctx.beginPath(); ctx.arc(-R*0.2,-R*0.6,R*0.06,0,TAU); ctx.arc(R*0.2,-R*0.6,R*0.06,0,TAU); ctx.fill();
+}
+function drawBeetle(m, def, flash){
+  const R=m.r, c=flash?'#fff':def.color;
+  ctx.strokeStyle='#15100a'; ctx.lineWidth=2.5; ctx.lineCap='round';
+  ctx.beginPath();
+  for(const yy of [-R*0.25,R*0.25]){
+    ctx.moveTo(-R*0.8,yy); ctx.lineTo(-R*1.4,yy-R*0.35); ctx.moveTo(-R*0.8,yy); ctx.lineTo(-R*1.32,yy+R*0.4);
+    ctx.moveTo(R*0.8,yy); ctx.lineTo(R*1.4,yy-R*0.35);  ctx.moveTo(R*0.8,yy); ctx.lineTo(R*1.32,yy+R*0.4);
+  }
+  ctx.stroke();
+  ctx.fillStyle=c; ctx.strokeStyle='#1d130c'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.ellipse(0,0,R*0.96,R*0.92,0,0,TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#1d130c'; ctx.beginPath(); ctx.ellipse(0,-R*0.72,R*0.52,R*0.42,0,0,TAU); ctx.fill(); // 头
+  ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(0,-R*0.2); ctx.lineTo(0,R*0.88); ctx.stroke(); // 翅缝
+  ctx.fillStyle='rgba(255,255,255,0.16)'; ctx.beginPath(); ctx.ellipse(-R*0.3,-R*0.28,R*0.32,R*0.2,-0.5,0,TAU); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-R*0.2,-R*0.74,R*0.1,0,TAU); ctx.arc(R*0.2,-R*0.74,R*0.1,0,TAU); ctx.fill();
+  ctx.fillStyle='#111'; ctx.beginPath(); ctx.arc(-R*0.18,-R*0.72,R*0.05,0,TAU); ctx.arc(R*0.18,-R*0.72,R*0.05,0,TAU); ctx.fill();
+}
+function drawHornet(m, def, flash){
+  const R=m.r, c=flash?'#fff':def.color;
+  ctx.fillStyle='rgba(225,238,255,0.6)'; ctx.strokeStyle='rgba(170,195,220,0.8)'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.ellipse(-R*0.5,-R*0.05,R*0.6,R*0.32,-0.5,0,TAU); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(R*0.5,-R*0.05,R*0.6,R*0.32,0.5,0,TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle=c; ctx.strokeStyle='#3a2a05'; ctx.lineWidth=2.5;
+  ctx.beginPath(); ctx.ellipse(0,0,R*0.6,R*1.02,0,0,TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#262626';
+  for(const yy of [-0.28,0.18,0.6]){ ctx.beginPath(); ctx.ellipse(0,yy*R,R*0.58,R*0.12,0,0,TAU); ctx.fill(); }
+  ctx.fillStyle='#3a2a05'; ctx.beginPath(); ctx.arc(0,-R*0.85,R*0.4,0,TAU); ctx.fill();
+  ctx.fillStyle='#222'; ctx.beginPath(); ctx.moveTo(0,R*0.92); ctx.lineTo(-R*0.13,R*1.32); ctx.lineTo(R*0.13,R*1.32); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-R*0.16,-R*0.88,R*0.11,0,TAU); ctx.arc(R*0.16,-R*0.88,R*0.11,0,TAU); ctx.fill();
+  ctx.fillStyle='#111'; ctx.beginPath(); ctx.arc(-R*0.15,-R*0.86,R*0.06,0,TAU); ctx.arc(R*0.15,-R*0.86,R*0.06,0,TAU); ctx.fill();
+}
+// —— 新增怪物（均"头朝上"绘制）——
+function drawFly(m, def, flash){
+  const R=m.r, c=flash?'#fff':def.color;
+  // 翅膀（高频振动）
+  const wf = Math.abs(Math.sin(m.wobble*8))*0.5+0.5;
+  ctx.fillStyle='rgba(235,240,255,0.5)'; ctx.strokeStyle='rgba(180,190,210,0.6)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.ellipse(-R*0.7,-R*0.2,R*0.7*wf,R*0.45,-0.4,0,TAU); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(R*0.7,-R*0.2,R*0.7*wf,R*0.45,0.4,0,TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle=c; ctx.strokeStyle='#4a4f55'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.ellipse(0,0,R*0.6,R*0.95,0,0,TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#3a3f45'; ctx.beginPath(); ctx.arc(0,-R*0.8,R*0.42,0,TAU); ctx.fill();
+  ctx.fillStyle='#b32a2a'; ctx.beginPath(); ctx.arc(0,-R*0.55,R*0.2,0,TAU); ctx.fill(); // 红眼
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-R*0.18,-R*0.82,R*0.08,0,TAU); ctx.arc(R*0.18,-R*0.82,R*0.08,0,TAU); ctx.fill();
+}
+function drawSpider(m, def, flash){
+  const R=m.r, c=flash?'#fff':def.color;
+  ctx.strokeStyle='#2a2140'; ctx.lineWidth=2.2; ctx.lineCap='round';
+  ctx.beginPath();
+  for(let s=-1;s<=1;s+=2){ for(const ang of [-0.9,-0.4,0.2,0.8]){
+    const a=ang + (s<0?Math.PI:0);
+    ctx.moveTo(s*R*0.3, 0); ctx.lineTo(s*R*0.3+Math.cos(a)*R*1.3, Math.sin(a)*R*1.1);
+  }}
+  ctx.stroke();
+  ctx.fillStyle=c; ctx.strokeStyle='#241a38'; ctx.lineWidth=2.5;
+  ctx.beginPath(); ctx.ellipse(0,R*0.2,R*0.95,R*0.8,0,0,TAU); ctx.fill(); ctx.stroke(); // 腹
+  ctx.beginPath(); ctx.arc(0,-R*0.6,R*0.5,0,TAU); ctx.fill(); ctx.stroke();             // 头胸
+  ctx.fillStyle='#1a1230';
+  ctx.beginPath(); ctx.moveTo(-R*0.6,R*0.4); ctx.lineTo(0,R*0.1); ctx.lineTo(R*0.6,R*0.4); ctx.closePath(); ctx.fill(); // 蛛纹
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-R*0.2,-R*0.65,R*0.1,0,TAU); ctx.arc(R*0.2,-R*0.65,R*0.1,0,TAU); ctx.fill();
+  ctx.fillStyle='#111'; ctx.beginPath(); ctx.arc(-R*0.2,-R*0.62,R*0.05,0,TAU); ctx.arc(R*0.2,-R*0.62,R*0.05,0,TAU); ctx.fill();
+}
+function drawFirefly(m, def, flash){
+  const R=m.r, c=flash?'#fff':def.color;
+  const glow = 0.5 + Math.sin(m.wobble*2)*0.3;
+  ctx.fillStyle=`rgba(120,255,200,${0.18+glow*0.18})`;
+  ctx.beginPath(); ctx.arc(0,0,R*1.7,0,TAU); ctx.fill();         // 光晕
+  ctx.fillStyle='rgba(225,238,255,0.55)'; ctx.beginPath(); ctx.ellipse(-R*0.5,-R*0.1,R*0.6,R*0.3,-0.5,0,TAU); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(R*0.5,-R*0.1,R*0.6,R*0.3,0.5,0,TAU); ctx.fill();
+  ctx.fillStyle=c; ctx.strokeStyle='#2a6b58'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.ellipse(0,0,R*0.6,R*1.0,0,0,TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle=`rgba(180,255,220,${0.5+glow*0.4})`;
+  ctx.beginPath(); ctx.ellipse(0,R*0.35,R*0.4,R*0.45,0,0,TAU); ctx.fill();  // 发光腹
+  ctx.fillStyle='#2a4a40'; ctx.beginPath(); ctx.arc(0,-R*0.7,R*0.38,0,TAU); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-R*0.15,-R*0.72,R*0.09,0,TAU); ctx.arc(R*0.15,-R*0.72,R*0.09,0,TAU); ctx.fill();
+}
+function drawCrab(m, def, flash){
+  const R=m.r, c=flash?'#fff':def.color;
+  ctx.strokeStyle='#8a3a1a'; ctx.lineWidth=2.5; ctx.lineCap='round';
+  ctx.beginPath(); // 腿
+  for(const yy of [-0.2,0.2,0.5]){
+    ctx.moveTo(-R*0.7,yy*R); ctx.lineTo(-R*1.3,(yy-0.25)*R);
+    ctx.moveTo(R*0.7,yy*R); ctx.lineTo(R*1.3,(yy-0.25)*R);
+  }
+  ctx.stroke();
+  ctx.fillStyle=c; ctx.strokeStyle='#7a3215'; ctx.lineWidth=2.5;
+  ctx.beginPath(); ctx.ellipse(0,0,R*1.0,R*0.78,0,0,TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#7a3215'; // 双钳
+  ctx.beginPath(); ctx.ellipse(-R*0.95,-R*0.5,R*0.32,R*0.22,0.5,0,TAU); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(R*0.95,-R*0.5,R*0.32,R*0.22,-0.5,0,TAU); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.2)'; ctx.beginPath(); ctx.ellipse(-R*0.3,-R*0.25,R*0.3,R*0.18,-0.5,0,TAU); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.fillRect(-R*0.2,-R*1.0,R*0.12,R*0.18); ctx.fillRect(R*0.08,-R*1.0,R*0.12,R*0.18); // 眼柄
+  ctx.fillStyle='#111'; ctx.beginPath(); ctx.arc(-R*0.14,-R*0.95,R*0.08,0,TAU); ctx.arc(R*0.14,-R*0.95,R*0.08,0,TAU); ctx.fill();
+}
+function drawMoth(m, def, flash){
+  const R=m.r, c=flash?'#fff':def.color;
+  ctx.fillStyle='rgba(200,180,230,0.6)'; ctx.strokeStyle='rgba(150,130,180,0.7)'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.ellipse(-R*0.6,0,R*0.7,R*0.85,-0.2,0,TAU); ctx.fill(); ctx.stroke(); // 翅
+  ctx.beginPath(); ctx.ellipse(R*0.6,0,R*0.7,R*0.85,0.2,0,TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle=c; ctx.strokeStyle='#6b5680'; ctx.lineWidth=2.5;
+  ctx.beginPath(); ctx.ellipse(0,0,R*0.42,R*1.05,0,0,TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#5b4670';
+  ctx.beginPath(); ctx.arc(-R*0.6,-R*0.1,R*0.18,0,TAU); ctx.fill(); // 翅斑
+  ctx.beginPath(); ctx.arc(R*0.6,-R*0.1,R*0.18,0,TAU); ctx.fill();
+  ctx.fillStyle='#4a3860'; ctx.beginPath(); ctx.arc(0,-R*0.9,R*0.32,0,TAU); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-R*0.14,-R*0.88,R*0.09,0,TAU); ctx.arc(R*0.14,-R*0.88,R*0.09,0,TAU); ctx.fill();
+  ctx.fillStyle='#111'; ctx.beginPath(); ctx.arc(-R*0.13,-R*0.86,R*0.05,0,TAU); ctx.arc(R*0.13,-R*0.86,R*0.05,0,TAU); ctx.fill();
+}
+function drawScorpion(m, def, flash){
+  const R=m.r, c=flash?'#fff':def.color;
+  ctx.strokeStyle='#5e4a14'; ctx.lineWidth=2.2; ctx.lineCap='round';
+  ctx.beginPath(); // 腿
+  for(const yy of [-0.1,0.2,0.5]){
+    ctx.moveTo(-R*0.5,yy*R); ctx.lineTo(-R*1.2,(yy-0.25)*R);
+    ctx.moveTo(R*0.5,yy*R); ctx.lineTo(R*1.2,(yy-0.25)*R);
+  }
+  ctx.stroke();
+  ctx.fillStyle=c; ctx.strokeStyle='#6e5618'; ctx.lineWidth=2.5;
+  ctx.beginPath(); ctx.ellipse(0,R*0.15,R*0.85,R*0.6,0,0,TAU); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(0,-R*0.35,R*0.5,R*0.45,0,0,TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#5e4a14'; // 尾巴卷曲
+  ctx.beginPath(); ctx.moveTo(R*0.4,R*0.4); ctx.quadraticCurveTo(R*1.3,R*0.2,R*1.1,-R*0.6); ctx.lineWidth=6; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(R*1.1,-R*0.6); ctx.lineTo(R*0.9,-R*0.95); ctx.lineTo(R*1.3,-R*0.75); ctx.closePath(); ctx.fillStyle='#3a2c08'; ctx.fill(); // 毒刺
+  ctx.fillStyle='#3a2c08'; ctx.beginPath(); ctx.ellipse(-R*0.7,-R*0.4,R*0.3,R*0.18,0.5,0,TAU); ctx.fill(); // 钳
+  ctx.beginPath(); ctx.ellipse(-R*0.95,-R*0.2,R*0.18,R*0.12,0.8,0,TAU); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-R*0.15,-R*0.4,R*0.09,0,TAU); ctx.arc(R*0.15,-R*0.4,R*0.09,0,TAU); ctx.fill();
+  ctx.fillStyle='#111'; ctx.beginPath(); ctx.arc(-R*0.14,-R*0.38,R*0.05,0,TAU); ctx.arc(R*0.14,-R*0.38,R*0.05,0,TAU); ctx.fill();
+}
+
+function drawFlower(f, isLocal){
+  const p = f;
+  const bodyR = p.r;
+  const baseColor = isLocal ? '#46c468' : (f.color||'#46c468');
+  const leafColor = isLocal ? '#2f9a4d' : shade(f.color||'#46c468', -45);
+
+  // ---- 环绕的武器花瓣（先画，位于身体下层）----
+  const petals = isLocal ? p.slots.filter(s=>s && !s.dead) : (f.petals||[]);
+  if (isLocal){
+    // orbitRCur 已在 update 中平滑更新
+  } else {
+    // 远程：按其外推状态平滑插值
+    const tgt = (f.r||22) + ORBIT_GAP + (f.ext ? PETAL_EXTEND : 0);
+    f.orbitRCur = (f.orbitRCur||tgt) + (tgt - (f.orbitRCur||tgt))*0.2;
+  }
+  const orbitR = isLocal ? p.orbitRCur : f.orbitRCur;
+  const spin = isLocal ? p.spin : (f.rot||0);
+  petals.forEach((pe,i)=>{
+    const def = PETAL_TYPES[pe.type] || PETAL_TYPES.basic;
+    const rar = RARITIES[pe.rarity||0];
+    const ang = spin + i*(TAU/Math.max(1,petals.length));
+    const recoilK = (isLocal && pe.recoil>0) ? 1-pe.recoil*0.45 : 1;
+    const px = p.x + Math.cos(ang)*orbitR*recoilK;
+    const py = p.y + Math.sin(ang)*orbitR*recoilK;
+    const pr = def.r;
+    // 阴影
+    ctx.fillStyle='rgba(0,0,0,0.18)';
+    ctx.beginPath(); ctx.ellipse(px, py+pr*0.55, pr*0.95, pr*0.5, 0,0,TAU); ctx.fill();
+    // 本体
+    if (pe.type==='heal'){ ctx.shadowColor='#7ee787'; ctx.shadowBlur=14; }
+    ctx.fillStyle = def.color;
+    ctx.beginPath(); ctx.arc(px,py,pr,0,TAU); ctx.fill();
+    ctx.shadowBlur=0;
+    ctx.lineWidth=2; ctx.strokeStyle='rgba(0,0,0,0.28)'; ctx.stroke();          // 内描边
+    ctx.lineWidth=3.5; ctx.strokeStyle=rar.ring;                                  // 稀有度外环
+    ctx.beginPath(); ctx.arc(px,py,pr-1.5,0,TAU); ctx.stroke();
+    ctx.fillStyle='rgba(255,255,255,0.35)';                                       // 高光
+    ctx.beginPath(); ctx.ellipse(px-pr*0.3, py-pr*0.3, pr*0.3, pr*0.2, -0.6, 0, TAU); ctx.fill();
+  });
+
+  // ---- 花朵本体 ----
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  // 地面阴影
+  ctx.fillStyle='rgba(0,0,0,0.22)';
+  ctx.beginPath(); ctx.ellipse(0, bodyR*0.85, bodyR*1.0, bodyR*0.45, 0,0,TAU); ctx.fill();
+  // 绿色叶瓣（让本体像一朵花）—— 缓慢随自转旋转
+  const leafN = 6, lspin = (isLocal? p.spin*0.3 : (f.rot||0)*0.3);
+  for (let i=0;i<leafN;i++){
+    ctx.save(); ctx.rotate(i*(TAU/leafN) + lspin);
+    ctx.fillStyle = leafColor;
+    ctx.beginPath(); ctx.ellipse(0, -bodyR*0.95, bodyR*0.42, bodyR*0.72, 0, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+  // 本体圆
+  const flick = (isLocal && p.iframes>0 && Math.floor(p.iframes*16)%2===0);
+  ctx.fillStyle = flick ? '#ffffff' : baseColor;
+  ctx.beginPath(); ctx.arc(0,0,bodyR,0,TAU); ctx.fill();
+  ctx.lineWidth=3; ctx.strokeStyle='rgba(0,0,0,0.28)'; ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,0.22)';
+  ctx.beginPath(); ctx.ellipse(-bodyR*0.3,-bodyR*0.35,bodyR*0.32,bodyR*0.22,-0.6,0,TAU); ctx.fill();
+  // 脸
+  const eo=bodyR*0.34, ey=-bodyR*0.05;
+  ctx.fillStyle='#fff';
+  ctx.beginPath(); ctx.arc(-eo,ey,bodyR*0.23,0,TAU); ctx.arc(eo,ey,bodyR*0.23,0,TAU); ctx.fill();
+  ctx.fillStyle='#15240f';
+  ctx.beginPath(); ctx.arc(-eo+bodyR*0.06,ey,bodyR*0.12,0,TAU); ctx.arc(eo+bodyR*0.06,ey,bodyR*0.12,0,TAU); ctx.fill();
+  ctx.strokeStyle='#15240f'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(0, bodyR*0.2, bodyR*0.2, 0.15*Math.PI, 0.85*Math.PI); ctx.stroke();
+  ctx.restore();
+
+  // 名牌 + 血条（远程 / 联机）
+  if (!isLocal || mpActive){
+    const name = isLocal ? (mpMyName+'(你)') : f.name;
+    ctx.font='bold 13px sans-serif'; ctx.textAlign='center';
+    const tw = ctx.measureText(name).width+12;
+    ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fillRect(p.x-tw/2, p.y-bodyR-34, tw, 18);
+    ctx.fillStyle = isLocal ? '#7ef092' : '#eaf2e6'; ctx.fillText(name, p.x, p.y-bodyR-20);
+    const max = isLocal ? p.maxHp : (f.maxHp||85);
+    const hp = isLocal ? p.hp : (f.hp??0);
+    const hpf = clamp(hp/max,0,1);
+    const w = bodyR*2.2;
+    ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fillRect(p.x-w/2, p.y-bodyR-13, w, 5);
+    ctx.fillStyle = hpf>0.5?'#5fd36b':hpf>0.25?'#ffcf4d':'#e8463a';
+    ctx.fillRect(p.x-w/2, p.y-bodyR-13, w*hpf, 5);
+  }
+}
+
+function drawMinimap(){
+  const W=150,H=150;
+  miniCtx.clearRect(0,0,W,H);
+  miniCtx.fillStyle='rgba(0,0,0,0.5)'; miniCtx.fillRect(0,0,W,H);
+  const sc = W/WORLD;
+  // 区域
+  miniCtx.strokeStyle='rgba(255,90,90,0.5)'; miniCtx.lineWidth=1;
+  miniCtx.strokeRect(1,1,W-2,H-2);
+  // 怪物
+  miniCtx.fillStyle='rgba(224,85,85,0.8)';
+  for (const m of G.mobs){ miniCtx.fillRect(W/2+m.x*sc-1, H/2+m.y*sc-1, 2,2); }
+  // 传送门
+  for (const pt of PORTALS){
+    miniCtx.fillStyle = pt.color;
+    miniCtx.beginPath(); miniCtx.arc(W/2+pt.x*sc, H/2+pt.y*sc, 3, 0, TAU); miniCtx.fill();
+  }
+  // 远程玩家
+  if (mpActive){
+    for (const [,rp] of remotePlayers){
+      miniCtx.fillStyle = rp.color;
+      miniCtx.beginPath(); miniCtx.arc(W/2+rp.x*sc, H/2+rp.y*sc, 2.5, 0,TAU); miniCtx.fill();
+    }
+  }
+  // 本地
+  miniCtx.fillStyle='#43d35a';
+  miniCtx.beginPath(); miniCtx.arc(W/2+G.player.x*sc, H/2+G.player.y*sc, 3.5, 0,TAU); miniCtx.fill();
+}
+
+// ============================================================
+//  HUD
+// ============================================================
+const slotCanvases = [];
+function buildSlots(){
+  const box = document.getElementById('slots');
+  box.innerHTML='';
+  slotCanvases.length=0;
+  // 占位：始终显示 MAX_SLOTS 个槽（未解锁的暗化）
+  for (let i=0;i<MAX_SLOTS;i++){
+    const d=document.createElement('div'); d.className='slot';
+    const idx=i;
+    d.addEventListener('mousemove', e=>{ const pe=G&&G.player.slots[idx]; if(pe) showTip(petalInfoHTML(pe), e.clientX, e.clientY); });
+    d.addEventListener('mouseleave', hideTip);
+    box.appendChild(d);
+    const c=document.createElement('canvas'); c.width=80; c.height=80;
+    d.appendChild(c); slotCanvases.push(c);
+  }
+}
+function updateHUD(){
+  const p=G.player;
+  // HP
+  const hpF = clamp(p.hp/p.maxHp,0,1);
+  document.querySelector('#hpBar > i').style.width = (hpF*100)+'%';
+  document.getElementById('hpLbl').textContent = Math.max(0,Math.ceil(p.hp))+' / '+p.maxHp;
+  // XP
+  const need = needXp(p.level);
+  document.querySelector('#xpBar > i').style.width = clamp(p.xp/need,0,1)*100+'%';
+  document.getElementById('xpLbl').textContent = 'Lv '+p.level+'  '+Math.floor(p.xp)+'/'+need;
+  // stats
+  const bname = BIOMES[biomeAt(p.x,p.y)].name;
+  document.getElementById('stats').innerHTML =
+    `📍 <b>${bname}</b> · 🟢 等级 <b>${p.level}</b> · 🏆 击杀 <b>${p.kills}</b> · ⭐ 分数 <b>${p.score}</b>` +
+    (mpActive?`<br>🌐 ${mpIsHost?'主机':'联机'} · ${remotePlayers.size+1} 人`:'');
+  // slots
+  for (let i=0;i<MAX_SLOTS;i++){
+    const c=slotCanvases[i], x=c.getContext('2d'), pe=p.slots[i];
+    x.clearRect(0,0,80,80);
+    const slotEl = c.parentElement;
+    if (!pe){ slotEl.classList.remove('full'); if (i>=p.slots.length && i>=3) { /* locked */ } continue; }
+    slotEl.classList.add('full');
+    const def = PETAL_TYPES[pe.type], rar = RARITIES[pe.rarity];
+    if (pe.dead){ x.globalAlpha=0.3; }
+    if (pe.type==='heal'){ x.shadowColor='#7ee787'; x.shadowBlur=8; }
+    x.fillStyle=def.color; x.beginPath(); x.arc(40,40,15,0,TAU); x.fill();
+    x.shadowBlur=0; x.globalAlpha=1;
+    x.lineWidth=3; x.strokeStyle=rar.ring; x.stroke();
+    // 小血量指示
+    x.fillStyle='rgba(0,0,0,0.5)'; x.fillRect(20,60,40,4);
+    x.fillStyle = pe.dead?'#888':(pe.hp/pe.maxHp>0.5?'#43d35a':'#ffd34d');
+    x.fillRect(20,60,40*clamp(pe.hp/pe.maxHp,0,1),4);
+  }
+}
+
+// ============================================================
+//  流程控制
+// ============================================================
+function startGame(){
+  // 联机：全新角色；单机：有存档则继续，否则新角色
+  const continuing = !mpActive && savedPlayer;
+  const p = continuing ? savedPlayer : newPlayer();
+  if (continuing) savedPlayer = null;
+  G = { player:p, mobs:[], drops:[], projectiles:[], spawnT:2.2, state:'playing' };
+  particles.length=0; cam.x = p.x||0; cam.y = p.y||0; shake=0;
+  buildSlots();
+  document.getElementById('menu').classList.add('hidden');
+  document.getElementById('pause').classList.add('hidden');
+  document.getElementById('death').classList.add('hidden');
+  document.getElementById('backBtn').classList.remove('hidden');
+  // 首帧 HUD
+  updateHUD();
+}
+function togglePause(){
+  if (!G) return;
+  if (G.state==='playing'){ G.state='paused'; document.getElementById('pause').classList.remove('hidden'); }
+  else if (G.state==='paused'){ G.state='playing'; document.getElementById('pause').classList.add('hidden'); }
+}
+function showDeath(){
+  const p=G.player;
+  document.getElementById('deathStats').innerHTML =
+    `达到 <span>Lv ${p.level}</span> · 击杀 <span>${p.kills}</span> 只 · 得分 <span>${p.score}</span>`;
+  document.getElementById('death').classList.remove('hidden');
+}
+function goBack(){
+  saveGame();
+  if (window.electronAPI && window.electronAPI.backToLauncher) {
+    try { window.electronAPI.backToLauncher(); } catch(e){}
+  } else if (window.history.length>1){ window.history.back(); }
+}
+
+document.getElementById('playBtn').onclick = ()=>{ startGame(); };
+document.getElementById('newGameBtn').onclick = ()=>{
+  clearSave(); savedPlayer = null;
+  document.getElementById('playBtn').textContent = '开始游戏 ▶';
+  document.getElementById('newGameBtn').style.display = 'none';
+  startGame();
+};
+document.getElementById('resumeBtn').onclick = ()=>{ togglePause(); };
+document.getElementById('quitBtn').onclick = ()=>{ goBack(); };
+document.getElementById('dquitBtn').onclick = ()=>{ goBack(); };
+document.getElementById('againBtn').onclick = ()=>{ startGame(); };
+document.getElementById('backBtn').onclick = ()=>{ goBack(); };
+document.getElementById('btnBack').onclick = ()=>{ panelOpen ? closePanel() : openPanel('back'); };
+document.getElementById('btnGallery').onclick = ()=>{ panelOpen ? closePanel() : openPanel('gallery'); };
+document.getElementById('tabBack').onclick = ()=> openPanel('back');
+document.getElementById('tabGallery').onclick = ()=> openPanel('gallery');
+document.getElementById('petalClose').onclick = closePanel;
+document.getElementById('modeEquip').onclick = ()=>{ backMode='equip'; renderPetalPanel(); };
+document.getElementById('modeFuse').onclick = ()=>{ backMode='fuse'; renderPetalPanel(); };
+document.getElementById('fuseBtn').onclick = doFuse;
+
+// ============================================================
+//  主循环
+// ============================================================
+function frame(t){
+  const dt = Math.min((t-lastT)/1000 || 0, 0.05);
+  lastT = t;
+  // 单机下打开花瓣面板时暂停；联机保持实时
+  if (G && G.state==='playing' && !(panelOpen && !mpActive)){
+    update(dt);
+  }
+  if (G) render();
+  requestAnimationFrame(frame);
+}
+
+// ============================================================
+//  启动
+// ============================================================
+(function init(){
+  // 先展示菜单，背景跑一个空 G 以便绘制（菜单时也画世界）
+  G = { player:newPlayer(), mobs:[], drops:[], projectiles:[], spawnT:1, state:'menu' };
+  buildProps();
+  buildSlots();
+  // 联机：注册监听 + 恢复状态
+  if (window.electronAPI && window.electronAPI.onMpMessage) {
+    window.electronAPI.onMpMessage((data)=> mpHandleMessage(data));
+  }
+  mpRestoreState();
+  // 离开时存档（页面隐藏/关闭/返回）
+  window.addEventListener('pagehide', saveGame);
+  window.addEventListener('beforeunload', saveGame);
+  document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState==='hidden') saveGame(); });
+  // 菜单文案：有存档则"继续"
+  const playBtn = document.getElementById('playBtn');
+  if (savedPlayer){
+    playBtn.textContent = '继续游戏 ▶';
+    document.getElementById('newGameBtn').style.display = '';
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

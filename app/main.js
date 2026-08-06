@@ -7,6 +7,24 @@ const os = require('os');
 const { exec } = require('child_process');
 const dgram = require('dgram');
 
+// 全局异常捕获：防止 webContents.send 到已销毁窗口等意外导致整个 app 崩溃
+process.on('uncaughtException', (err) => {
+  console.error('[MAIN] 未捕获异常（已吞掉防崩溃）:', err && err.message);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('[MAIN] 未处理的 Promise 拒绝（已吞掉防崩溃）:', err && err.message);
+});
+
+// 单实例锁：防止同时运行两个进程（dev 版 + dmg 版 / 重复打开）
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
+  });
+}
+
 let win;
 let firstLoad = true;
 let port = 0;
@@ -125,6 +143,21 @@ setInterval(tickPlayTime, 30000);
 
 loadPlayTimes();
 
+// 好友身份持久化（{ code, name }）
+const profileFile = path.join(app.getPath('userData'), 'profile.json');
+let profile = null;
+function loadProfile() {
+  try { if (fs.existsSync(profileFile)) profile = JSON.parse(fs.readFileSync(profileFile, 'utf8')); }
+  catch (e) { profile = null; }
+}
+function saveProfile() {
+  try { fs.writeFileSync(profileFile, JSON.stringify(profile, null, 2), 'utf8'); } catch (e) {}
+}
+loadProfile();
+
+// 好友：等待 friends-presence-snapshot 的 resolver
+let frPendingSnapshot = null;
+
 // === 联机系统 ===
 let mpWss = null;       // WebSocket 服务器（主机模式）
 let mpClient = null;    // WebSocket 客户端（加入模式）
@@ -136,13 +169,16 @@ let mpMyPlayerName = '';   // 本机玩家名
 let mpLastGameStart = null; // 缓存game-start消息，供joiner页面恢复用
 
 // === 互联网联机（中转服务器）===
-const RELAY_SERVER = 'ws://81.70.199.45:18766';
+const RELAY_SERVER = 'wss://xiaotuling.com/ws';   // 走 nginx 443 通道（和网页版一致），避免裸 18766 被某些网络切断(1006)
 const RELAY_HOST_TIMEOUT = 5000;
 let relayWs = null;
 let relayMode = false;
 let relayRoomId = null;
 let relayHostToken = null;  // 主机重连用 token
 let relayPeers = [];  // 中继模式下的其他玩家
+let relayIntentionalClose = false;  // relayStop 主动关闭，不触发自动重连
+let relayReconnectAttempts = 0;
+const RELAY_MAX_RECONNECT = 20;     // 服务器宽限 5 分钟，尽量多重试几次
 
 // === LAN Discovery (HTTP 扫描) ===
 const DISCOVERY_PORT = 19876;
@@ -469,28 +505,94 @@ function mpStop() {
 }
 
 // === 互联网中转联机 ===
+let relayConnectPromise = null;
 function relayConnect() {
-  return new Promise((resolve, reject) => {
+  // 复用已开连接；并发调用共享同一个"进行中"的连接，避免创建多个 WebSocket
+  // 导致身份码重复、房间重复、孤儿连接的 close 回调把状态清乱（曾导致桌面端联机完全不可用）
+  if (relayWs && relayWs.readyState === WebSocket.OPEN) return Promise.resolve(relayWs);
+  if (relayConnectPromise) return relayConnectPromise;
+  relayConnectPromise = new Promise((resolve, reject) => {
     relayWs = new WebSocket(RELAY_SERVER);
-    relayWs.on('open', () => resolve(relayWs));
-    relayWs.on('error', () => reject(new Error('无法连接中转服务器')));
+    relayWs.on('open', () => {
+      relayConnectPromise = null;
+      resolve(relayWs);
+      // 注册身份（好友/presence）：有昵称就注册，重连也会重新注册（幂等）
+      if (profile && profile.code) {
+        try { relayWs.send(JSON.stringify({ type: 'identity-register', code: profile.code, name: profile.name })); } catch(e) {}
+      }
+      // 断线重连后重新加入房间（joiner 用普通 join；host 带 token 抢回主机身份）
+      if (relayMode && relayRoomId && !mpIsHost) {
+        try { relayWs.send(JSON.stringify({ type: 'join', roomId: relayRoomId, name: mpMyPlayerName })); } catch(e) {}
+      }
+      if (relayMode && mpIsHost && relayHostToken && relayRoomId) {
+        try { relayWs.send(JSON.stringify({ type: 'join', roomId: relayRoomId, token: relayHostToken, name: mpMyPlayerName })); } catch(e) {}
+      }
+    });
+    relayWs.on('error', () => { relayConnectPromise = null; reject(new Error('无法连接中转服务器')); });
     relayWs.on('close', () => {
+      // 先捕获重连身份（在清空状态之前）
+      const canReclaim = !relayIntentionalClose && relayMode && mpIsHost && relayHostToken && relayRoomId;
+      const token = relayHostToken, roomId = relayRoomId, name = mpMyPlayerName;
+      const intentional = relayIntentionalClose;
+      console.log('[RELAY] ws断开 canReclaim=' + canReclaim + ' relayMode=' + relayMode + ' mpIsHost=' + mpIsHost + ' token=' + (token?'有':'无') + ' roomId=' + (roomId||'无') + ' attempts=' + relayReconnectAttempts);
       relayWs = null;
-      relayMode = false;
-      relayPeers = [];
-      // 保留 mpMyPlayerId/mpMyPlayerName 让 UI 知道刚断开，但下次 host/join 会重置
+      relayIntentionalClose = false;
+
+      // 主机意外断线：在服务器的宽限窗口内用 token 抢回主机身份
+      if (canReclaim && relayReconnectAttempts < RELAY_MAX_RECONNECT) {
+        relayReconnectAttempts++;
+        const delay = Math.min(1000 * relayReconnectAttempts, 4000);
+        console.log('[RELAY] 安排第' + relayReconnectAttempts + '次重连，' + delay + 'ms后');
+        setTimeout(() => relayReclaimHost(roomId, token, name), delay);
+        return;  // 重连中，暂不通知 UI 断开
+      }
+
+      // 真正断开：不清 relayMode（保留联机意图），发 disconnected + 状态灯
+      relayReconnectAttempts = 0;
       if (win && !win.isDestroyed()) win.webContents.send('mp-message', { type: 'disconnected' });
+      if (win && !win.isDestroyed()) win.webContents.send('fr-message', { type: 'relay-status', online: false });
     });
     relayWs.on('message', (raw) => {
       let data;
       try { data = JSON.parse(raw.toString()); } catch(e) { return; }
+
+      // 好友/身份/presence 事件：转发到 renderer 的 fr-message，不进 mp 流程
+      if (data.type === 'identity-registered') {
+        if (data.code && (!profile || profile.code !== data.code)) {
+          profile = profile || {}; profile.code = data.code; saveProfile();
+        }
+        if (win && !win.isDestroyed()) win.webContents.send('fr-message', data);
+        return;
+      }
+      if (data.type === 'identity-rejected') {
+        if (win && !win.isDestroyed()) win.webContents.send('fr-message', data);
+        return;
+      }
+      if (data.type === 'friend-online' || data.type === 'friend-offline' ||
+          data.type === 'friend-name-change' || data.type === 'incoming-request' ||
+          data.type === 'request-accepted' || data.type === 'friend-added' ||
+          data.type === 'friend-removed' || data.type === 'incoming-invite' ||
+          data.type === 'friend-request-result' || data.type === 'friend-rejected-result' ||
+          data.type === 'friend-removed-result' || data.type === 'invite-result' ||
+          data.type === 'name-updated' || data.type === 'leave-room-ok' || data.type === 'account-deleted' || data.type === 'auth-error') {
+        if (win && !win.isDestroyed()) win.webContents.send('fr-message', data);
+        return;
+      }
+      if (data.type === 'friends-presence-snapshot') {
+        if (frPendingSnapshot) { try { frPendingSnapshot(data); } catch(e){} frPendingSnapshot = null; }
+        if (win && !win.isDestroyed()) win.webContents.send('fr-message', data);
+        return;
+      }
+
       if (data.type === 'hosted') {
         relayRoomId = data.roomId;
         relayHostToken = data.token || null;
         mpMyPlayerId = 0;
+        relayReconnectAttempts = 0;
       } else if (data.type === 'joined') {
         mpMyPlayerId = data.playerId;
         relayRoomId = data.roomId;
+        relayReconnectAttempts = 0;
         if (data.players) {
           relayPeers = data.players.filter(p => p.id !== mpMyPlayerId);
         }
@@ -521,6 +623,7 @@ function relayConnect() {
       }
     });
   });
+  return relayConnectPromise;
 }
 
 function relayHost(lobbyInfo) {
@@ -531,23 +634,23 @@ function relayHost(lobbyInfo) {
         let data; try { data = JSON.parse(raw.toString()); } catch(e) { return; }
         if (data.type === 'hosted' && !settled) {
           settled = true;
-          ws.removeEventListener('message', handler);
+          ws.off('message', handler);
           relayMode = true;
           mpIsHost = true;
           mpMyPlayerName = (lobbyInfo && lobbyInfo.name) || '主机';
-          resolve({ roomId: data.roomId, ip: '81.70.199.45', port: 18766 });
+          resolve({ roomId: data.roomId, ip: 'xiaotuling.com', port: 443 });
         } else if (data.type === 'error' && !settled) {
           settled = true;
-          ws.removeEventListener('message', handler);
+          ws.off('message', handler);
           reject(new Error(data.msg));
         }
       };
-      ws.addEventListener('message', handler);
+      ws.on('message', handler);
       ws.send(JSON.stringify({ type: 'host', name: (lobbyInfo && lobbyInfo.name) || '主机', gameName: (lobbyInfo && lobbyInfo.gameName) || '' }));
       setTimeout(() => {
         if (!settled) {
           settled = true;
-          ws.removeEventListener('message', handler);
+          ws.off('message', handler);
           reject(new Error('创建房间超时，请检查网络'));
         }
       }, RELAY_HOST_TIMEOUT);
@@ -563,17 +666,17 @@ function relayJoin(roomId, playerName) {
         let data; try { data = JSON.parse(raw.toString()); } catch(e) { return; }
         if (data.type === 'joined' && !settled) {
           settled = true;
-          ws.removeEventListener('message', handler);
+          ws.off('message', handler);
           relayMode = true;
           mpMyPlayerName = playerName || '玩家';
           resolve({ connected: true, id: data.playerId });
         } else if (data.type === 'error' && !settled) {
           settled = true;
-          ws.removeEventListener('message', handler);
+          ws.off('message', handler);
           reject(new Error(data.msg));
         }
       };
-      ws.addEventListener('message', handler);
+      ws.on('message', handler);
       ws.send(JSON.stringify({ type: 'join', roomId: String(roomId), name: playerName || '玩家' }));
       setTimeout(() => { if (!settled) { settled = true; reject(new Error('连接超时')); } }, 5000);
     });
@@ -586,11 +689,53 @@ function relaySend(data) {
 }
 
 function relayStop() {
+  relayIntentionalClose = true;     // 主动关闭，onclose 不要自动重连
+  relayReconnectAttempts = 0;
   if (relayWs) { relayWs.close(); relayWs = null; }
   relayMode = false;
   relayRoomId = null;
   relayHostToken = null;
   relayPeers = [];
+}
+
+// 主机意外断线后，用 token 抢回主机身份（服务器保留 30s 重连窗口）
+function relayReclaimHost(roomId, token, name) {
+  console.log('[RELAY] 重连中... roomId=' + roomId);
+  relayConnect().then(ws => {
+    if (relayWs === ws) {
+      ws.send(JSON.stringify({ type: 'join', roomId, token, name }));
+      console.log('[RELAY] 已发 join-with-token');
+    } else {
+      console.log('[RELAY] ws已过期，跳过');
+    }
+  }).catch((e) => {
+    console.log('[RELAY] 重连失败: ' + e.message);
+  });
+}
+
+// 好友/presence：确保中转连接已建立（不在房间里时也保持在线）
+function relayEnsureConnected() {
+  if (relayWs && relayWs.readyState === WebSocket.OPEN) return Promise.resolve(relayWs);
+  return relayConnect().catch(() => null);
+}
+
+// 主动离开房间但保持 presence 连接（mp-stop 的 relay 模式用）
+function relayLeaveRoom() {
+  if (relayWs && relayWs.readyState === WebSocket.OPEN && relayMode) {
+    try { relayWs.send(JSON.stringify({ type: 'leave-room' })); } catch(e) {}
+  }
+  relayReconnectAttempts = 0;
+  relayMode = false;
+  relayRoomId = null;
+  relayHostToken = null;
+  relayPeers = [];
+}
+
+// 发送好友相关消息
+function frRelaySend(msg) {
+  relayEnsureConnected().then(ws => {
+    if (ws && ws.readyState === WebSocket.OPEN) try { ws.send(JSON.stringify(msg)); } catch(e) {}
+  });
 }
 
 // 防火墙：启动时静默添加端口规则（不弹窗）
@@ -674,7 +819,7 @@ const server = http.createServer((req, res) => {
     }
     res.writeHead(200, {
       'Content-Type': contentType,
-      'Content-Security-Policy': "default-src 'self' 'unsafe-inline' 'unsafe-eval'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; worker-src 'self' blob:",
+      'Content-Security-Policy': "default-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; worker-src 'self' blob:; img-src 'self' data: blob:; media-src 'self' blob: data:; connect-src 'self' ws: wss: http: https:",
       'Access-Control-Allow-Origin': '*',
       'Cache-Control': 'no-cache, no-store, must-revalidate'
     });
@@ -740,7 +885,8 @@ ipcMain.on('toggle-fullscreen', () => {
 
 // IPC: 启动游戏
 ipcMain.on('launch-game', async (event, gamePath) => {
-  await triggerAutoSave();
+  // 不调 triggerAutoSave：它会在导航后注入 Three.js 清理代码到游戏页面，
+  // 销毁游戏的 renderer 导致游戏卡死
   const segs = String(gamePath || '').split('/');
   if (segs.length >= 2 && segs[1]) recordGameStart(segs[1]);
   // 中继模式下广播 game-start 给其他玩家
@@ -749,7 +895,6 @@ ipcMain.on('launch-game', async (event, gamePath) => {
     relayWs.send(JSON.stringify({ type: 'relay', data: { type: 'game-start', gamePath: gamePath, pvp: pvp } }));
   }
   win.loadURL('http://localhost:' + port + '/' + gamePath);
-  purgeAfterNavigation();
 });
 
 // IPC: 返回启动器
@@ -844,9 +989,64 @@ ipcMain.on('mp-send', (event, data) => {
 
 // IPC: 联机 - 停止
 ipcMain.handle('mp-stop', async () => {
-  if (relayMode) relayStop(); else mpStop();
+  if (relayMode) relayLeaveRoom(); else mpStop();
   return { stopped: true };
 });
+
+// ===== IPC: 好友系统（与 preload.js / web-api.js // PARITY）=====
+ipcMain.handle('fr-get-profile', async () => profile);
+ipcMain.handle('fr-set-profile', async (e, name) => {
+  profile = profile || {}; profile.name = name; saveProfile();
+  // 已连接就立刻（重新）注册，把新昵称同步到服务器
+  if (relayWs && relayWs.readyState === WebSocket.OPEN) {
+    try { relayWs.send(JSON.stringify({ type: 'identity-register', code: profile.code || null, name })); } catch(err) {}
+  }
+  return profile;
+});
+ipcMain.handle('fr-save-code', async (e, code) => {
+  profile = profile || {}; profile.code = code; saveProfile();
+  return { ok: true };
+});
+ipcMain.handle('fr-connect', async () => {
+  await relayEnsureConnected();
+  return { ok: true };
+});
+ipcMain.handle('fr-list', async () => {
+  // 不自动重连：连接断了就返回空列表，避免 identity-registered → refreshFriends → 重连 的风暴
+  if (!relayWs || relayWs.readyState !== WebSocket.OPEN) return { list: [] };
+  return new Promise((resolve) => {
+    let done = false;
+    frPendingSnapshot = (data) => { done = true; resolve({ list: data.list || [] }); };
+    try { relayWs.send(JSON.stringify({ type: 'friends-presence' })); }
+    catch (e) { resolve({ list: [] }); return; }
+    setTimeout(() => { if (!done) { done = true; frPendingSnapshot = null; resolve({ list: [] }); } }, 4000);
+  });
+});
+ipcMain.handle('fr-add-request', async (e, code) => { frRelaySend({ type: 'friend-request', code }); return { ok: true }; });
+ipcMain.handle('fr-accept', async (e, code) => { frRelaySend({ type: 'friend-accept', code }); return { ok: true }; });
+ipcMain.handle('fr-reject', async (e, code) => { frRelaySend({ type: 'friend-reject', code }); return { ok: true }; });
+ipcMain.handle('fr-remove', async (e, code) => { frRelaySend({ type: 'friend-remove', code }); return { ok: true }; });
+ipcMain.handle('fr-invite', async (e, code) => { frRelaySend({ type: 'invite', code }); return { ok: true }; });
+ipcMain.handle('fr-join', async (e, roomId, name) => {
+  // 复用 mp-join 路径（6 位房间号 → 中转加入）
+  try {
+    if (relayMode) relayLeaveRoom();
+    const result = await relayJoin(roomId, name || (profile && profile.name) || '玩家');
+    return result;
+  } catch (err) { return { error: err.message }; }
+});
+ipcMain.handle('fr-register', async (e, name, password) => { frRelaySend({ type: 'account-register', name, password }); return { ok: true }; });
+ipcMain.handle('fr-login', async (e, name, password) => { frRelaySend({ type: 'account-login', name, password }); return { ok: true }; });
+ipcMain.handle('fr-delete-account', async () => { frRelaySend({ type: 'delete-account' }); return { ok: true }; });
+ipcMain.handle('fr-clear-profile', async () => { profile = null; try { fs.unlinkSync(profileFile); } catch(e) {} return { ok: true }; });
+ipcMain.handle('fr-logout', async () => {
+  profile = null;
+  try { fs.unlinkSync(profileFile); } catch(e) {}
+  if (relayWs) { relayIntentionalClose = true; try { relayWs.close(); } catch(e){} relayWs = null; }
+  relayMode = false; relayRoomId = null; relayHostToken = null; relayPeers = [];
+  return { ok: true };
+});
+ipcMain.handle('fr-is-connected', async () => !!(relayWs && relayWs.readyState === WebSocket.OPEN));
 
 // IPC: 互联网联机 - 创建房间
 ipcMain.handle('mp-relay-host', async (event, lobbyInfo) => {
@@ -872,9 +1072,9 @@ ipcMain.on('mp-relay-send', (event, data) => {
 // IPC: 互联网联机 - 获取房间列表
 ipcMain.handle('mp-relay-rooms', async () => {
   try {
-    const http = require('http');
+    const https = require('https');
     return new Promise((resolve) => {
-      http.get('http://81.70.199.45:18766/rooms', (res) => {
+      https.get('https://xiaotuling.com/rooms', (res) => {
         let body = '';
         res.on('data', (d) => body += d);
         res.on('end', () => { try { resolve(JSON.parse(body)); } catch(e) { resolve([]); } });

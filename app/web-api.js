@@ -42,14 +42,31 @@
   var mpMessageCallback = null;
   var pendingSends = [];
   var mpPeers = [];  // 已知的其他玩家
+  var relayIntentionalClose = false;  // mpStop 主动关闭，不触发自动重连
+  var relayReconnectAttempts = 0;
+  var RELAY_MAX_RECONNECT = 4;        // 服务器主机重连窗口 30s，最多重试几次
+
+  // === 好友 / 身份（网页版用 localStorage 持久化）===
+  function loadFrProfile() {
+    try { return JSON.parse(localStorage.getItem('gc_profile') || 'null'); } catch(e) { return null; }
+  }
+  function saveFrProfile(p) {
+    try { localStorage.setItem('gc_profile', JSON.stringify(p)); } catch(e) {}
+  }
+  var frProfile = loadFrProfile();
+  var frMessageCallback = null;
 
   function clearPendingSends() { pendingSends = []; }
 
+  var connectRelayPromise = null;
   function connectRelay() {
-    return new Promise(function(resolve, reject) {
-      if (relayWs && relayWs.readyState === 1) { resolve(relayWs); return; }
+    // 复用已开连接；并发调用共享同一个"进行中"的连接，避免创建多个 WebSocket 导致状态错乱
+    if (relayWs && relayWs.readyState === 1) return Promise.resolve(relayWs);
+    if (connectRelayPromise) return connectRelayPromise;
+    connectRelayPromise = new Promise(function(resolve, reject) {
       relayWs = new WebSocket(RELAY_WS_URL);
       relayWs.onopen = function() {
+        connectRelayPromise = null;
         resolve(relayWs);
         // 仅在仍处于联机状态时 flush 队列，避免跨房间污染
         if (mpState !== 'idle') {
@@ -59,21 +76,78 @@
         } else {
           clearPendingSends();
         }
+        // 免密重连：仅当本地已有 code（之前注册/登录过）才发身份；否则等用户注册/登录
+        if (frProfile && frProfile.code) {
+          try { relayWs.send(JSON.stringify({ type: 'identity-register', code: frProfile.code, name: frProfile.name })); } catch(e) {}
+        }
+        // 断线重连后重新加入房间（joiner 用普通 join；host 带 token 抢回）
+        if (mpRoomId && !mpIsHost) {
+          try { relayWs.send(JSON.stringify({ type: 'join', roomId: mpRoomId, name: mpMyName })); } catch(e) {}
+        }
+        if (mpRoomId && mpIsHost && mpHostToken) {
+          try { relayWs.send(JSON.stringify({ type: 'join', roomId: mpRoomId, token: mpHostToken, name: mpMyName })); } catch(e) {}
+        }
       };
-      relayWs.onerror = function() { reject(new Error('无法连接中转服务器')); };
+      relayWs.onerror = function() { connectRelayPromise = null; reject(new Error('无法连接中转服务器')); };
       relayWs.onclose = function() {
+        // 先捕获重连身份（在清空状态之前）
+        var canReclaim = !relayIntentionalClose && mpState === 'hosting' && mpHostToken && mpRoomId;
+        var token = mpHostToken, roomId = mpRoomId, name = mpMyName;
+        var intentional = relayIntentionalClose;
         relayWs = null;
+        relayIntentionalClose = false;
         clearPendingSends();
+
+        // 主机意外断线：在服务器的 30s 窗口内用 token 抢回主机身份
+        if (canReclaim && relayReconnectAttempts < RELAY_MAX_RECONNECT) {
+          relayReconnectAttempts++;
+          var delay = Math.min(1000 * relayReconnectAttempts, 4000);
+          setTimeout(function() { relayReclaimHost(roomId, token, name); }, delay);
+          return;  // 重连中，暂不通知断开
+        }
+
+        // 真正断开：不清 mpState（保留联机意图），发 disconnected + 状态灯
+        relayReconnectAttempts = 0;
         if (mpState !== 'idle' && mpMessageCallback) mpMessageCallback({ type: 'disconnected' });
+        if (frMessageCallback) frMessageCallback({ type: 'relay-status', online: false });
       };
       relayWs.onmessage = function(e) {
         var data;
         try { data = JSON.parse(e.data); } catch(err) { return; }
+
+        // 好友/身份/presence 事件：路由到 frMessageCallback，不进 mp/iframe 流程
+        if (data.type === 'identity-registered') {
+          if (data.code && (!frProfile || frProfile.code !== data.code)) {
+            frProfile = frProfile || {};
+            frProfile.code = data.code;
+            saveFrProfile(frProfile);
+          }
+          if (frMessageCallback) frMessageCallback(data);
+          return;
+        }
+        if (data.type === 'identity-rejected') {
+          if (frMessageCallback) frMessageCallback(data);
+          return;
+        }
+        if (data.type === 'friend-online' || data.type === 'friend-offline' ||
+            data.type === 'friend-name-change' || data.type === 'incoming-request' ||
+            data.type === 'request-accepted' || data.type === 'friend-added' ||
+            data.type === 'friend-removed' || data.type === 'incoming-invite' ||
+            data.type === 'friends-presence-snapshot' || data.type === 'friend-request-result' ||
+            data.type === 'friend-rejected-result' || data.type === 'friend-removed-result' ||
+            data.type === 'invite-result' || data.type === 'name-updated' || data.type === 'leave-room-ok' || data.type === 'account-deleted' || data.type === 'auth-error') {
+          if (frMessageCallback) frMessageCallback(data);
+          return;
+        }
+
         if (data.type === 'hosted') {
           mpMyId = data.playerId; mpRoomId = data.roomId;
           mpHostToken = data.token || null;
+          mpState = 'hosting'; mpIsHost = true;
+          relayReconnectAttempts = 0;
         } else if (data.type === 'joined') {
           mpMyId = data.playerId; mpRoomId = data.roomId;
+          relayReconnectAttempts = 0;
           // 收到玩家列表
           if (data.players) {
             mpPeers = data.players.filter(function(p) { return p.id !== mpMyId; });
@@ -98,17 +172,61 @@
         } else if (data.type === 'host-paused' || data.type === 'host-reconnected') {
           if (mpMessageCallback) mpMessageCallback(data);
         } else {
-          // 转发到 iframe 或 callback
           if (mpMessageCallback) mpMessageCallback(data);
-          broadcastToIframe(data);
         }
+        // 关键：所有联机相关消息都要转发到 iframe 内的游戏页面，
+        // 否则游戏页面收不到 player-join / your-id / player-list，
+        // 进入游戏后看不到其他玩家。
+        broadcastToIframe(data);
       };
+    });
+    return connectRelayPromise;
+  }
+
+  // 主机意外断线后，用 token 抢回主机身份（服务器保留 30s 重连窗口）
+  function relayReclaimHost(roomId, token, name) {
+    connectRelay().then(function(ws) {
+      if (relayWs === ws) {
+        ws.send(JSON.stringify({ type: 'join', roomId: roomId, token: token, name: name }));
+      }
+    }).catch(function() {
+      // 连接本身失败：connectRelay 的 onclose 会继续驱动重连或放弃
+    });
+  }
+
+  // === 好友：连接 / 收发辅助 ===
+  function ensureRelayConnected() {
+    if (relayWs && relayWs.readyState === 1) return Promise.resolve(relayWs);
+    return connectRelay().catch(function() { return null; });
+  }
+  function frSend(msg) {
+    ensureRelayConnected().then(function(ws) {
+      if (ws && ws.readyState === 1) try { ws.send(JSON.stringify(msg)); } catch(e) {}
+    });
+  }
+  function frSendAndAwait(msg, responseType, timeoutMs) {
+    return ensureRelayConnected().then(function(ws) {
+      if (!ws) return null;
+      return new Promise(function(resolve) {
+        var done = false;
+        var h = function(e) {
+          var d; try { d = JSON.parse(e.data); } catch(_) { return; }
+          if (d.type === responseType && !done) {
+            done = true; ws.removeEventListener('message', h); resolve(d);
+          }
+        };
+        ws.addEventListener('message', h);
+        try { ws.send(JSON.stringify(msg)); } catch(err) { done = true; ws.removeEventListener('message', h); resolve(null); }
+        setTimeout(function() { if (!done) { done = true; ws.removeEventListener('message', h); resolve(null); } }, timeoutMs || 4000);
+      });
     });
   }
 
   // === iframe 管理 ===
   var gameIframe = null;
-  var isLauncher = location.pathname.includes('launcher.html') || location.pathname === '/';
+  var isLauncher = location.pathname === '/' ||
+                   location.pathname === '/index.html' ||
+                   location.pathname.endsWith('/launcher.html');
 
   // 向 iframe 广播消息
   function broadcastToIframe(data) {
@@ -255,7 +373,11 @@
     },
 
     mpStop: function() {
-      if (relayWs) { relayWs.close(); relayWs = null; }
+      // 主动离开房间，但保持 presence 连接（不断开 relayWs，好友仍看到在线）
+      if (relayWs && relayWs.readyState === 1 && mpState !== 'idle') {
+        try { relayWs.send(JSON.stringify({ type: 'leave-room' })); } catch(e) {}
+      }
+      relayReconnectAttempts = 0;
       mpState = 'idle'; mpMyId = null; mpRoomId = null;
       mpHostToken = null; mpIsHost = false;
       clearPendingSends();
@@ -279,7 +401,56 @@
 
     mpAddFirewall: function() { return Promise.resolve({ ok: true }); },
 
-    onMpMessage: function(callback) { mpMessageCallback = callback; }
+    mpRelayRooms: function() {
+      var url = location.protocol === 'https:' ? '/rooms' : 'http://81.70.199.45:18766/rooms';
+      return fetch(url).then(function(r) { return r.json(); }).catch(function() { return []; });
+    },
+
+    onMpMessage: function(callback) { mpMessageCallback = callback; },
+
+    // 好友系统 API（与 preload.js 保持一致 // PARITY）
+    frGetProfile: function() { return Promise.resolve(frProfile); },
+    frSetProfile: function(name) {
+      frProfile = frProfile || {};
+      frProfile.name = name;
+      saveFrProfile(frProfile);
+      return Promise.resolve(frProfile);
+    },
+    frSaveCode: function(code) {
+      frProfile = frProfile || {};
+      frProfile.code = code;
+      saveFrProfile(frProfile);
+      return Promise.resolve({ ok: true });
+    },
+    frConnect: function() { return ensureRelayConnected().then(function() { return { ok: true }; }); },
+    frList: function() {
+      // 不自动重连：连接断了就返回空列表，避免 identity-registered → refreshFriends → 重连 的风暴
+      if (!relayWs || relayWs.readyState !== 1) return Promise.resolve({ list: [] });
+      return frSendAndAwait({ type: 'friends-presence' }, 'friends-presence-snapshot', 4000)
+        .then(function(d) { return d ? { list: d.list } : { list: [] }; });
+    },
+    frAddRequest: function(code) { frSend({ type: 'friend-request', code: code }); return Promise.resolve({ ok: true }); },
+    frAccept: function(code) { frSend({ type: 'friend-accept', code: code }); return Promise.resolve({ ok: true }); },
+    frReject: function(code) { frSend({ type: 'friend-reject', code: code }); return Promise.resolve({ ok: true }); },
+    frRemove: function(code) { frSend({ type: 'friend-remove', code: code }); return Promise.resolve({ ok: true }); },
+    frInvite: function(code) { frSend({ type: 'invite', code: code }); return Promise.resolve({ ok: true }); },
+    frJoin: function(roomId, name) {
+      return window.electronAPI.mpJoin(roomId, 0, name || (frProfile && frProfile.name) || '玩家');
+    },
+    frRegister: function(name, password) { frSend({ type: 'account-register', name: name, password: password }); return Promise.resolve({ ok: true }); },
+    frLogin: function(name, password) { frSend({ type: 'account-login', name: name, password: password }); return Promise.resolve({ ok: true }); },
+    frDeleteAccount: function() { frSend({ type: 'delete-account' }); return Promise.resolve({ ok: true }); },
+    frClearProfile: function() { frProfile = null; try { localStorage.removeItem('gc_profile'); } catch(e) {} return Promise.resolve({ ok: true }); },
+    frLogout: function() {
+      frProfile = null;
+      try { localStorage.removeItem('gc_profile'); } catch(e) {}
+      if (relayWs) { relayIntentionalClose = true; try { relayWs.close(); } catch(e){} relayWs = null; }
+      mpState = 'idle'; mpIsHost = false; mpMyId = null; mpRoomId = null; mpHostToken = null; mpPeers = [];
+      clearPendingSends();
+      return Promise.resolve({ ok: true });
+    },
+    frIsConnected: function() { return Promise.resolve(!!(relayWs && relayWs.readyState === 1)); },
+    onFrMessage: function(cb) { frMessageCallback = cb; }
   };
 
   // iframe 内的游戏页面：代理 electronAPI（只在游戏页面生效，不在 launcher）
@@ -321,11 +492,19 @@
       },
       mpAddFirewall: function() { return Promise.resolve({ ok: true }); },
       onMpMessage: function(callback) {
-        window.removeEventListener('message', window._mpProxyHandler || function(){});
-        window._mpProxyHandler = function(e) {
-          if (e.data && e.data.type === 'mp-message') callback(e.data.data);
-        };
-        window.addEventListener('message', window._mpProxyHandler);
+        // 支持多次注册：用 callback 数组而不是单例
+        window._mpCallbacks = window._mpCallbacks || [];
+        window._mpCallbacks.push(callback);
+        if (!window._mpProxyInstalled) {
+          window._mpProxyInstalled = true;
+          window.addEventListener('message', function(e) {
+            if (e.data && e.data.type === 'mp-message') {
+              (window._mpCallbacks || []).forEach(function(cb) {
+                try { cb(e.data.data); } catch (err) {}
+              });
+            }
+          });
+        }
       }
     };
 

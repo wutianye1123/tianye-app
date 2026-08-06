@@ -262,34 +262,6 @@
             pointer-events: none;
         }
 
-        #musicBtn {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            border: 2px solid #555;
-            background: rgba(0, 0, 0, 0.7);
-            color: #fff;
-            font-size: 20px;
-            cursor: pointer;
-            z-index: 200;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.3s;
-        }
-
-        #musicBtn:hover {
-            background: rgba(50, 50, 50, 0.9);
-            border-color: #888;
-        }
-
-        #musicBtn.playing {
-            border-color: #5c5;
-            box-shadow: 0 0 10px #5c5;
-        }
         #saveMsg { position:fixed; top:60px; left:50%; transform:translateX(-50%);
           color:#0f0; font-size:16px; pointer-events:none; opacity:0;
           text-shadow:0 0 4px #0f0; font-family:monospace; z-index:9999;
@@ -307,7 +279,6 @@
     <audio id="stepStone" preload="auto">
         <source src="stone2.mp3" type="audio/mpeg">
     </audio>
-    <button id="musicBtn" title="播放/暂停音乐">♪</button>
     <canvas id="gameCanvas"></canvas>
 
     <div id="blocker">
@@ -364,6 +335,22 @@
         </div>
     </div>
 
+    <!-- ESC 设置面板 -->
+    <div id="settingsPanel" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:250;justify-content:center;align-items:center;">
+        <div style="text-align:center;color:#fff;padding:30px 40px;background:rgba(0,0,0,0.9);border-radius:16px;border:2px solid #4a4a4a;min-width:320px;">
+            <h2 style="color:#5c5;margin-bottom:20px;">设置</h2>
+            <div style="margin:12px 0;text-align:left;font-size:16px;">
+                <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin:10px 0;">
+                    <input type="checkbox" id="setAutoJump" style="width:18px;height:18px;"> 自动跳跃
+                </label>
+                <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin:10px 0;">
+                    <input type="checkbox" id="setCanFly" style="width:18px;height:18px;"> 飞行（开启后双击空格起飞）
+                </label>
+            </div>
+            <p style="color:#888;font-size:13px;margin-top:15px;">按 ESC 关闭</p>
+        </div>
+    </div>
+
     <div id="crosshair"></div>
     <div id="hotbar"></div>
     <div id="debug">FPS: 0</div>
@@ -374,13 +361,8 @@
     </div>
     <div id="particles"></div>
 
-    <script>
-    // 通过Electron IPC加载Three.js（绕过浏览器网络限制）
-    if (window.electronAPI && window.electronAPI.readFile) {
-        var __tcode = window.electronAPI.readFile('games/3D我的世界/three.min.js');
-        if (__tcode) { try { eval(__tcode); } catch(e) { document.getElementById('instructions').innerHTML='<h1 style="color:#f66">引擎错误: '+e.message+'</h1>'; } }
-    }
-    </script>
+    <!-- Three.js：通过 HTTP 加载 r149（和 readFile+eval 说再见） -->
+    <script src="three.min.js"></script>
     <script>
         var __gameLoaded = true; // 诊断标记
         // 全局错误捕获 - 显示到页面上
@@ -544,7 +526,7 @@
             [BlockTypes.LEAVES]: {
                 name: '树叶',
                 textures: { top: TextureIndex.LEAVES, side: TextureIndex.LEAVES, bottom: TextureIndex.LEAVES },
-                color: 0x537D46,
+                color: 0x5aa830,
                 transparent: true
             },
             [BlockTypes.SAND]: {
@@ -769,10 +751,10 @@
         function drawLeaves(ctx, col, row) {
             const x = col * TEXTURE_SIZE;
             const y = row * TEXTURE_SIZE;
-            // 树叶：深绿色
-            const baseColor = '#537D46';
-            const darkColor = '#436D38';
-            const lightColor = '#638D54';
+            // 树叶：鲜绿色
+            const baseColor = '#5aa830';
+            const darkColor = '#3f7d1f';
+            const lightColor = '#6fc24a';
 
             ctx.clearRect(x, y, TEXTURE_SIZE, TEXTURE_SIZE);
 
@@ -1014,6 +996,10 @@
             texture.minFilter = THREE.NearestFilter;
             texture.wrapS = THREE.RepeatWrapping;
             texture.wrapT = THREE.RepeatWrapping;
+            // 不翻转 canvas：让 UV 的 V=0 直接对应图集第 0 行（grassTop 等）。
+            // 默认 flipY=true 会上下翻转，草方块顶面（texIdx=0）会采到第 1 行 water，
+            // 导致草/水等纹理互换（用户看到「水变绿、草地变蓝」）。
+            texture.flipY = false;
 
             return {
                 texture,
@@ -1070,6 +1056,44 @@
         let isLocked = false;
         let yaw = 0;    // 左右看
         let pitch = 0;  // 上下看
+        let gameStarted = false;  // 游戏是否已开始（放到顶层让 animate 能看到）
+
+        // 设置 + 飞行 + 暂停（ESC 设置面板）
+        let settings = { autoJump: false, canFly: false };
+        let paused = false;
+        let flying = false;
+        let lastSpaceTime = 0;
+        let moveDown = false;
+
+        function loadSettings() {
+            try {
+                const s = JSON.parse(localStorage.getItem('mc3d_settings'));
+                if (s && typeof s === 'object') {
+                    if (typeof s.autoJump === 'boolean') settings.autoJump = s.autoJump;
+                    if (typeof s.canFly === 'boolean') settings.canFly = s.canFly;
+                }
+            } catch (e) {}
+        }
+        function saveSettings() {
+            try { localStorage.setItem('mc3d_settings', JSON.stringify(settings)); } catch (e) {}
+        }
+        function toggleSettings() {
+            paused = !paused;
+            const panel = document.getElementById('settingsPanel');
+            if (paused) {
+                if (panel) panel.style.display = 'flex';
+                document.body.style.cursor = 'auto';   // 显示鼠标，便于点设置
+                if (document.pointerLockElement) { try { document.exitPointerLock(); } catch (e) {} }
+                isLocked = false;
+            } else {
+                if (panel) panel.style.display = 'none';
+                document.body.style.cursor = 'none';
+                isLocked = true;
+                // Chromium 不允许 ESC 退出 pointer lock 后立即重锁，延迟一小段再请求；
+                // 若仍失败，用户点击画面会再次触发（见 click 监听）。
+                setTimeout(() => { try { document.getElementById('gameCanvas').requestPointerLock(); } catch (e) {} }, 120);
+            }
+        }
 
         // 脚步声音效
         let stepGrassAudio, stepStoneAudio;
@@ -1140,22 +1164,8 @@
 
         function saveGameMC() {
             try {
-                // Capture modified blocks from current chunks vs generated
-                // First, diff existing chunks against freshly generated data
-                for (const [key, chunk] of chunks) {
-                    const [cx, cz] = key.split(',').map(Number);
-                    const freshData = generateChunkData(cx, cz);
-                    for (let i = 0; i < chunk.data.length; i++) {
-                        if (chunk.data[i] !== freshData[i]) {
-                            const lx = i % CHUNK_SIZE;
-                            const lz = Math.floor(i / CHUNK_SIZE) % CHUNK_SIZE;
-                            const ly = Math.floor(i / (CHUNK_SIZE * CHUNK_SIZE));
-                            const wx = cx * CHUNK_SIZE + lx;
-                            const wz = cz * CHUNK_SIZE + lz;
-                            modifiedBlocks[`${wx},${ly},${wz}`] = chunk.data[i];
-                        }
-                    }
-                }
+                // modifiedBlocks 已由 setBlock 维护为 dirty 集合（只含真正改动过的方块），
+                // 直接保存即可。
                 const saveData = {
                     px: player.position.x, py: player.position.y, pz: player.position.z,
                     yaw, pitch,
@@ -1196,17 +1206,55 @@
                 // 重建快捷栏UI以匹配加载的数据
                 initUI();
 
-                // Rebuild chunks and apply modifications
+                // 应用存档改动：先批量写进各区块 data，最后每个受影响区块只重建一次。
+                // 旧做法对每个方块调一次 setBlock（每次重建整块），几千条会卡几十秒。
                 updateChunks();
-                // Apply modified blocks
-                for (const [key, blockType] of Object.entries(modifiedBlocks)) {
-                    const [bx, by, bz] = key.split(',').map(Number);
-                    setBlock(bx, by, bz, blockType);
+                const affected = new Set();
+                for (const key of Object.keys(modifiedBlocks)) {
+                    const parts = key.split(',');
+                    const bx = parseInt(parts[0]);
+                    const by = parseInt(parts[1]);
+                    const bz = parseInt(parts[2]);
+                    if (by < 0 || by >= CHUNK_HEIGHT) continue;
+                    const { cx, cz } = worldToChunk(bx, bz);
+                    let chunk = getChunk(cx, cz);
+                    if (!chunk) { loadChunk(cx, cz); chunk = getChunk(cx, cz); }
+                    if (!chunk) continue;
+                    const lx = ((bx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+                    const lz = ((bz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+                    chunk.data[lx + lz * CHUNK_SIZE + by * CHUNK_SIZE * CHUNK_SIZE] = modifiedBlocks[key];
+                    affected.add(cx + ',' + cz);
+                    if (lx === 0) affected.add((cx - 1) + ',' + cz);
+                    if (lx === CHUNK_SIZE - 1) affected.add((cx + 1) + ',' + cz);
+                    if (lz === 0) affected.add(cx + ',' + (cz - 1));
+                    if (lz === CHUNK_SIZE - 1) affected.add(cx + ',' + (cz + 1));
+                }
+                for (const ck of affected) {
+                    const p = ck.split(',');
+                    rebuildChunk(parseInt(p[0]), parseInt(p[1]));
                 }
                 showSaveToast('已加载');
             } catch (e) {
                 showSaveToast('加载失败');
             }
+        }
+
+        // 联机开局：丢弃本地旧存档的世界，按共享种子重开 + 落到合法出生点，
+        // 修复“加入联机仍加载旧档、卡进虚空”。
+        function resetWorldForMp() {
+            modifiedBlocks = {};
+            chunkLoadQueue = []; chunkLoadQueueSet = new Set();
+            for (const [key, chunk] of chunks) {
+                if (chunk.opaqueMesh) { scene.remove(chunk.opaqueMesh); chunk.opaqueMesh.geometry.dispose(); chunk.opaqueMesh.material.dispose(); }
+                if (chunk.transparentMesh) { scene.remove(chunk.transparentMesh); chunk.transparentMesh.geometry.dispose(); chunk.transparentMesh.material.dispose(); }
+            }
+            chunks.clear();
+            currentRenderDistance = INITIAL_RENDER_DISTANCE;
+            player.position.set(8, 50, 8);
+            player.velocity.set(0, 0, 0);
+            loadChunk(0, 0);            // 先确保出生点区块有数据，findSpawnPoint 才找得到地面
+            updateChunks();
+            findSpawnPoint();
         }
 
         document.addEventListener('keydown', e => {
@@ -1287,6 +1335,7 @@
                     if (!mpIsHost) {
                         mpActive = true;
                         document.getElementById('mpLobby').style.display = 'none';
+                        resetWorldForMp();        // 加入联机：重置到共享种子的世界 + 合法出生点，避免卡虚空
                         startGameCommon();
                         // Create remote players for existing peers
                         for (var [pid, pp] of mpPlayers) {
@@ -1565,6 +1614,7 @@
         document.getElementById('mpStartGameBtn').addEventListener('click', function() {
             mpSafeSend({ type: 'game-start' });
             document.getElementById('mpLobby').style.display = 'none';
+            resetWorldForMp();        // 开房：主机也重置到共享种子的新世界，和加入方一致
             startGameCommon();
             for (var [pid4, pp4] of mpPlayers) {
                 if (Number(pid4) !== mpMyId && !remotePlayers.has(Number(pid4))) {
@@ -1586,6 +1636,12 @@
 
         // ============ 初始化 ============
         function init() {
+            loadSettings();
+            // 绑定设置面板 checkbox
+            const _aj = document.getElementById('setAutoJump');
+            const _cf = document.getElementById('setCanFly');
+            if (_aj) { _aj.checked = settings.autoJump; _aj.addEventListener('change', () => { settings.autoJump = _aj.checked; saveSettings(); }); }
+            if (_cf) { _cf.checked = settings.canFly; _cf.addEventListener('change', () => { settings.canFly = _cf.checked; saveSettings(); }); }
             // 初始化全局THREE对象
             player.position = new THREE.Vector3(8, 50, 8);
             player.velocity = new THREE.Vector3(0, 0, 0);
@@ -1594,7 +1650,6 @@
 
             // 初始化音乐控制
             const bgMusic = document.getElementById('bgMusic');
-            const musicBtn = document.getElementById('musicBtn');
             bgMusic.volume = 0.5;
 
             // 初始化脚步声音效
@@ -1602,18 +1657,6 @@
             stepStoneAudio = document.getElementById('stepStone');
             stepGrassAudio.volume = 0.3;
             stepStoneAudio.volume = 0.3;
-
-            musicBtn.addEventListener('click', () => {
-                if (bgMusic.paused) {
-                    bgMusic.play();
-                    musicBtn.classList.add('playing');
-                    musicBtn.textContent = '♫';
-                } else {
-                    bgMusic.pause();
-                    musicBtn.classList.remove('playing');
-                    musicBtn.textContent = '♪';
-                }
-            });
 
             // 创建纹理图集
             textureAtlas = createTextureAtlas();
@@ -1999,11 +2042,13 @@
             // 分别存储不透明和透明方块的顶点数据
             const opaqueVertices = [];
             const opaqueUVs = [];
+            const opaqueColors = [];
             const opaqueIndices = [];
             let opaqueVertexCount = 0;
 
             const transparentVertices = [];
             const transparentUVs = [];
+            const transparentColors = [];
             const transparentIndices = [];
             let transparentVertexCount = 0;
 
@@ -2179,10 +2224,16 @@
                 }
             };
 
-            const addFace = (vertices, uvs, indices, vertexCount, x, y, z, face, textureIndex) => {
+            const addFace = (vertices, uvs, colors, indices, vertexCount, x, y, z, face, textureIndex) => {
                 const positions = getFacePositions(x, y, z, face);
                 for (let i = 0; i < positions.length; i += 3) {
                     vertices.push(positions[i], positions[i + 1], positions[i + 2]);
+                }
+
+                // 环境光遮蔽 AO：算出该面 4 个顶点的遮蔽数（0.3~1.0），作为顶点色
+                const ao = calculateFaceAO(x, y, z, face);
+                for (let i = 0; i < 4; i++) {
+                    colors.push(ao[i], ao[i], ao[i]);
                 }
 
                 // 计算 UV 坐标
@@ -2248,6 +2299,7 @@
                                 transparentVertices.push(cross1Vertices[i], cross1Vertices[i + 1], cross1Vertices[i + 2]);
                             }
                             transparentUVs.push(...crossUVs);
+                            transparentColors.push(1,1,1, 1,1,1, 1,1,1, 1,1,1);
                             transparentIndices.push(
                                 transparentVertexCount, transparentVertexCount + 1, transparentVertexCount + 2,
                                 transparentVertexCount, transparentVertexCount + 2, transparentVertexCount + 3
@@ -2259,6 +2311,7 @@
                                 transparentVertices.push(cross2Vertices[i], cross2Vertices[i + 1], cross2Vertices[i + 2]);
                             }
                             transparentUVs.push(...crossUVs);
+                            transparentColors.push(1,1,1, 1,1,1, 1,1,1, 1,1,1);
                             transparentIndices.push(
                                 transparentVertexCount, transparentVertexCount + 1, transparentVertexCount + 2,
                                 transparentVertexCount, transparentVertexCount + 2, transparentVertexCount + 3
@@ -2314,12 +2367,12 @@
                                 const textureIndex = blockData.textures[texKey];
                                 if (isTransparent) {
                                     transparentVertexCount = addFace(
-                                        transparentVertices, transparentUVs, transparentIndices,
+                                        transparentVertices, transparentUVs, transparentColors, transparentIndices,
                                         transparentVertexCount, x, y, z, face, textureIndex
                                     );
                                 } else {
                                     opaqueVertexCount = addFace(
-                                        opaqueVertices, opaqueUVs, opaqueIndices,
+                                        opaqueVertices, opaqueUVs, opaqueColors, opaqueIndices,
                                         opaqueVertexCount, x, y, z, face, textureIndex
                                     );
                                 }
@@ -2335,11 +2388,13 @@
                 const geometry = new THREE.BufferGeometry();
                 geometry.setAttribute('position', new THREE.Float32BufferAttribute(opaqueVertices, 3));
                 geometry.setAttribute('uv', new THREE.Float32BufferAttribute(opaqueUVs, 2));
+                geometry.setAttribute('color', new THREE.Float32BufferAttribute(opaqueColors, 3));
                 geometry.setIndex(opaqueIndices);
                 geometry.computeVertexNormals();
 
                 const material = new THREE.MeshPhongMaterial({
                     map: textureAtlas.texture,
+                    vertexColors: true,
                     shininess: 5,
                     specular: 0x222222,
                     transparent: false,
@@ -2361,11 +2416,13 @@
                 const geometry = new THREE.BufferGeometry();
                 geometry.setAttribute('position', new THREE.Float32BufferAttribute(transparentVertices, 3));
                 geometry.setAttribute('uv', new THREE.Float32BufferAttribute(transparentUVs, 2));
+                geometry.setAttribute('color', new THREE.Float32BufferAttribute(transparentColors, 3));
                 geometry.setIndex(transparentIndices);
                 geometry.computeVertexNormals();
 
                 const material = new THREE.MeshPhongMaterial({
                     map: textureAtlas.texture,
+                    vertexColors: true,
                     shininess: 30,
                     specular: 0x444444,
                     transparent: true,
@@ -2469,6 +2526,7 @@
                 this.position = new THREE.Vector3(x, y, z);
                 this.velocity = new THREE.Vector3(0, 0, 0);
                 this.rotation = Math.random() * Math.PI * 2;
+                this.health = 10;
                 this.mesh = this.createMesh();
                 this.wanderTimer = 0;
                 this.wanderDirection = new THREE.Vector3();
@@ -2505,13 +2563,17 @@
                     [-w * 0.3, h * 0.2, w * 0.3],
                     [w * 0.3, h * 0.2, w * 0.3]
                 ];
+                this.legs = [];
                 positions.forEach(pos => {
                     const leg = new THREE.Mesh(legGeo, bodyMat);
                     leg.position.set(...pos);
                     leg.castShadow = true;
                     leg.receiveShadow = true;
                     group.add(leg);
+                    this.legs.push(leg);
                 });
+                this.walkPhase = 0;
+                this.onGround = true;
 
                 group.position.copy(this.position);
                 return group;
@@ -2544,6 +2606,15 @@
                     this.velocity.z *= 0.9;
                 }
 
+                // 上台阶跳跃（移动中 + 着地 + 前方有 1 格高方块）
+                if (this.onGround && (this.velocity.x || this.velocity.z)) {
+                    const ahead = getGroundHeight(this.position.x + this.velocity.x * 0.5, this.position.z + this.velocity.z * 0.5);
+                    if (ahead > this.position.y + 0.5 && ahead < this.position.y + 1.5) {
+                        this.velocity.y = 7;
+                        this.onGround = false;
+                    }
+                }
+
                 // 重力
                 this.velocity.y -= 20 * delta;
 
@@ -2552,11 +2623,32 @@
                 this.position.z += this.velocity.z * delta;
                 this.position.y += this.velocity.y * delta;
 
-                // 地面检测
+                // 地面检测（跳起时不吸附，让跳跃物理生效）
                 const groundY = getGroundHeight(this.position.x, this.position.z);
-                if (this.position.y < groundY) {
+                if (this.position.y < groundY && this.velocity.y <= 0) {
                     this.position.y = groundY;
                     this.velocity.y = 0;
+                    this.onGround = true;
+                } else if (this.position.y >= groundY) {
+                    this.onGround = false;
+                }
+
+                // 腿部摆动动画
+                if (this.legs && this.legs.length) {
+                    const moving = (this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z) > 0.01;
+                    if (moving) {
+                        this.walkPhase += delta * 8;
+                        const sw = Math.sin(this.walkPhase) * 0.6;
+                        this.legs[0].rotation.x = sw;
+                        this.legs[3].rotation.x = sw;
+                        this.legs[1].rotation.x = -sw;
+                        this.legs[2].rotation.x = -sw;
+                    } else {
+                        this.legs[0].rotation.x = 0;
+                        this.legs[1].rotation.x = 0;
+                        this.legs[2].rotation.x = 0;
+                        this.legs[3].rotation.x = 0;
+                    }
                 }
 
                 // 更新mesh
@@ -2654,6 +2746,10 @@
             const index = lx + lz * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE;
 
             chunk.data[index] = blockType;
+            // 记录到存档用的 dirty 集合：只存真正改动过的方块。
+            // 不再用「重新生成地形再 diff」，因为植被用 Math.random() 每次不同，
+            // diff 会把所有树/花误判为改动，存档膨胀、loadGameMC 卡几十秒。
+            modifiedBlocks[`${x},${y},${z}`] = blockType;
 
             // 重建区块网格
             if (chunk.opaqueMesh) {
@@ -2715,8 +2811,13 @@
         function updatePlayer(delta) {
             const inWater = isInWater();
 
-            // 重力（水中减弱）
-            if (inWater) {
+            // 飞行模式：无重力，空格上升 / Shift 下降
+            if (flying) {
+                player.velocity.y = ((moveUp ? 1 : 0) - (moveDown ? 1 : 0)) * 6;
+                player.velocity.y *= 0.9;
+                player.onGround = false;
+            } else if (inWater) {
+                // 重力（水中减弱）
                 player.velocity.y -= 5 * delta;  // 水中重力减弱
                 // 按住空格上浮
                 if (moveUp) {
@@ -2752,6 +2853,26 @@
                 player.velocity.z = 0;
             }
 
+            // autoJump 提前起跳：还没贴到方块就跳，弧线正好落上去（更自然）
+            if (settings.autoJump && player.onGround && !flying) {
+                const hSpeed = Math.sqrt(player.velocity.x * player.velocity.x + player.velocity.z * player.velocity.z);
+                if (hSpeed > 0.1) {
+                    const dx = player.velocity.x / hSpeed;
+                    const dz = player.velocity.z / hSpeed;
+                    const fx = player.position.x + dx * 0.7;
+                    const fz = player.position.z + dz * 0.7;
+                    const feetY = Math.floor(player.position.y);
+                    const ahead = getBlock(fx, feetY, fz);
+                    const above = getBlock(fx, feetY + 1, fz);
+                    const aheadData = BlockData[ahead];
+                    if (ahead !== BlockTypes.AIR && ahead !== BlockTypes.WATER &&
+                        !(aheadData && aheadData.crossTexture) && above === BlockTypes.AIR) {
+                        player.velocity.y = 8.5;
+                        player.onGround = false;
+                    }
+                }
+            }
+
             // 碰撞检测和移动
             const steps = 10;
             for (let i = 0; i < steps; i++) {
@@ -2759,7 +2880,12 @@
                 player.position.x += player.velocity.x * delta / steps;
                 if (checkCollision()) {
                     player.position.x -= player.velocity.x * delta / steps;
-                    player.velocity.x = 0;
+                    if (settings.autoJump && !flying) {
+                        if (player.onGround) { player.velocity.y = 8.5; player.onGround = false; }
+                        // autoJump 时保留水平速度，让玩家斜抛上台阶（不原地卡住）
+                    } else {
+                        player.velocity.x = 0;
+                    }
                 }
 
                 // Y轴移动
@@ -2779,8 +2905,20 @@
                 player.position.z += player.velocity.z * delta / steps;
                 if (checkCollision()) {
                     player.position.z -= player.velocity.z * delta / steps;
-                    player.velocity.z = 0;
+                    if (settings.autoJump && !flying) {
+                        if (player.onGround) { player.velocity.y = 8.5; player.onGround = false; }
+                    } else {
+                        player.velocity.z = 0;
+                    }
                 }
+            }
+
+            // 按住空格连续跳（真 MC 节奏）：这一帧若刚落地且仍按住空格，立刻再起跳，
+            // 这样按住空格就能像真 MC 一样有节奏地连跳（而不是按一次跳一下、松开再按→顿挫）。
+            if (!flying && !settings.autoJump && moveUp && player.onGround && !isInWater()) {
+                player.velocity.y = 8;
+                player.onGround = false;
+                canJump = false;
             }
 
             // 更新相机位置
@@ -2876,8 +3014,7 @@
                 const block = getBlock(x, y, z);
                 const blockData = BlockData[block];
 
-                if (block !== BlockTypes.AIR && block !== BlockTypes.WATER &&
-                    !(blockData && blockData.crossTexture)) {
+                if (block !== BlockTypes.AIR && block !== BlockTypes.WATER) {
                     return {
                         block: { x: Math.floor(x), y: Math.floor(y), z: Math.floor(z) },
                         placeBlock: { x: prevX, y: prevY, z: prevZ },
@@ -2891,6 +3028,33 @@
             }
 
             return null;
+        }
+
+        function attackMob() {
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const oldFar = raycaster.far;
+            raycaster.far = 5;  // 攻击距离
+            const hits = raycaster.intersectObjects(mobs.map(m => m.mesh), true);
+            raycaster.far = oldFar;
+            if (hits.length === 0) return false;
+            // 命中的子 mesh 向上找所属 mob（group）
+            let cur = hits[0].object;
+            let mob = null;
+            while (cur && !mob) { mob = mobs.find(m => m.mesh === cur); cur = cur.parent; }
+            if (!mob || mob.remote) return false;  // 远程 mob 由 host 控制，不打
+            mob.health -= 5;
+            // 受击击退（远离玩家方向）
+            const dx = mob.position.x - player.position.x;
+            const dz = mob.position.z - player.position.z;
+            const len = Math.sqrt(dx * dx + dz * dz) || 1;
+            mob.velocity.x = dx / len * 4;
+            mob.velocity.z = dz / len * 4;
+            mob.velocity.y = 4;
+            if (mob.health <= 0) {
+                const idx = mobs.indexOf(mob);
+                if (idx >= 0) { mob.destroy(); mobs.splice(idx, 1); }
+            }
+            return true;
         }
 
         function breakBlock() {
@@ -3032,25 +3196,27 @@
                 document.getElementById('debug').style.display = 'block';
                 document.getElementById('blockName').style.display = 'block';
                 document.getElementById('statusBar').style.display = 'block';
-                // 延迟尝试pointer lock
+                // 立即（在点击手势内）请求指针锁，避免光标跑出窗口；再延迟兜底重试一次
+                try { document.getElementById('gameCanvas').requestPointerLock(); } catch(e) {}
                 setTimeout(() => {
-                    try { document.getElementById('gameCanvas').requestPointerLock(); } catch(e) {}
+                    try { if (!document.pointerLockElement) document.getElementById('gameCanvas').requestPointerLock(); } catch(e) {}
                 }, 100);
             });
 
             // 点击游戏画面也尝试pointer lock
             document.addEventListener('click', () => {
-                if (gameStarted && !document.pointerLockElement) {
+                if (gameStarted && !paused && !document.pointerLockElement) {
+                    document.body.style.cursor = 'none';
                     try { document.getElementById('gameCanvas').requestPointerLock(); } catch(e) {}
                 }
             });
 
-            // 指针锁定
-            var gameStarted = false;
+            // 指针锁定（gameStarted 已在顶层声明）
             document.addEventListener('pointerlockchange', () => {
                 if (gameStarted && !document.pointerLockElement) {
-                    // 游戏已开始，pointer lock丢失时不回主页，但允许重新锁定
+                    // 游戏中按 ESC 退出 pointer lock → 打开设置面板
                     isLocked = false;
+                    if (!paused) toggleSettings();
                     return;
                 }
                 isLocked = !!document.pointerLockElement;
@@ -3112,12 +3278,12 @@
 
             // 鼠标点击
             document.addEventListener('mousedown', (e) => {
-                if (!isLocked) return;
+                if (!isLocked && !gameStarted) return;
 
                 e.preventDefault();
 
                 if (e.button === 0) {
-                    breakBlock();
+                    if (!attackMob()) breakBlock();
                 } else if (e.button === 2) {
                     placeBlock();
                 }
@@ -3133,20 +3299,32 @@
 
             // 键盘
             document.addEventListener('keydown', (e) => {
-                if (!isLocked) return;
+                if (paused) { if (e.code === 'Escape') toggleSettings(); return; }
+                if (!isLocked && !gameStarted) return;
 
                 switch (e.code) {
                     case 'KeyW': moveForward = true; break;
                     case 'KeyS': moveBackward = true; break;
                     case 'KeyA': moveLeft = true; break;
                     case 'KeyD': moveRight = true; break;
-                    case 'Space':
+                    case 'Space': {
+                        const now = performance.now();
+                        if (settings.canFly && now - lastSpaceTime < 300) {
+                            flying = !flying;
+                            lastSpaceTime = 0;
+                            moveUp = true;
+                            break;
+                        }
+                        lastSpaceTime = now;
                         moveUp = true;
+                        if (flying) break;  // 飞行中空格=上升，不跳
                         if (canJump && !isInWater()) {
                             player.velocity.y = 8;
                             canJump = false;
                         }
                         break;
+                    }
+                    case 'ShiftLeft': moveDown = true; break;
                     case 'Digit1': selectSlot(0); break;
                     case 'Digit2': selectSlot(1); break;
                     case 'Digit3': selectSlot(2); break;
@@ -3172,12 +3350,13 @@
                     case 'KeyA': moveLeft = false; break;
                     case 'KeyD': moveRight = false; break;
                     case 'Space': moveUp = false; break;
+                    case 'ShiftLeft': moveDown = false; break;
                 }
             });
 
             // 滚轮
             document.addEventListener('wheel', (e) => {
-                if (!isLocked) return;
+                if (!isLocked && !gameStarted) return;
 
                 if (e.deltaY > 0) {
                     selectSlot((hotbarSlot + 1) % 9);
@@ -3212,7 +3391,7 @@
             }
 
             // 区块始终分帧加载（即使未锁定，方便后台预加载）
-            if (isLocked) {
+            if (gameStarted && !paused) {
                 updatePlayer(delta);
                 // Host runs mob AI, joiner skips
                 if (!mpActive || mpIsHost) {

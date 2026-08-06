@@ -44,6 +44,68 @@
     <div class="splash-particles" id="splashParticles"></div>
   </div>
 
+  <!-- 注册 / 登陆 -->
+  <div id="frOnboardModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:100001;align-items:center;justify-content:center;">
+    <div style="background:#1e293b;border:1px solid rgba(102,126,234,0.4);border-radius:14px;padding:28px;max-width:360px;width:90%;text-align:center;">
+      <div style="font-size:40px;">👋</div>
+      <h3 style="margin:10px 0 6px;">游戏中心账号</h3>
+      <div style="display:flex;gap:8px;margin:6px 0 16px;">
+        <button id="frTabRegister" class="mp-action-btn" style="flex:1;">注册</button>
+        <button id="frTabLogin" class="mp-action-btn" style="flex:1;opacity:0.5;">登陆</button>
+      </div>
+      <div id="frAuthError" style="display:none;color:#ef4444;font-size:13px;margin-bottom:10px;min-height:16px;"></div>
+      <input type="text" id="frAuthName" placeholder="昵称" maxlength="16" style="width:100%;box-sizing:border-box;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.05);color:#fff;outline:none;font-size:15px;text-align:center;margin-bottom:8px;">
+      <input type="password" id="frAuthPass" placeholder="密码（至少 4 位）" style="width:100%;box-sizing:border-box;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.05);color:#fff;outline:none;font-size:15px;text-align:center;margin-bottom:8px;">
+      <input type="password" id="frAuthPass2" placeholder="确认密码" style="width:100%;box-sizing:border-box;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.05);color:#fff;outline:none;font-size:15px;text-align:center;margin-bottom:8px;">
+      <button id="frAuthSubmit" class="mp-action-btn" style="width:100%;margin-top:6px;">注册</button>
+    </div>
+  </div>
+
+  <!-- 好友邀请浮窗 -->
+  <div id="frInviteToast" style="display:none;position:fixed;bottom:20px;right:20px;background:#1e293b;border:1px solid #667eea;border-radius:10px;padding:14px 18px;z-index:100000;box-shadow:0 8px 24px rgba(0,0,0,0.4);max-width:300px;">
+    <div id="frInviteText" style="margin-bottom:10px;font-size:14px;"></div>
+    <button id="frInviteAccept" class="mp-action-btn" style="padding:6px 14px;font-size:13px;">接受</button>
+    <button id="frInviteDecline" style="padding:6px 14px;font-size:13px;margin-left:6px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#ccc;border-radius:6px;cursor:pointer;">拒绝</button>
+  </div>
+
+  <!-- 好友面板（全局浮窗，导航栏"好友"按钮触发；不依赖选中的游戏） -->
+  <div class="mp-panel" id="friendsPanel" style="display:none;position:fixed;top:72px;right:16px;width:420px;max-height:82vh;overflow-y:auto;z-index:99990;background:#1e293b;box-shadow:0 8px 24px rgba(0,0,0,0.4);">
+    <div class="mp-panel-header">
+      <h3>好友</h3>
+      <button class="mp-close-btn" id="frCloseBtn">&times;</button>
+    </div>
+    <div style="margin-bottom:12px;">
+      <span class="mp-label">我的好友码</span>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+        <code id="frMyCode" style="flex:1;font-size:22px;letter-spacing:4px;color:#a855f7;">----</code>
+        <button class="mp-copy-btn" id="frCopyCodeBtn" title="复制好友码" style="padding:6px 10px;font-size:12px;border-radius:6px;cursor:pointer;">复制</button>
+      </div>
+      <div class="mp-field" style="margin-top:8px;">
+        <label>我的昵称</label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="frMyName" maxlength="16" style="flex:1;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.05);color:#fff;outline:none;">
+          <button id="frSaveNameBtn" class="mp-action-btn" style="padding:8px 14px;">改名</button>
+        </div>
+      </div>
+    </div>
+    <div class="mp-field">
+      <label>添加好友（输入 8 位好友码）</label>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <input type="text" id="frAddInput" inputmode="numeric" placeholder="8 位好友码" maxlength="8" style="width:100%;box-sizing:border-box;padding:16px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.05);color:#fff;outline:none;font-size:24px;letter-spacing:8px;text-align:center;">
+        <button id="frAddBtn" class="mp-action-btn" style="padding:16px 14px;width:100%;">发送请求</button>
+      </div>
+    </div>
+    <div id="frRequests" style="margin:8px 0;"></div>
+    <div class="mp-field">
+      <span class="mp-label">好友列表</span>
+      <div id="frList" class="mp-player-list"></div>
+    </div>
+    <div style="margin-top:14px;border-top:1px solid rgba(255,255,255,0.1);padding-top:10px;display:flex;flex-direction:column;gap:8px;">
+      <button id="frLogoutBtn" style="width:100%;padding:8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.2);color:#ccc;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;">退出登陆</button>
+      <button id="frDeleteAccountBtn" style="width:100%;padding:8px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);color:#ef4444;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;">删除账号</button>
+    </div>
+  </div>
+
   <!-- 顶部导航栏 -->
   <nav class="navbar">
     <div class="navbar-brand">
@@ -64,6 +126,11 @@
       </svg>
       <input type="text" id="searchInput" placeholder="搜索游戏..." autocomplete="off">
     </div>
+    <span id="relayStatus" style="display:flex;align-items:center;gap:6px;padding:6px 12px;font-size:12px;color:#94a3b8;"><span id="relayStatusDot" style="width:8px;height:8px;border-radius:50%;background:#f59e0b;"></span><span id="relayStatusText">连接中</span></span>
+    <button id="friendsBtn" style="display:flex;align-items:center;gap:6px;padding:6px 14px;background:rgba(168,85,247,0.2);border:1px solid rgba(168,85,247,0.4);border-radius:6px;color:#a855f7;font-size:13px;cursor:pointer;font-family:inherit;">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      好友
+    </button>
     <a href="/download/游戏中心-2.0.0-Mac.dmg" id="downloadBtn" style="display:flex;align-items:center;gap:6px;padding:6px 14px;background:rgba(102,126,234,0.2);border:1px solid rgba(102,126,234,0.4);border-radius:6px;color:#667eea;text-decoration:none;font-size:13px;cursor:pointer;transition:background 0.2s;" onmouseover="this.style.background='rgba(102,126,234,0.35)'" onmouseout="this.style.background='rgba(102,126,234,0.2)'">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       下载本地版
@@ -196,7 +263,7 @@
                   </div>
                 </div>
                 <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;">
-                  <input type="checkbox" id="mpPvPCheck" style="width:16px;height:16px;accent-color:#ef4444;cursor:pointer;flex-shrink:0;">
+                  <input type="checkbox" id="mpPvPCheck" checked style="width:16px;height:16px;accent-color:#ef4444;cursor:pointer;flex-shrink:0;">
                   <label for="mpPvPCheck" style="margin:0;cursor:pointer;color:#ef4444;font-size:14px;font-weight:500;">PvP 玩家对打</label>
                 </div>
                 <button class="mp-action-btn" id="mpCreateBtn">创建房间</button>
@@ -232,15 +299,16 @@
                 </div>
                 <div class="mp-field">
                   <label>手动输入房间号</label>
-                  <div style="display:flex;gap:8px;align-items:center;">
-                    <input type="text" id="mpJoinRoomCode" placeholder="4位房间号" maxlength="4" style="flex:1;font-size:24px;letter-spacing:12px;text-align:center;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.05);color:#fff;outline:none;">
-                    <button class="mp-action-btn" id="mpJoinBtn" style="padding:12px 20px;font-size:16px;">加入</button>
+                  <div style="display:flex;flex-direction:column;gap:8px;">
+                    <input type="text" id="mpJoinRoomCode" placeholder="房间号" maxlength="6" style="width:100%;box-sizing:border-box;font-size:30px;letter-spacing:10px;text-align:center;padding:18px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.05);color:#fff;outline:none;">
+                    <button class="mp-action-btn" id="mpJoinBtn" style="padding:18px 20px;font-size:18px;width:100%;">加入</button>
                   </div>
                   <div class="mp-join-status" id="mpJoinStatus" style="margin-top:4px;"></div>
                 </div>
               </div>
             </div>
           </div>
+
           <div class="detail-section">
             <h3>关于游戏</h3>
             <p id="detailDesc"></p>
@@ -254,9 +322,14 @@
     </main>
   </div>
 
+  <!-- 网页版（非 Electron）联机兼容层：必须在 inline script 之前加载，
+       否则 inline script 执行时 window.electronAPI 还不存在，onMpMessage 注册会失败 -->
+  <script src="web-api.js"></script>
+
   <script>
     const games = [
       { id:'狩猎游戏', name:'狩猎游戏', desc:'3D第一人称射击狩猎游戏，在广袤的自然场景中追踪猎物，体验真实的射击手感和沉浸式狩猎体验。', icon:'🎯', file:'index.html', tags:['射击','3D','第一人称'], genre:'射击游戏' },
+      { id:'warthunder-game', name:'陆空对战', desc:'类战争雷霆 3D 载具对战！坦克/飞机双模式，鼠标瞄准炮塔（带高低机）、飞行教官自动改平；弹药殉爆/起火、多条命重生，与 AI 队友并肩作战。', icon:'🛡️', file:'index.html', tags:['射击','3D','对战','载具'], genre:'射击游戏' },
       { id:'3D我的世界', name:'3D 我的世界', desc:'3D方块世界建造游戏，自由探索无限世界，采集资源，建造属于自己的建筑奇迹。', icon:'🧱', file:'3D我的世界.html', tags:['沙盒','3D','建造'], genre:'沙盒游戏' },
       { id:'2D我的世界', name:'2D 我的世界', desc:'2D像素方块世界，经典横版沙盒体验，挖掘、建造、生存。', icon:'⬛', file:'2D我的世界.html', tags:['沙盒','2D','像素'], genre:'沙盒游戏' },
       { id:'3D开车', name:'3D 开车', desc:'3D驾驶模拟，真实物理引擎，多款车辆可选，自由驰骋在开放道路上。', icon:'🚗', file:'3D开车.html', tags:['驾驶','3D','模拟'], genre:'模拟游戏' },
@@ -284,7 +357,8 @@
       { id:'地平线', name:'地平线', desc:'开放世界驾驶，山路漂移、海岸公路、测速挑战，体验自由驰骋的速度与激情。', icon:'🏁', file:'index.html', tags:['赛车','3D','开放世界','驾驶'], genre:'赛车游戏' },
       { id:'physics_ammo_break', name:'物理破碎', desc:'Ammo.js物理引擎演示，投掷球体击碎场景中的物体，体验真实的凸体破碎效果。', icon:'💥', file:'index.html', tags:['物理','3D','演示'], genre:'休闲游戏' },
       { id:'钓鱼游戏', name:'俄罗斯钓鱼', desc:'3D钓鱼模拟游戏，在湖畔、河流、码头等多个场景中体验真实钓鱼。收集图鉴，升级装备，钓到传说中的大鱼！', icon:'🎣', file:'index.html', tags:['模拟','3D','钓鱼','休闲'], genre:'模拟游戏' },
-      { id:'星露谷物语', name:'星露谷物语', desc:'像素风农场模拟RPG，种植作物、浇水施肥、收获出售，体验悠闲的田园生活！支持四季更替、天气系统和商店经济。', icon:'🌾', file:'星露谷物语.html', tags:['模拟','农场','像素','RPG'], genre:'模拟游戏' }
+      { id:'星露谷物语', name:'星露谷物语', desc:'像素风农场模拟RPG，种植作物、浇水施肥、收获出售，体验悠闲的田园生活！支持四季更替、天气系统和商店经济。', icon:'🌾', file:'星露谷物语.html', tags:['模拟','农场','像素','RPG'], genre:'模拟游戏' },
+      { id:'florr', name:'花朵大作战', desc:'类 florr.io 花朵生存对战！鼠标控制花朵，花瓣环绕自动攻击怪物，击杀掉落经验升级、解锁花瓣槽；支持互联网房间与其他玩家 PvP 对战。', icon:'🌸', file:'index.html', tags:['生存','2D','联机','PvP'], genre:'生存游戏' }
     ];
 
     const sidebar = document.getElementById('sidebar');
@@ -412,6 +486,7 @@
     let mpState = 'idle'; // idle | hosting | joined
     let mpHostInfo = null; // { ip, port }
     let mpPlayers = [];
+    let mpMyId = null;
     let mpTeam = { host: 'red', join: 'red' };
     let mpNetMode = 'internet'; // 'internet' | 'lan'
 
@@ -420,13 +495,50 @@
       mpNetMode = 'internet';
       document.getElementById('mpModeInternet').style.cssText = 'flex:1;padding:8px;font-size:13px;background:rgba(102,126,234,0.25);border:2px solid #667eea;color:#667eea;';
       document.getElementById('mpModeLAN').style.cssText = 'flex:1;padding:8px;font-size:13px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#888;';
-      if (document.getElementById('mpInternetRooms')) document.getElementById('mpInternetRooms').parentElement.style.display = '';
+      if (window.electronAPI && window.electronAPI.mpDiscoverStop) window.electronAPI.mpDiscoverStop();
+      const roomsEl = document.getElementById('mpInternetRooms');
+      if (roomsEl) {
+        roomsEl.parentElement.style.display = '';
+        roomsEl.parentElement.querySelector('label').textContent = '互联网房间（自动刷新）';
+      }
     });
     document.getElementById('mpModeLAN').addEventListener('click', () => {
       mpNetMode = 'lan';
       document.getElementById('mpModeLAN').style.cssText = 'flex:1;padding:8px;font-size:13px;background:rgba(34,197,94,0.25);border:2px solid #22c55e;color:#22c55e;';
       document.getElementById('mpModeInternet').style.cssText = 'flex:1;padding:8px;font-size:13px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#888;';
-      if (document.getElementById('mpInternetRooms')) document.getElementById('mpInternetRooms').parentElement.style.display = 'none';
+      const roomsEl = document.getElementById('mpInternetRooms');
+      if (roomsEl) {
+        roomsEl.parentElement.style.display = '';
+        roomsEl.parentElement.querySelector('label').textContent = '局域网主机（自动扫描）';
+        roomsEl.innerHTML = '<div style="color:#888;text-align:center;padding:12px;font-size:13px;">扫描局域网中...</div>';
+      }
+      if (window.electronAPI && window.electronAPI.mpDiscoverStart) {
+        window.electronAPI.onMpDiscover(function(servers) {
+          if (!roomsEl) return;
+          if (!servers || !servers.length) { roomsEl.innerHTML = '<div style="color:#888;text-align:center;padding:12px;font-size:13px;">未发现局域网主机</div>'; return; }
+          roomsEl.innerHTML = servers.map(function(s) {
+            return '<div class="mp-lan-room" data-ip="' + s.ip + '" data-port="' + s.port + '" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;margin:3px 0;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.25);border-radius:6px;cursor:pointer;" onmouseover="this.style.background=\'rgba(34,197,94,0.2)\'" onmouseout="this.style.background=\'rgba(34,197,94,0.1)\'"><div><span style="color:#22c55e;font-weight:600;">' + s.name + '</span>' + (s.game ? '<span style="color:#888;font-size:12px;margin-left:8px;">' + s.game + '</span>' : '') + '</div><div><span style="color:#666;font-size:12px;">' + s.ip + ':' + s.port + '</span></div></div>';
+          }).join('');
+          roomsEl.querySelectorAll('.mp-lan-room').forEach(function(item) {
+            item.addEventListener('click', async function() {
+              var ip = item.dataset.ip, port = parseInt(item.dataset.port) || 0;
+              var name = document.getElementById('mpJoinName').value.trim() || '玩家';
+              var st = document.getElementById('mpJoinStatus');
+              st.textContent = '连接中...'; st.style.color = 'var(--yellow)';
+              try {
+                var res = await window.electronAPI.mpJoin(ip, port, name);
+                if (res && res.error) throw new Error(res.error);
+                mpState = 'joined'; mpPlayers = []; mpMyId = (res && res.id != null) ? res.id : null;
+                document.getElementById('mpJoinForm').style.display = 'none';
+                document.getElementById('mpJoinConnected').style.display = 'block';
+                renderPlayerList();
+                st.textContent = '已加入！'; st.style.color = 'var(--green)';
+              } catch (e) { st.textContent = '连接失败: ' + e.message; st.style.color = 'var(--red)'; }
+            });
+          });
+        });
+        window.electronAPI.mpDiscoverStart();
+      }
     });
 
     function selectMpTeam(panel, team) {
@@ -443,6 +555,8 @@
     }
 
     mpBtn.addEventListener('click', () => {
+      const fp = document.getElementById('friendsPanel');
+      if (fp) fp.style.display = 'none';
       mpPanel.style.display = mpPanel.style.display === 'none' ? 'block' : 'none';
     });
     mpCloseBtn.addEventListener('click', () => { mpPanel.style.display = 'none'; });
@@ -481,6 +595,8 @@
           const res = await fetch(roomsUrl);
           rooms = await res.json();
         }
+        // 过滤掉自己创建的房间（不该看到/加入自己的房间）
+        if (mpHostInfo && mpHostInfo.roomId) rooms = rooms.filter(r => r.roomId !== mpHostInfo.roomId);
         if (rooms.length === 0) {
           el.innerHTML = '<div style="color:#888;text-align:center;padding:12px;font-size:13px;">暂无在线房间<br><span style="color:#666;font-size:11px;">刷新中...</span></div>';
         } else {
@@ -509,11 +625,13 @@
     if (window.electronAPI && window.electronAPI.onMpMessage) {
       window.electronAPI.onMpMessage((msg) => {
         if (msg.type === 'player-list') {
-          // 一次性接收完整玩家列表，替换已有数据
-          mpPlayers = msg.players.map(p => ({ id: p.id, name: p.name }));
+          // 一次性接收完整玩家列表，过滤掉自己
+          mpPlayers = msg.players
+            .filter(p => p.id !== mpMyId)
+            .map(p => ({ id: p.id, name: p.name }));
           renderPlayerList();
         } else if (msg.type === 'player-join') {
-          if (!mpPlayers.some(p => p.id === msg.id)) {
+          if (msg.id !== mpMyId && !mpPlayers.some(p => p.id === msg.id)) {
             mpPlayers.push({ id: msg.id, name: msg.name });
           }
           renderPlayerList();
@@ -523,16 +641,19 @@
         } else if (msg.type === 'disconnected') {
           mpState = 'idle';
           mpPlayers = [];
+          mpMyId = null;
           showJoinForm();
-        } else if (msg.type === 'game-start' && mpState === 'joined' && selectedGame) {
-          // Host 开始了游戏，自动跳转
+        } else if (msg.type === 'game-start' && mpState === 'joined') {
+          // 直接使用 host 的 gamePath，joiner 不需要预先在 sidebar 选游戏
+          let gamePath = msg.gamePath;
           const team = mpTeam.join;
-          const sep = selectedGame.file.includes('?') ? '&' : '?';
-          let params = '';
-          if (msg.pvp) params += 'pvp=1';
-          if (team) params += (params ? '&' : '') + 'team=' + team;
-          const gamePath = `games/${selectedGame.id}/${selectedGame.file}${params ? sep + params : ''}`;
-          if (window.electronAPI && window.electronAPI.launchGame) {
+          let extra = '';
+          if (msg.pvp && gamePath && !gamePath.includes('pvp=1')) extra += 'pvp=1';
+          if (team && gamePath && !gamePath.includes('team=')) extra += (extra ? '&' : '') + 'team=' + team;
+          if (extra && gamePath) {
+            gamePath += (gamePath.includes('?') ? '&' : '?') + extra;
+          }
+          if (gamePath && window.electronAPI && window.electronAPI.launchGame) {
             window.electronAPI.launchGame(gamePath);
           }
         }
@@ -564,6 +685,7 @@
         if (mpHostInfo.error) { alert('创建房间失败: ' + mpHostInfo.error); return; }
         mpState = 'hosting';
         mpPlayers = [];
+        mpMyId = 0; // host always playerId 0
         document.getElementById('mpHostSetup').style.display = 'none';
         document.getElementById('mpHostInfo').style.display = 'block';
         if (mpHostInfo.roomId) {
@@ -649,9 +771,11 @@
       statusEl.style.color = 'var(--yellow)';
 
       try {
-        await window.electronAPI.mpJoin(roomCode, 0, name);
+        const joinRes = await window.electronAPI.mpJoin(roomCode, 0, name);
+        if (joinRes && joinRes.error) { throw new Error(joinRes.error); }
         mpState = 'joined';
         mpPlayers = [];
+        mpMyId = (joinRes && joinRes.id != null) ? joinRes.id : null;
         document.getElementById('mpJoinForm').style.display = 'none';
         document.getElementById('mpJoinConnected').style.display = 'block';
         renderPlayerList();
@@ -679,8 +803,315 @@
       showJoinForm();
     });
 
+    // ===== 好友系统 =====
+    const friendsPanel = document.getElementById('friendsPanel');
+    let frList = [];        // [{code,name,online,roomId}]
+    let frRequests = [];    // [{from,fromName,ts}]
+    let frProfile = null;
+
+    function prefillNames(name) {
+      const h = document.getElementById('mpHostName'); if (h) h.value = name;
+      const j = document.getElementById('mpJoinName'); if (j) j.value = name;
+      const m = document.getElementById('frMyName'); if (m) m.value = name;
+    }
+
+    function setupFrHandlers() {
+      if (!window.electronAPI || !window.electronAPI.onFrMessage) return;
+      var _relayRetryT = null;
+      window.electronAPI.onFrMessage((msg) => {
+        if (msg.type === 'relay-status') {
+          setRelayStatus(msg.online ? 'connected' : 'disconnected');
+          // 断线后温和自动重连（5秒后单次重试，不会风暴）
+          if (msg.online === false && frProfile && frProfile.code && !_relayRetryT) {
+            _relayRetryT = setTimeout(function() {
+              _relayRetryT = null;
+              setRelayStatus('connecting');
+              if (window.electronAPI.frConnect) window.electronAPI.frConnect();
+            }, 5000);
+          }
+        } else if (msg.type === 'identity-registered') {
+          if (_relayRetryT) { clearTimeout(_relayRetryT); _relayRetryT = null; }
+          setRelayStatus('connected');
+          frProfile = frProfile || {}; frProfile.code = msg.code;
+          if (msg.name) frProfile.name = msg.name;
+          if (window.electronAPI.frSaveCode) window.electronAPI.frSaveCode(msg.code);
+          if (window.electronAPI.frSetProfile && msg.name) window.electronAPI.frSetProfile(msg.name);
+          const m = document.getElementById('frOnboardModal'); if (m) m.style.display = 'none';
+          if (msg.name) prefillNames(msg.name);
+          renderFriends();
+          refreshFriends();
+        } else if (msg.type === 'friends-presence-snapshot') {
+          frList = msg.list || []; renderFriends();
+        } else if (msg.type === 'friend-online') {
+          const f = frList.find(x => x.code === msg.code);
+          if (f) { f.online = true; f.roomId = msg.roomId || null; if (msg.name) f.name = msg.name; }
+          else frList.push({ code: msg.code, name: msg.name, online: true, roomId: msg.roomId || null });
+          renderFriends();
+        } else if (msg.type === 'friend-offline') {
+          const f = frList.find(x => x.code === msg.code);
+          if (f) { f.online = false; f.roomId = null; }
+          renderFriends();
+        } else if (msg.type === 'friend-name-change') {
+          const f = frList.find(x => x.code === msg.code);
+          if (f) { f.name = msg.name; renderFriends(); }
+        } else if (msg.type === 'incoming-request') {
+          if (!frRequests.some(r => r.from === msg.from)) {
+            frRequests.push({ from: msg.from, fromName: msg.fromName, ts: msg.ts });
+            renderRequests();
+          }
+        } else if (msg.type === 'request-accepted' || msg.type === 'friend-added') {
+          refreshFriends();
+        } else if (msg.type === 'friend-removed') {
+          frList = frList.filter(x => x.code !== msg.code); renderFriends();
+        } else if (msg.type === 'incoming-invite') {
+          showInviteToast(msg);
+        } else if (msg.type === 'friend-request-result') {
+          if (msg.msg && msg.ok === false) alert(msg.msg);
+          refreshFriends();
+        } else if (msg.type === 'identity-rejected') {
+          showAuthModal('login', msg.msg || '请重新登录');
+        } else if (msg.type === 'auth-error') {
+          const errEl = document.getElementById('frAuthError');
+          if (errEl) { errEl.textContent = msg.msg || '操作失败'; errEl.style.display = 'block'; }
+          // 自动切换标签，引导走对的路：注册遇"已注册"→登陆；登陆遇"不存在"→注册
+          if (frAuthMode === 'register' && /已注册/.test(msg.msg || '')) {
+            frAuthMode = 'login'; applyAuthTab();
+            if (errEl) errEl.textContent = '该昵称已注册，已切换到「登陆」';
+          } else if (frAuthMode === 'login' && /不存在/.test(msg.msg || '')) {
+            frAuthMode = 'register'; applyAuthTab();
+            if (errEl) errEl.textContent = '账号不存在，已切换到「注册」';
+          }
+        }
+      });
+    }
+
+    async function refreshFriends() {
+      if (!window.electronAPI || !window.electronAPI.frList) return;
+      try {
+        const res = await window.electronAPI.frList();
+        frList = (res && res.list) || [];
+        renderFriends();
+      } catch (e) {}
+    }
+
+    function renderFriends() {
+      if (frProfile && frProfile.code) {
+        const codeEl = document.getElementById('frMyCode');
+        if (codeEl) codeEl.textContent = frProfile.code.replace(/(\d{4})(\d{4})/, '$1 $2');
+      }
+      const el = document.getElementById('frList');
+      if (!el) return;
+      if (!frList.length) {
+        el.innerHTML = '<div style="color:#888;padding:10px;text-align:center;font-size:13px;">还没有好友，输入好友码添加吧</div>';
+        return;
+      }
+      el.innerHTML = frList.map(f => {
+        const status = f.online
+          ? (f.roomId ? '<span style="color:#22c55e;">在房间中</span>' : '<span style="color:#94a3b8;">在线</span>')
+          : '<span style="color:#555;">离线</span>';
+        const joinBtn = (f.online && f.roomId)
+          ? `<button class="mp-action-btn" data-join="${f.roomId}" style="padding:4px 10px;font-size:12px;">加入</button>` : '';
+        const inviteBtn = (f.online && mpState === 'hosting')
+          ? `<button class="mp-action-btn" data-invite="${f.code}" style="padding:4px 10px;font-size:12px;margin-left:4px;">邀请</button>` : '';
+        const dotColor = f.online ? '#22c55e' : '#555';
+        return `<div class="mp-player-item" style="display:flex;justify-content:space-between;align-items:center;">
+          <span><span class="mp-player-dot" style="background:${dotColor};"></span>${f.name || f.code} ${status}</span>
+          <span>${joinBtn}${inviteBtn}</span>
+        </div>`;
+      }).join('');
+      el.querySelectorAll('[data-join]').forEach(b => b.addEventListener('click', async () => {
+        const res = await window.electronAPI.frJoin(b.dataset.join, (frProfile && frProfile.name) || '玩家');
+        if (res && res.error) { alert('加入失败: ' + res.error); return; }
+        mpState = 'joined'; mpPlayers = []; mpMyId = (res && res.id != null) ? res.id : null;
+        friendsPanel.style.display = 'none';
+      }));
+      el.querySelectorAll('[data-invite]').forEach(b => b.addEventListener('click', async () => {
+        await window.electronAPI.frInvite(b.dataset.invite);
+        b.textContent = '已邀请'; b.disabled = true;
+        setTimeout(() => { b.textContent = '邀请'; b.disabled = false; }, 2000);
+      }));
+    }
+
+    function renderRequests() {
+      const el = document.getElementById('frRequests');
+      if (!el) return;
+      if (!frRequests.length) { el.innerHTML = ''; return; }
+      el.innerHTML = frRequests.map(r => `
+        <div class="mp-player-item" style="display:flex;justify-content:space-between;align-items:center;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);margin:4px 0;padding:8px 10px;border-radius:6px;">
+          <span style="font-size:13px;">${r.fromName || r.from} 请求加你为好友</span>
+          <span>
+            <button class="mp-action-btn" data-accept="${r.from}" style="padding:4px 10px;font-size:12px;">接受</button>
+            <button class="mp-action-btn" data-reject="${r.from}" style="padding:4px 10px;font-size:12px;margin-left:4px;background:rgba(255,255,255,0.08);">拒绝</button>
+          </span>
+        </div>`).join('');
+      el.querySelectorAll('[data-accept]').forEach(b => b.addEventListener('click', async () => {
+        await window.electronAPI.frAccept(b.dataset.accept);
+        frRequests = frRequests.filter(x => x.from !== b.dataset.accept);
+        renderRequests(); refreshFriends();
+      }));
+      el.querySelectorAll('[data-reject]').forEach(b => b.addEventListener('click', async () => {
+        await window.electronAPI.frReject(b.dataset.reject);
+        frRequests = frRequests.filter(x => x.from !== b.dataset.reject);
+        renderRequests();
+      }));
+    }
+
+    function showInviteToast(msg) {
+      const toast = document.getElementById('frInviteToast');
+      if (!toast) return;
+      toast.dataset.roomId = msg.roomId || '';
+      document.getElementById('frInviteText').innerHTML = `<b>${msg.fromName || msg.from}</b> 邀请你加入房间 <code style="color:#a855f7;">${msg.roomId || ''}</code>`;
+      toast.style.display = 'block';
+    }
+
+    document.getElementById('friendsBtn').addEventListener('click', async () => {
+      mpPanel.style.display = 'none';
+      friendsPanel.style.display = friendsPanel.style.display === 'none' ? 'block' : 'none';
+      if (friendsPanel.style.display === 'block') { await refreshFriends(); renderRequests(); }
+    });
+    document.getElementById('frCloseBtn').addEventListener('click', () => { friendsPanel.style.display = 'none'; });
+
+    document.getElementById('frAddBtn').addEventListener('click', async () => {
+      const code = document.getElementById('frAddInput').value.trim();
+      if (!/^\d{8}$/.test(code)) { alert('请输入 8 位好友码'); return; }
+      await window.electronAPI.frAddRequest(code);
+      document.getElementById('frAddInput').value = '';
+    });
+
+    document.getElementById('frCopyCodeBtn').addEventListener('click', () => {
+      const text = (frProfile && frProfile.code) || '';
+      if (!text) return;
+      navigator.clipboard.writeText(text).then(() => {
+        const b = document.getElementById('frCopyCodeBtn');
+        const old = b.textContent; b.textContent = '已复制';
+        setTimeout(() => { b.textContent = old; }, 1500);
+      });
+    });
+
+    document.getElementById('frSaveNameBtn').addEventListener('click', async () => {
+      const name = document.getElementById('frMyName').value.trim() || '玩家';
+      await window.electronAPI.frSetProfile(name);
+      frProfile = await window.electronAPI.frGetProfile();
+      prefillNames(name);
+    });
+
+    document.getElementById('frLogoutBtn').addEventListener('click', async () => {
+      if (!confirm('退出登陆？账号保留，之后可用昵称+密码重新登录。')) return;
+      await window.electronAPI.frLogout();
+      frProfile = null;
+      frList = []; frRequests = [];
+      document.getElementById('frMyCode').textContent = '----';
+      renderFriends(); renderRequests();
+      friendsPanel.style.display = 'none';
+      showAuthModal('login');
+    });
+
+    document.getElementById('frDeleteAccountBtn').addEventListener('click', async () => {
+      if (!confirm('确定删除当前账号？你的好友码、昵称、好友关系都会清除，且不可恢复。')) return;
+      await window.electronAPI.frDeleteAccount();
+      await window.electronAPI.frClearProfile();
+      frProfile = null;
+      frList = []; frRequests = [];
+      document.getElementById('frMyCode').textContent = '----';
+      renderFriends(); renderRequests();
+      friendsPanel.style.display = 'none';
+      showAuthModal('register');
+    });
+
+    document.getElementById('frInviteAccept').addEventListener('click', async () => {
+      const toast = document.getElementById('frInviteToast');
+      const roomId = toast.dataset.roomId;
+      toast.style.display = 'none';
+      if (roomId) {
+        const res = await window.electronAPI.frJoin(roomId, (frProfile && frProfile.name) || '玩家');
+        if (res && res.error) alert('加入失败: ' + res.error);
+        else { mpState = 'joined'; mpPlayers = []; mpMyId = (res && res.id != null) ? res.id : null; }
+      }
+    });
+    document.getElementById('frInviteDecline').addEventListener('click', () => {
+      document.getElementById('frInviteToast').style.display = 'none';
+    });
+
+    let frAuthMode = 'register';
+    function applyAuthTab() {
+      const isReg = frAuthMode === 'register';
+      const rT = document.getElementById('frTabRegister'), lT = document.getElementById('frTabLogin');
+      if (rT) rT.style.opacity = isReg ? '1' : '0.5';
+      if (lT) lT.style.opacity = isReg ? '0.5' : '1';
+      const p2 = document.getElementById('frAuthPass2');
+      if (p2) p2.style.display = isReg ? 'block' : 'none';
+      const sub = document.getElementById('frAuthSubmit');
+      if (sub) sub.textContent = isReg ? '注册' : '登陆';
+    }
+    function showAuthModal(mode, errMsg) {
+      frAuthMode = mode || 'register';
+      const modal = document.getElementById('frOnboardModal');
+      const errEl = document.getElementById('frAuthError');
+      if (errEl) { errEl.textContent = errMsg || ''; errEl.style.display = errMsg ? 'block' : 'none'; }
+      const n = document.getElementById('frAuthName'); if (n) n.value = '';
+      const p = document.getElementById('frAuthPass'); if (p) p.value = '';
+      const p2 = document.getElementById('frAuthPass2'); if (p2) p2.value = '';
+      applyAuthTab();
+      if (modal) modal.style.display = 'flex';
+    }
+    (function () {
+      const rT = document.getElementById('frTabRegister'), lT = document.getElementById('frTabLogin');
+      if (rT) rT.addEventListener('click', () => { frAuthMode = 'register'; applyAuthTab(); });
+      if (lT) lT.addEventListener('click', () => { frAuthMode = 'login'; applyAuthTab(); });
+      const sub = document.getElementById('frAuthSubmit');
+      if (sub) sub.addEventListener('click', async () => {
+        const name = (document.getElementById('frAuthName').value || '').trim();
+        const password = document.getElementById('frAuthPass').value || '';
+        const errEl = document.getElementById('frAuthError');
+        const showErr = (t) => { if (errEl) { errEl.textContent = t; errEl.style.display = 'block'; } };
+        if (!name) return showErr('请输入昵称');
+        if (password.length < 4) return showErr('密码至少 4 位');
+        if (frAuthMode === 'register') {
+          if (document.getElementById('frAuthPass2').value !== password) return showErr('两次密码不一致');
+          if (errEl) errEl.style.display = 'none';
+          await window.electronAPI.frRegister(name, password);
+        } else {
+          if (errEl) errEl.style.display = 'none';
+          await window.electronAPI.frLogin(name, password);
+        }
+        // 结果由 onFrMessage 的 identity-registered（成功）/ auth-error（失败）回传
+      });
+    })();
+
+    function setRelayStatus(state) {
+      var dot = document.getElementById('relayStatusDot');
+      var txt = document.getElementById('relayStatusText');
+      if (!dot || !txt) return;
+      if (state === 'connected') { dot.style.background = '#22c55e'; txt.textContent = '已连接'; txt.style.color = '#22c55e'; }
+      else if (state === 'disconnected') { dot.style.background = '#ef4444'; txt.textContent = '未连接'; txt.style.color = '#ef4444'; }
+      else { dot.style.background = '#f59e0b'; txt.textContent = '连接中'; txt.style.color = '#f59e0b'; }
+    }
+    async function frInit() {
+      if (!window.electronAPI || !window.electronAPI.frGetProfile) return;
+      setRelayStatus('connecting');
+      frProfile = await window.electronAPI.frGetProfile();
+      setupFrHandlers();
+      // 每秒检测一次连接状态，更新指示灯
+      var _lastRelayStatus = '';
+      setInterval(async () => {
+        if (!window.electronAPI || !window.electronAPI.frIsConnected) return;
+        try {
+          const connected = await window.electronAPI.frIsConnected();
+          const s = connected ? 'connected' : 'disconnected';
+          if (s !== _lastRelayStatus) { _lastRelayStatus = s; setRelayStatus(s); }
+        } catch(e) {}
+      }, 1000);
+      if (!frProfile || !frProfile.code) {
+        showAuthModal('login');
+        return;
+      }
+      prefillNames(frProfile.name);
+      await window.electronAPI.frConnect();  // 凭本地 code 免密重连
+    }
+
     // 初始化
     renderSidebar();
+    frInit();
 
     // ===== 启动动画 =====
     (function() {
@@ -724,7 +1155,5 @@
       }, 150);
     })();
   </script>
-  <!-- 网页版（非 Electron）联机兼容层：在 Electron 下会被 preload 注入的 electronAPI 跳过 -->
-  <script src="web-api.js"></script>
 </body>
 </html>

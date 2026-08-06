@@ -1,0 +1,11 @@
+{
+  "name": "warthunder-game",
+  "version": "1.0.0",
+  "private": true,
+  "description": "陆空对战 · 类战争雷霆（3D 网页版）",
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "check": "node --check js/main.js && node --check js/lib.js"
+  }
+}

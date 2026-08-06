@@ -865,6 +865,7 @@ body {
 
 .mp-field input {
   width: 100%;
+  box-sizing: border-box;
   background: var(--bg-darkest);
   border: 1px solid var(--border);
   border-radius: 6px;

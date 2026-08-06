@@ -4932,23 +4932,72 @@ document.addEventListener('keyup', e => {
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') isSprinting = false;
 });
 
-// 鼠标滚轮切换武器
+// 狙击镜变倍倍率（开镜时滚轮调节），松开右键复位
+let scopeZoomMul = 1;
+var _zoomReadout = null;
+function showZoomReadout() {
+  var base = (WEAPONS[currentWeapon] && WEAPONS[currentWeapon].scopeZoom) || 1;
+  var eff = (base * scopeZoomMul).toFixed(1);
+  if (!_zoomReadout) {
+    _zoomReadout = document.createElement('div');
+    _zoomReadout.style.cssText = 'position:fixed;top:96px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:#7CFC00;padding:6px 14px;border-radius:8px;font-size:14px;z-index:99999;pointer-events:none;';
+    document.body.appendChild(_zoomReadout);
+  }
+  _zoomReadout.textContent = '🔍 ' + eff + 'x';
+  _zoomReadout.style.display = 'block';
+  clearTimeout(_zoomReadout._t);
+  _zoomReadout._t = setTimeout(function() { _zoomReadout.style.display = 'none'; }, 1200);
+}
+// 鼠标滚轮：狙击枪开镜时变倍放大/缩小；否则切换武器
 document.addEventListener('wheel', e => {
   if (!gameStarted) return;
+  if (scoped && WEAPONS[currentWeapon] && WEAPONS[currentWeapon].scopeZoom >= 3) {
+    e.preventDefault();
+    scopeZoomMul = THREE.MathUtils.clamp(scopeZoomMul * (e.deltaY < 0 ? 1.2 : 1 / 1.2), 0.4, 4);
+    showZoomReadout();
+    return;
+  }
   if (e.deltaY > 0) switchWeapon((currentWeapon + 1) % WEAPONS.length);
   else switchWeapon((currentWeapon - 1 + WEAPONS.length) % WEAPONS.length);
+}, { passive: false });
+
+// 网页版游戏跑在 iframe 里（为联机 WebSocket 保活），Chrome 在 iframe 内报告的指针锁定
+// movementX 比桌面主窗口小很多（平台行为，无法关闭），必须放大补偿。
+// 默认网页版给高值（Retina 屏更高）；游戏中按 ] 调高、[ 调低，自动保存。
+var _inIframe = (window.self !== window.top);
+var MOUSE_SENS = parseFloat(localStorage.getItem('hunt_mousesens')) || (_inIframe ? Math.max(8, (window.devicePixelRatio || 1) * 6) : 1);
+var _sensReadout = null, _sensHintShown = false;
+function showSensReadout() {
+  if (!_sensReadout) {
+    _sensReadout = document.createElement('div');
+    _sensReadout.style.cssText = 'position:fixed;top:64px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);color:#fff;padding:8px 18px;border-radius:8px;font-size:15px;z-index:99999;pointer-events:none;letter-spacing:0.5px;';
+    document.body.appendChild(_sensReadout);
+  }
+  _sensReadout.textContent = '鼠标灵敏度 ' + MOUSE_SENS.toFixed(1) + '   ( [ 调低 · ] 调高 )';
+  _sensReadout.style.display = 'block';
+  clearTimeout(_sensReadout._t);
+  _sensReadout._t = setTimeout(function() { _sensReadout.style.display = 'none'; }, 2500);
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === ']') { MOUSE_SENS = Math.min(MOUSE_SENS * 1.5, 60); localStorage.setItem('hunt_mousesens', MOUSE_SENS); showSensReadout(); }
+  else if (e.key === '[') { MOUSE_SENS = Math.max(MOUSE_SENS / 1.5, 0.1); localStorage.setItem('hunt_mousesens', MOUSE_SENS); showSensReadout(); }
 });
 
 document.addEventListener('mousemove', e => {
   if (!document.pointerLockElement || !gameStarted) return;
+  if (!_sensHintShown) { _sensHintShown = true; showSensReadout(); }
+  // 开镜时按放大倍率降低灵敏度（与 FOV 放大一致，含狙击变倍）
+  var _wz = (WEAPONS[currentWeapon] && WEAPONS[currentWeapon].scopeZoom) || 1;
+  var _scopeZ = scoped ? Math.max(_wz, 1.4) * (_wz >= 3 ? scopeZoomMul : 1) : 1;
+  var sens = MOUSE_SENS / _scopeZ;
   if (droneActive) {
-    droneYaw -= e.movementX * 0.003;
-    dronePitch -= e.movementY * 0.003;
+    droneYaw -= e.movementX * 0.003 * sens;
+    dronePitch -= e.movementY * 0.003 * sens;
     dronePitch = THREE.MathUtils.clamp(dronePitch, -Math.PI / 2 + 0.1, Math.PI / 2 - 0.1);
     return;
   }
-  yaw -= e.movementX * 0.002;
-  pitch -= e.movementY * 0.002;
+  yaw -= e.movementX * 0.002 * sens;
+  pitch -= e.movementY * 0.002 * sens;
   pitch = THREE.MathUtils.clamp(pitch, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
 });
 
@@ -4970,6 +5019,7 @@ document.addEventListener('mouseup', e => {
   if (e.button === 0) mouseDown = false;
   if (e.button === 2 && !gamePaused) {
     scoped = false;
+    scopeZoomMul = 1;
     document.getElementById('crosshair').style.display = '';
   }
 });
@@ -5371,8 +5421,10 @@ function animate() {
   let aimFov = 70;
   if (binocularsActive) {
     aimFov = BINOC_FOV;
-  } else if (scoped && w.scopeZoom > 1) {
-    aimFov = Math.max(15, 70 / w.scopeZoom);
+  } else if (scoped) {
+    // 任何枪开镜都至少放大一点；狙击镜可用滚轮变倍（×scopeZoomMul）
+    const z = Math.max(w.scopeZoom || 1, 1.4) * (w.scopeZoom >= 3 ? scopeZoomMul : 1);
+    aimFov = Math.max(6, 70 / z);
   }
   camera.fov += (aimFov - camera.fov) * Math.min(dt * 12, 1);
   camera.updateProjectionMatrix();
@@ -5405,8 +5457,9 @@ function animate() {
   const crosshairEl = document.getElementById('crosshair');
   if (binocularsActive) {
     crosshairEl.style.display = 'none';
-  } else if (!scoped || w.scopeZoom <= 0) {
-    crosshairEl.style.display = '';
+  } else {
+    // 开镜时：狙击镜（带圆形镜筒、倍率≥3）不显示十字；其它枪开镜显示十字准心便于瞄准
+    crosshairEl.style.display = (!scoped || w.scopeZoom < 3) ? '' : 'none';
   }
 
   // 枪的轻微晃动（根据姿态）

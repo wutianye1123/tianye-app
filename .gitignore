@@ -6,3 +6,8 @@ backup-*/
 _probe_ws.js
 _e2e.js
 _app_probe_ws.js
+
+# local tooling (Claude Code / HMCL) — machine-local, not source
+.claude/
+.hmcl/
+*.log
