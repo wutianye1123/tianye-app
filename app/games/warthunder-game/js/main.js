@@ -2150,6 +2150,7 @@ class Game {
       inp.consumeMovement();
       ndc = inp.getNDC();
     }
+    this._planeAimNDC = ndc;   // 供 _animate 把准星画在虚拟瞄准点（指针锁定后 clientX/Y 会冻结）
     const ny = this.settings.invertY ? -ndc.y : ndc.y;
     p.mouseAim(-ndc.x * this.settings.planeGain, ny * this.settings.planeGain, dt); // 水平方向校准：光标左移→左转
 
@@ -2284,6 +2285,12 @@ class Game {
       // 否则鼠标碰到屏幕边缘就停（clientX 差值被窗口宽度限死）。
       if (this.state === 'playing' && !this._pointerLocked) this.hud.showLockPrompt();
       else this.hud.hideLockPrompt();
+    } else if (this.mode === 'plane' && this.player && this.player.alive) {
+      // 飞机：准星跟随虚拟瞄准点 NDC（指针锁定后 clientX/Y 冻结，必须用累积的虚拟点，否则准星钉死）
+      const ndc = this._planeAimNDC || { x: 0, y: 0 };
+      this.hud.positionCrosshair((ndc.x * 0.5 + 0.5) * window.innerWidth, (-ndc.y * 0.5 + 0.5) * window.innerHeight);
+      this.hud.positionAimCircle(0, 0, false);
+      this.hud.hideLockPrompt();
     } else {
       this.hud.positionCrosshair(this.input.mouseX, this.input.mouseY);
       this.hud.positionAimCircle(0, 0, false);
