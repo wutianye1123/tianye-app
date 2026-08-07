@@ -28,7 +28,7 @@ const CONFIG = {
     shellGravity: 6,
     shellLife: 3.5,
     radius: 3.0,
-    worldSize: 420,
+    worldSize: 300,
   },
   plane: {
     maxHealth: 60,
@@ -1679,12 +1679,12 @@ function setupEnvironment(scene, mode) {
 
 // 地图主题：不同地形（色调 / 雾 / 密度 / 城镇街区 / 起伏）。菜单"🗺 地图"按钮在这些里循环。
 const MAPS = [
-  { id:'city',    name:'城镇巷战', urban:true,  towns:0, density:0.4, fog:0x706a62, bg:0x8a847c, gLow:[0.30,0.29,0.26], gHigh:[0.42,0.40,0.36], leaf:0x3a4030, wall:0x5a544c, height:0.45, wallColor:0x9aa0a0 },
+  { id:'city',    name:'城镇巷战', urban:'block', towns:0, density:1.0, build:0x7c7268, fog:0x706a62, bg:0x8a847c, gLow:[0.30,0.29,0.26], gHigh:[0.42,0.40,0.36], leaf:0x3a4030, wall:0x5a544c, height:0.45, wallColor:0x9aa0a0 },
   { id:'open',    name:'旷野',     urban:false, towns:2, density:1.3, fog:0xbfd3c4, bg:0xbfd3c4, gLow:[0.34,0.48,0.24], gHigh:[0.50,0.45,0.27], leaf:0x3f6b35, wall:0x6b5d3f, height:1.0, wallColor:0x88ff99 },
   { id:'hills',   name:'丘陵山地', urban:false, towns:1, density:1.0, fog:0xaab39a, bg:0xbfd3c4, gLow:[0.28,0.43,0.20], gHigh:[0.46,0.42,0.26], leaf:0x356b30, wall:0x6b5d3f, height:1.6, wallColor:0x88ff99 },
   { id:'desert',  name:'沙漠',     urban:false, towns:1, density:0.85,fog:0xd8c994, bg:0xe8d7a8, gLow:[0.76,0.66,0.40], gHigh:[0.88,0.78,0.52], leaf:0x6b6030, wall:0x8a7a4a, height:0.7, wallColor:0xe0c878 },
   { id:'forest',  name:'密林',     urban:false, towns:0, density:1.7, fog:0x8fae84, bg:0xaec5a4, gLow:[0.15,0.32,0.13], gHigh:[0.30,0.40,0.20], leaf:0x2a5a25, wall:0x4a4030, height:1.0, wallColor:0x88ff99 },
-  { id:'factory', name:'工业厂区', urban:false, towns:0, density:1.4, fog:0x6f6f74, bg:0x808086, gLow:[0.26,0.26,0.28], gHigh:[0.37,0.37,0.40], leaf:0x3a4030, wall:0x4a4a4e, height:0.5, wallColor:0xaaaaaa },
+  { id:'factory', name:'工业厂区', urban:'shed', towns:0, density:1.0, build:0x56565c, fog:0x6f6f74, bg:0x808086, gLow:[0.26,0.26,0.28], gHigh:[0.37,0.37,0.40], leaf:0x3a4030, wall:0x4a4a4e, height:0.5, wallColor:0xaaaaaa },
   { id:'snow',    name:'雪原',     urban:false, towns:1, density:1.1, fog:0xd6dfe6, bg:0xe8eef2, gLow:[0.80,0.84,0.88], gHigh:[0.92,0.94,0.97], leaf:0x3a5a40, wall:0x6a6a6a, height:1.1, wallColor:0xc0d0e0 },
 ];
 
@@ -1696,8 +1696,10 @@ function createTerrain(scene, mode, mapId) {
   const half = (mode === 'plane' ? CONFIG.plane.worldSize : CONFIG.tank.worldSize);
   const theme = MAPS.find((m) => m.id === mapId) || MAPS[1];
   if (theme.height != null) setTerrainScale(theme.height);   // 按地图调整起伏
-  scene.background = new THREE.Color(theme.bg);              // 按地图覆盖天空/雾
-  scene.fog = new THREE.Fog(theme.fog, 120, mode === 'plane' ? 700 : 450);
+  if (mode === 'tank') {                                     // 仅陆战按地图覆盖天空/雾（空战保留蓝色天空）
+    scene.background = new THREE.Color(theme.bg);
+    scene.fog = new THREE.Fog(theme.fog, 120, 450);
+  }
 
   // 地面（细分高度场 + 顶点色：按地图调色板，低处→高处渐变）
   const groundSize = half * 2 + 400;
@@ -1737,128 +1739,106 @@ function createTerrain(scene, mode, mapId) {
   wall.position.y = wallH / 2;
   group.add(wall);
 
-  // 障碍物：按地图主题（密度 / 城镇街区 / 小镇群）
-  const baseCount = (mode === 'plane' ? 24 : 40) * (half / (mode === 'plane' ? 400 : 260));
-  const obstacleCount = Math.round(baseCount * (mode === 'tank' ? (theme.density || 1) : 1));
-  const addBuilding = (x, z, pal) => {
-    const w = randRange(7, 16), h = randRange(7, 22), d = randRange(7, 16);
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
-      new THREE.MeshStandardMaterial({ color: pal, roughness: 0.9 }));
+  // —— 障碍物：集中在交战区(±spread)，按地图主题生成 ——
+  const spread = mode === 'tank' ? half - 30 : half;
+  const baseCount = (mode === 'plane' ? 24 : 46) * (spread / 260);
+  const obstacleCount = Math.round(baseCount * (theme.density || 1));
+  const buildPal = theme.build || 0x80766a;
+  const addBuilding = (x, z, pal, big) => {
+    const w = randRange(big ? 11 : 7, big ? 22 : 16), h = randRange(big ? 9 : 6, big ? 26 : 18), d = randRange(big ? 11 : 7, big ? 22 : 16);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: pal, roughness: 0.9 }));
     m.position.set(x, h / 2 + terrainHeight(x, z), z);
     m.castShadow = true; m.receiveShadow = true;
     group.add(m);
     obstacles.push({ position: new THREE.Vector3(x, 0, z), radius: Math.max(w, d) / 2 });
   };
 
-  // 城镇图：街区网格——连续楼房 + 街道，密集巷战（战争雷霆城镇感）
+  // 城镇(街区网格) / 工厂(大片厂房)——密集巷战
   if (theme.urban && mode === 'tank') {
-    const cell = 78, street = 18, pal = 0x7c7268;
-    for (let bx = -half + cell; bx < half - cell; bx += cell + street) {
-      for (let bz = -half + cell; bz < half - cell; bz += cell + street) {
-        if (Math.hypot(bx, bz) < 95) continue;   // 中央战场/占领点留空
-        addBuilding(bx + randRange(-cell / 3, cell / 3), bz - cell / 2 + randRange(-3, 3), pal);
-        addBuilding(bx + randRange(-cell / 3, cell / 3), bz + cell / 2 + randRange(-3, 3), pal);
-        addBuilding(bx - cell / 2 + randRange(-3, 3), bz + randRange(-cell / 3, cell / 3), pal);
-        addBuilding(bx + cell / 2 + randRange(-3, 3), bz + randRange(-cell / 3, cell / 3), pal);
-        if (Math.random() < 0.5) addBuilding(bx + randRange(-10, 10), bz + randRange(-10, 10), pal);
+    if (theme.urban === 'shed') {
+      // 工厂：宽矮大厂房 + 小铁棚
+      const cell = 70, street = 14;
+      for (let bx = -spread; bx < spread; bx += cell + street) {
+        for (let bz = -spread; bz < spread; bz += cell + street) {
+          if (Math.hypot(bx, bz) < 75) continue;
+          const w = randRange(20, 32), h = randRange(8, 14), d = randRange(18, 30);
+          const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: buildPal, roughness: 0.85, metalness: 0.2 }));
+          m.position.set(bx + randRange(-6, 6), h / 2 + terrainHeight(bx, bz), bz + randRange(-6, 6));
+          m.castShadow = true; m.receiveShadow = true; group.add(m);
+          obstacles.push({ position: new THREE.Vector3(m.position.x, 0, m.position.z), radius: Math.max(w, d) / 2 });
+          if (Math.random() < 0.6) addBuilding(bx + randRange(-cell / 2, cell / 2), bz + randRange(-cell / 2, cell / 2), 0x4a4a50);
+        }
+      }
+    } else {
+      // 城镇：街区四边大楼（同街区差不多高，像真街区）
+      const cell = 62, street = 14;
+      for (let bx = -spread; bx < spread; bx += cell + street) {
+        for (let bz = -spread; bz < spread; bz += cell + street) {
+          if (Math.hypot(bx, bz) < 78) continue;   // 中央战场/占领点留空
+          const ph = randRange(11, 26);
+          const place = (ox, oz) => {
+            const w = randRange(10, 18), h = ph + randRange(-3, 3), d = randRange(10, 18);
+            const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: buildPal, roughness: 0.9 }));
+            m.position.set(bx + ox, h / 2 + terrainHeight(bx + ox, bz + oz), bz + oz);
+            m.castShadow = true; m.receiveShadow = true; group.add(m);
+            obstacles.push({ position: new THREE.Vector3(bx + ox, 0, bz + oz), radius: Math.max(w, d) / 2 });
+          };
+          place(randRange(-cell / 3, cell / 3), -cell / 2 + randRange(-3, 3));
+          place(randRange(-cell / 3, cell / 3), cell / 2 + randRange(-3, 3));
+          place(-cell / 2 + randRange(-3, 3), randRange(-cell / 3, cell / 3));
+          place(cell / 2 + randRange(-3, 3), randRange(-cell / 3, cell / 3));
+          if (Math.random() < 0.6) place(randRange(-8, 8), randRange(-8, 8));
+        }
       }
     }
   }
 
-  // 小镇群（非城镇图：散落村镇）
+  // 小镇群（散落村镇）
   for (let c = 0; c < (theme.towns || 0); c++) {
-    const cx = randRange(-half * 0.55, half * 0.55), cz = randRange(-half * 0.55, half * 0.55);
+    const cx = randRange(-spread * 0.8, spread * 0.8), cz = randRange(-spread * 0.8, spread * 0.8);
     if (Math.hypot(cx, cz) < 60) continue;
-    for (let k = 0; k < randInt(5, 9); k++) {
-      const x = cx + randRange(-24, 24), z = cz + randRange(-24, 24);
-      if (Math.abs(x) < 22 && Math.abs(z) < 22) continue;
-      addBuilding(x, z, 0x80766a);
+    for (let k = 0; k < randInt(6, 10); k++) {
+      const x = cx + randRange(-26, 26), z = cz + randRange(-26, 26);
+      if (Math.abs(x) < 24 && Math.abs(z) < 24) continue;
+      addBuilding(x, z, buildPal, true);
     }
   }
 
+  // 散落掩体：类型按地图 mix 配比；位置在 ±spread 内
+  const mix = theme.mix || { building: 0.3, rock: 0.25, tree: 0.3, wall: 0.15 };
+  const types = Object.keys(mix);
+  const pickType = () => { const r = Math.random(); let acc = 0; for (const t of types) { acc += mix[t]; if (r < acc) return t; } return types[0]; };
   for (let i = 0; i < obstacleCount; i++) {
-    const x = randRange(-half + 10, half - 10);
-    const z = randRange(-half + 10, half - 10);
-    // 避开中央（出生点 / 占领点）
-    if (Math.abs(x) < 22 && Math.abs(z) < 22) continue;
-    const type = Math.random();
+    const x = randRange(-spread, spread), z = randRange(-spread, spread);
+    if (Math.abs(x) < 24 && Math.abs(z) < 24) continue;
+    const type = pickType();
     let mesh, radius;
-    if (type < 0.30) {
-      // 建筑
-      const w = randRange(6, 14), h = randRange(5, 16), d = randRange(6, 14);
-      mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(w, h, d),
-        new THREE.MeshStandardMaterial({ color: 0x8a7f6b, roughness: 0.9 })
-      );
-      mesh.position.set(x, h / 2 + terrainHeight(x, z), z);
-      radius = Math.max(w, d) / 2;
-    } else if (type < 0.48) {
-      // 岩石
-      const r = randRange(2, 5);
-      mesh = new THREE.Mesh(
-        new THREE.DodecahedronGeometry(r, 0),
-        new THREE.MeshStandardMaterial({ color: 0x807872, roughness: 1, flatShading: true })
-      );
-      mesh.position.set(x, r * 0.7 + terrainHeight(x, z), z);
-      mesh.rotation.set(randRange(0, 1), randRange(0, 1), randRange(0, 1));
-      radius = r;
-    } else if (type < 0.70) {
-      // 树（圆锥树冠 + 圆柱树干）
+    if (type === 'building') {
+      const w = randRange(8, 18), h = randRange(7, 22), d = randRange(8, 18);
+      mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: buildPal, roughness: 0.9 }));
+      mesh.position.set(x, h / 2 + terrainHeight(x, z), z); radius = Math.max(w, d) / 2;
+    } else if (type === 'rock') {
+      const r = randRange(2, 6);
+      mesh = new THREE.Mesh(new THREE.DodecahedronGeometry(r, 0), new THREE.MeshStandardMaterial({ color: 0x807872, roughness: 1, flatShading: true }));
+      mesh.position.set(x, r * 0.7 + terrainHeight(x, z), z); mesh.rotation.set(randRange(0, 1), randRange(0, 1), randRange(0, 1)); radius = r;
+    } else if (type === 'tree') {
       const tree = new THREE.Group();
       const trunkH = randRange(3, 5);
-      const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.5, 0.7, trunkH, 6),
-        new THREE.MeshStandardMaterial({ color: 0x5b4127, roughness: 1 })
-      );
-      trunk.position.y = trunkH / 2;
-      trunk.castShadow = true;
-      const leaves = new THREE.Mesh(
-        new THREE.ConeGeometry(randRange(2.5, 4), randRange(5, 8), 7),
-        new THREE.MeshStandardMaterial({ color: theme.leaf || 0x3f6b35, roughness: 1, flatShading: true })
-      );
-      leaves.position.y = trunkH + 3;
-      leaves.castShadow = true;
-      tree.add(trunk, leaves);
-      tree.position.set(x, terrainHeight(x, z), z);
-      mesh = tree;
-      radius = 2.5;
-    } else if (type < 0.85) {
-      // 沙袋墙（长矮条，好掩体）
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.7, trunkH, 6), new THREE.MeshStandardMaterial({ color: 0x5b4127, roughness: 1 }));
+      trunk.position.y = trunkH / 2; trunk.castShadow = true;
+      const leaves = new THREE.Mesh(new THREE.ConeGeometry(randRange(2.5, 4), randRange(5, 8), 7), new THREE.MeshStandardMaterial({ color: theme.leaf || 0x3f6b35, roughness: 1, flatShading: true }));
+      leaves.position.y = trunkH + 3; leaves.castShadow = true;
+      tree.add(trunk, leaves); tree.position.set(x, terrainHeight(x, z), z); mesh = tree; radius = 2.5;
+    } else if (type === 'wall') {
       const w = randRange(8, 16), h = randRange(1.6, 2.4), d = randRange(1.5, 2.5);
-      mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(w, h, d),
-        new THREE.MeshStandardMaterial({ color: theme.wall || 0x6b5d3f, roughness: 1, flatShading: true })
-      );
-      mesh.position.set(x, h / 2 + terrainHeight(x, z), z);
-      mesh.rotation.y = randRange(0, Math.PI);
-      radius = w / 2;
-    } else if (type < 0.95) {
-      // 残骸（倾斜暗色铁块）
-      const w = randRange(3, 5);
-      mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(w, w, w * 1.4),
-        new THREE.MeshStandardMaterial({ color: 0x3a3530, roughness: 1, metalness: 0.3, flatShading: true })
-      );
-      mesh.position.set(x, w * 0.5 + terrainHeight(x, z), z);
-      mesh.rotation.set(randRange(-0.4, 0.4), randRange(0, 6.28), randRange(-0.4, 0.4));
-      radius = w;
-    } else {
-      // 油桶群
-      const grp = new THREE.Group();
-      for (let k = 0, n = randInt(3, 6); k < n; k++) {
-        const b = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.5, 0.5, 1.5, 8),
-          new THREE.MeshStandardMaterial({ color: 0x5a3a2a, roughness: 0.8, metalness: 0.3 })
-        );
-        b.position.set(randRange(-1.5, 1.5), 0.75, randRange(-1.5, 1.5));
-        grp.add(b);
-      }
-      grp.position.set(x, terrainHeight(x, z), z);
-      mesh = grp;
-      radius = 2.5;
+      mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: theme.wall || 0x6b5d3f, roughness: 1, flatShading: true }));
+      mesh.position.set(x, h / 2 + terrainHeight(x, z), z); mesh.rotation.y = randRange(0, Math.PI); radius = w / 2;
+    } else { // ruin
+      const w = randRange(3, 6);
+      mesh = new THREE.Mesh(new THREE.BoxGeometry(w, w, w * 1.4), new THREE.MeshStandardMaterial({ color: 0x3a3530, roughness: 1, metalness: 0.3, flatShading: true }));
+      mesh.position.set(x, w * 0.5 + terrainHeight(x, z), z); mesh.rotation.set(randRange(-0.4, 0.4), randRange(0, 6.28), randRange(-0.4, 0.4)); radius = w;
     }
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    mesh.castShadow = true; mesh.receiveShadow = true;
     group.add(mesh);
     obstacles.push({ position: new THREE.Vector3(x, 0, z), radius });
   }
@@ -2144,7 +2124,7 @@ class Game {
   }
 
   _playerBasePos() {
-    if (this.mode === 'tank') return this.objective === 'capture' ? new THREE.Vector3(0, 0, -150) : new THREE.Vector3(0, 0, 0);
+    if (this.mode === 'tank') return new THREE.Vector3(0, 0, -(CONFIG.tank.worldSize - 45));   // 南侧边缘
     return new THREE.Vector3(0, CONFIG.plane.spawnAltitude, 0);
   }
 
@@ -2172,14 +2152,9 @@ class Game {
   _spawnEnemy() {
     if (this.mode === 'tank') {
       const e = new Tank({ side: 'enemy', team: 'red', color: 0x9a7b3e, type: randomTankType().id });
-      if (this.objective === 'capture') {
-        // 占领模式：红方从北侧(+z)出生
-        e.group.position.set(randRange(-60, 60), 0, randRange(120, 170));
-      } else {
-        const ang = randRange(0, Math.PI * 2);
-        const dist = randRange(80, 140);
-        e.group.position.set(Math.sin(ang) * dist, 0, Math.cos(ang) * dist);
-      }
+      const h = CONFIG.tank.worldSize;
+      // 红方一律从地图北侧边缘出生（和蓝方南北对角）
+      e.group.position.set(randRange(-h * 0.4, h * 0.4), 0, randRange(h * 0.55, h - 45));
       e.heading = Math.atan2(-e.group.position.x, -e.group.position.z);
       e.ai = new TankAI(e);
       this.em.addTank(e);
@@ -2218,11 +2193,9 @@ class Game {
   _spawnAlly() {
     if (this.mode === 'tank') {
       const e = new Tank({ side: 'ally', team: 'blue', color: 0x3a6b8a, type: randomTankType().id });
-      if (this.objective === 'capture') {
-        e.group.position.set(randRange(-50, 50), 0, randRange(-170, -120));
-      } else {
-        e.group.position.set(randRange(-18, 18), 0, randRange(-18, 18));
-      }
+      const h = CONFIG.tank.worldSize;
+      // 蓝方(玩家队)从南侧边缘出生，和玩家一起
+      e.group.position.set(randRange(-40, 40), 0, randRange(-(h - 45), -(h * 0.55)));
       e.heading = Math.atan2(-e.group.position.x, -e.group.position.z);
       e.ai = new TankAI(e);
       this.em.addTank(e);
@@ -2762,7 +2735,7 @@ let game = null;
 let difficulty = 'normal';
 let endless = false;
 let objective = 'battle';   // 陆战目标：'battle'(歼灭) | 'capture'(占领)
-let mapIndex = 1;           // 陆战地图主题索引（MAPS[1]='open' 默认）
+let mapIndex = 0;           // 陆战地图主题索引（MAPS[0]='city' 默认）
 const bestEl = document.getElementById('best');
 const endlessBtn = document.getElementById('btn-endless');
 const objectiveBtn = document.getElementById('btn-objective');
