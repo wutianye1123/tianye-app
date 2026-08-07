@@ -466,15 +466,14 @@ class HUD {
 
     const cx = w / 2, cy = h / 2;
     const scale = (w / 2) / range;
-    const cos = Math.cos(-playerHeading), sin = Math.sin(-playerHeading);
-
-    // 把世界坐标投影到“玩家朝上”的小地图坐标
+    // 玩家前进方向 = (sin h, cos h)；分解到"前进/右侧"分量再画（原旋转矩阵算式会变成 2 倍角、全错）
+    const hs = Math.sin(playerHeading), hc = Math.cos(playerHeading);
     const project = (p) => {
       const dx = p.x - playerPos.x;
       const dz = p.z - playerPos.z;
-      const rx = dx * cos - dz * sin;
-      const rz = dx * sin + dz * cos;
-      return { px: cx + rx * scale, py: cy - rz * scale }; // 屏幕Y向下，前方在上方
+      const fwd = dx * hs + dz * hc;          // 沿前进方向（>0 在前方）
+      const rgt = dx * hc - dz * hs;          // 沿右侧（>0 在右边）
+      return { px: cx + rgt * scale, py: cy - fwd * scale }; // 屏幕Y向下，前方在上方
     };
     const dot = (p, color, r) => {
       const { px, py } = project(p);
@@ -2600,7 +2599,7 @@ class Game {
         playerHeading: heading,
         enemies: this.enemies.filter((e) => e.alive).map((e) => e.position),
         allies: this.allies.filter((a) => a.alive).map((a) => a.position),
-        range: this.mode === 'tank' ? 220 : 340,
+        range: this.mode === 'tank' ? 300 : 340,
       });
       // 模块损伤提示（坦克）/ 提前量瞄准具（飞机）
       this.hud.setModules(this.mode === 'tank' ? this.player.modules : null);
