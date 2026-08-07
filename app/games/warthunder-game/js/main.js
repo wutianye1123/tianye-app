@@ -304,6 +304,7 @@ class HUD {
       <div id="hint"></div>
       <div id="feed"></div>
       <div id="center-msg"></div>
+      <div id="capture-bar" style="position:absolute;top:54px;left:50%;transform:translateX(-50%);width:340px;max-width:80vw;height:20px;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.3);border-radius:10px;overflow:hidden;display:none;"><div id="capture-fill" style="position:absolute;left:0;top:0;bottom:0;width:50%;background:#9a8a4a;transition:width .1s,background .2s;"></div><span id="capture-label" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:12px/1 sans-serif;color:#fff;text-shadow:0 1px 2px #000;">占领</span></div>
       <div id="lock-prompt">点击画面锁定鼠标 · 解锁炮塔无限旋转</div>
       <div id="result" class="hidden">
         <div class="result-card">
@@ -403,6 +404,23 @@ class HUD {
     if (!this.centerMsg) this.centerMsg = this.container.querySelector('#center-msg');
     this.centerMsg.textContent = text || '';
     this.centerMsg.style.display = text ? 'flex' : 'none';
+  }
+
+  // 占领进度条：progress -100(红满)..+100(蓝满)，传 null 隐藏。
+  setCapture(progress) {
+    if (!this.captureBar) {
+      this.captureBar = this.container.querySelector('#capture-bar');
+      this.captureFill = this.container.querySelector('#capture-fill');
+      this.captureLabel = this.container.querySelector('#capture-label');
+    }
+    if (!this.captureBar) return;
+    if (progress == null) { this.captureBar.style.display = 'none'; return; }
+    this.captureBar.style.display = 'block';
+    this.captureFill.style.width = ((progress + 100) / 2) + '%';
+    this.captureFill.style.background = progress > 1 ? '#5da94a' : progress < -1 ? '#c14a4a' : '#9a8a4a';
+    this.captureLabel.textContent = progress >= 100 ? '已占领！'
+      : progress <= -100 ? '敌方占领！'
+      : (progress > 1 ? `占领中 ${Math.floor(progress)}%` : progress < -1 ? `敌方占领 ${Math.floor(-progress)}%` : '争夺中');
   }
 
   setHint(text) {
@@ -1546,7 +1564,7 @@ class TankAI {
     const isEnemy = tank.team === 'red';
     const aimThresh = isEnemy ? 0.06 : 0.10;
     const fireChance = isEnemy ? CONFIG.tank.enemyFireChance : 0.85;
-    if (tank.canFire() && dist < 160 && Math.abs(aimDiff) < aimThresh && Math.random() < fireChance) {
+    if (!target.isZone && tank.canFire() && dist < 160 && Math.abs(aimDiff) < aimThresh && Math.random() < fireChance) {
       tank.tryFire(em);
     }
   }
@@ -1703,16 +1721,39 @@ function createTerrain(scene, mode) {
   wall.position.y = wallH / 2;
   group.add(wall);
 
-  // 障碍物（数量随地图面积放大）
-  const obstacleCount = Math.round((mode === 'plane' ? 24 : 40) * (half / (mode === 'plane' ? 400 : 260)));
+  // 障碍物（陆战加密 + 多样：城镇建筑群 / 建筑 / 岩石 / 树 / 沙袋墙 / 残骸 / 油桶）
+  const baseCount = (mode === 'plane' ? 24 : 40) * (half / (mode === 'plane' ? 400 : 260));
+  const obstacleCount = Math.round(mode === 'tank' ? baseCount * 2.1 : baseCount);
+
+  // 陆战：先撒 2~3 个"城镇"建筑群，营造战争雷霆城镇掩体感
+  if (mode === 'tank') {
+    const towns = randInt(2, 3);
+    for (let c = 0; c < towns; c++) {
+      const cx = randRange(-half * 0.55, half * 0.55);
+      const cz = randRange(-half * 0.55, half * 0.55);
+      if (Math.hypot(cx, cz) < 55) continue;   // 避开中央战场
+      for (let k = 0; k < randInt(5, 9); k++) {
+        const x = cx + randRange(-24, 24), z = cz + randRange(-24, 24);
+        if (Math.abs(x) < 22 && Math.abs(z) < 22) continue;
+        const w = randRange(6, 13), h = randRange(6, 16), d = randRange(6, 13);
+        const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
+          new THREE.MeshStandardMaterial({ color: 0x80766a, roughness: 0.9 }));
+        m.position.set(x, h / 2 + terrainHeight(x, z), z);
+        m.castShadow = true; m.receiveShadow = true;
+        group.add(m);
+        obstacles.push({ position: new THREE.Vector3(x, 0, z), radius: Math.max(w, d) / 2 });
+      }
+    }
+  }
+
   for (let i = 0; i < obstacleCount; i++) {
     const x = randRange(-half + 10, half - 10);
     const z = randRange(-half + 10, half - 10);
-    // 避开出生点中心
-    if (Math.abs(x) < 18 && Math.abs(z) < 18) continue;
+    // 避开中央（出生点 / 占领点）
+    if (Math.abs(x) < 22 && Math.abs(z) < 22) continue;
     const type = Math.random();
     let mesh, radius;
-    if (type < 0.4) {
+    if (type < 0.30) {
       // 建筑
       const w = randRange(6, 14), h = randRange(5, 16), d = randRange(6, 14);
       mesh = new THREE.Mesh(
@@ -1721,7 +1762,7 @@ function createTerrain(scene, mode) {
       );
       mesh.position.set(x, h / 2 + terrainHeight(x, z), z);
       radius = Math.max(w, d) / 2;
-    } else if (type < 0.7) {
+    } else if (type < 0.48) {
       // 岩石
       const r = randRange(2, 5);
       mesh = new THREE.Mesh(
@@ -1731,7 +1772,7 @@ function createTerrain(scene, mode) {
       mesh.position.set(x, r * 0.7 + terrainHeight(x, z), z);
       mesh.rotation.set(randRange(0, 1), randRange(0, 1), randRange(0, 1));
       radius = r;
-    } else {
+    } else if (type < 0.70) {
       // 树（圆锥树冠 + 圆柱树干）
       const tree = new THREE.Group();
       const trunkH = randRange(3, 5);
@@ -1750,6 +1791,40 @@ function createTerrain(scene, mode) {
       tree.add(trunk, leaves);
       tree.position.set(x, terrainHeight(x, z), z);
       mesh = tree;
+      radius = 2.5;
+    } else if (type < 0.85) {
+      // 沙袋墙（长矮条，好掩体）
+      const w = randRange(8, 16), h = randRange(1.6, 2.4), d = randRange(1.5, 2.5);
+      mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(w, h, d),
+        new THREE.MeshStandardMaterial({ color: 0x6b5d3f, roughness: 1, flatShading: true })
+      );
+      mesh.position.set(x, h / 2 + terrainHeight(x, z), z);
+      mesh.rotation.y = randRange(0, Math.PI);
+      radius = w / 2;
+    } else if (type < 0.95) {
+      // 残骸（倾斜暗色铁块）
+      const w = randRange(3, 5);
+      mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(w, w, w * 1.4),
+        new THREE.MeshStandardMaterial({ color: 0x3a3530, roughness: 1, metalness: 0.3, flatShading: true })
+      );
+      mesh.position.set(x, w * 0.5 + terrainHeight(x, z), z);
+      mesh.rotation.set(randRange(-0.4, 0.4), randRange(0, 6.28), randRange(-0.4, 0.4));
+      radius = w;
+    } else {
+      // 油桶群
+      const grp = new THREE.Group();
+      for (let k = 0, n = randInt(3, 6); k < n; k++) {
+        const b = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.5, 0.5, 1.5, 8),
+          new THREE.MeshStandardMaterial({ color: 0x5a3a2a, roughness: 0.8, metalness: 0.3 })
+        );
+        b.position.set(randRange(-1.5, 1.5), 0.75, randRange(-1.5, 1.5));
+        grp.add(b);
+      }
+      grp.position.set(x, terrainHeight(x, z), z);
+      mesh = grp;
       radius = 2.5;
     }
     mesh.castShadow = true;
@@ -1873,13 +1948,14 @@ class Sfx {
 }
 
 class Game {
-  constructor({ canvas, mode = 'tank', difficulty = 'normal', tankType = 'medium', planeType = 'fighter', endless = false, hudContainer, onExit, onResult } = {}) {
+  constructor({ canvas, mode = 'tank', difficulty = 'normal', tankType = 'medium', planeType = 'fighter', endless = false, objective = 'battle', hudContainer, onExit, onResult } = {}) {
     this.canvas = canvas;
     this.mode = mode;
     this.difficulty = difficulty;
     this.tankType = tankType;
     this.planeType = planeType;
     this.endless = endless;
+    this.objective = mode === 'tank' ? objective : 'battle';   // 'battle'(歼灭) | 'capture'(占领，仅陆战)
     this.onExit = onExit;
     this.onResult = onResult;
     this.state = 'playing';
@@ -2003,12 +2079,41 @@ class Game {
     // 初始队友
     for (let i = 0; i < this.allyCount; i++) this._spawnAlly();
 
+    this._setupObjective();
     this.hud.setCenterMessage('');
-    this.hud.addFeed('战斗开始 · 队友已就位', 'info');
+    this.hud.addFeed(this.objective === 'capture' ? '战斗开始 · 占领中央据点！' : '战斗开始 · 队友已就位', 'info');
+  }
+
+  // 占领模式：据点设置/清理。中央圆柱+光环，蓝南红北出生。
+  _setupObjective() {
+    this._clearCapture();
+    this.captureProgress = 0;
+    if (this.objective !== 'capture') { if (this.hud) this.hud.setCapture(null); return; }
+    const r = 22;
+    this.captureZone = new THREE.Mesh(
+      new THREE.CylinderGeometry(r, r, 0.4, 40),
+      new THREE.MeshBasicMaterial({ color: 0x554a2a, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
+    );
+    this.captureZone.position.set(0, 0.3, 0);
+    this.captureZoneRing = new THREE.Mesh(
+      new THREE.TorusGeometry(r, 0.9, 8, 48),
+      new THREE.MeshBasicMaterial({ color: 0xffdd44 })
+    );
+    this.captureZoneRing.rotation.x = Math.PI / 2;
+    this.captureZoneRing.position.set(0, 1.2, 0);
+    this.scene.add(this.captureZone, this.captureZoneRing);
+    this._zoneTarget = { position: new THREE.Vector3(0, 0, 0), alive: true, isZone: true };
+    this.hud.addFeed('占领模式 · 控制中央据点，进度先满 100% 获胜', 'info');
+  }
+  _clearCapture() {
+    for (const m of [this.captureZone, this.captureZoneRing]) {
+      if (m) { this.scene.remove(m); m.geometry.dispose(); m.material.dispose(); }
+    }
+    this.captureZone = null; this.captureZoneRing = null; this._zoneTarget = null;
   }
 
   _playerBasePos() {
-    if (this.mode === 'tank') return new THREE.Vector3(0, 0, 0);
+    if (this.mode === 'tank') return this.objective === 'capture' ? new THREE.Vector3(0, 0, -150) : new THREE.Vector3(0, 0, 0);
     return new THREE.Vector3(0, CONFIG.plane.spawnAltitude, 0);
   }
 
@@ -2035,10 +2140,15 @@ class Game {
 
   _spawnEnemy() {
     if (this.mode === 'tank') {
-      const ang = randRange(0, Math.PI * 2);
-      const dist = randRange(80, 140);
       const e = new Tank({ side: 'enemy', team: 'red', color: 0x9a7b3e, type: randomTankType().id });
-      e.group.position.set(Math.sin(ang) * dist, 0, Math.cos(ang) * dist);
+      if (this.objective === 'capture') {
+        // 占领模式：红方从北侧(+z)出生
+        e.group.position.set(randRange(-60, 60), 0, randRange(120, 170));
+      } else {
+        const ang = randRange(0, Math.PI * 2);
+        const dist = randRange(80, 140);
+        e.group.position.set(Math.sin(ang) * dist, 0, Math.cos(ang) * dist);
+      }
       e.heading = Math.atan2(-e.group.position.x, -e.group.position.z);
       e.ai = new TankAI(e);
       this.em.addTank(e);
@@ -2077,8 +2187,12 @@ class Game {
   _spawnAlly() {
     if (this.mode === 'tank') {
       const e = new Tank({ side: 'ally', team: 'blue', color: 0x3a6b8a, type: randomTankType().id });
-      e.group.position.set(randRange(-18, 18), 0, randRange(-18, 18));
-      e.heading = randRange(0, Math.PI * 2);
+      if (this.objective === 'capture') {
+        e.group.position.set(randRange(-50, 50), 0, randRange(-170, -120));
+      } else {
+        e.group.position.set(randRange(-18, 18), 0, randRange(-18, 18));
+      }
+      e.heading = Math.atan2(-e.group.position.x, -e.group.position.z);
       e.ai = new TankAI(e);
       this.em.addTank(e);
       this.allies.push(e);
@@ -2316,13 +2430,18 @@ class Game {
       const obstacles = this.terrain && this.terrain.obstacles;
       const blueAlive = (this.player && this.player.alive ? [this.player] : []).concat(this.allies.filter((a) => a.alive));
       const redAlive = this.enemies.filter((e) => e.alive);
+      const zoneT = (this.objective === 'capture') ? this._zoneTarget : null;
       for (const e of this.enemies) {
         if (!e.ai) continue;
-        e.ai.update(dt, { target: this._nearest(e.position, blueAlive), entityManager: this.em, obstacles });
+        let t = this._nearest(e.position, blueAlive);
+        if (zoneT && (!t || e.position.distanceTo(t.position) > 75)) t = zoneT;   // 没附近敌人就抢点
+        e.ai.update(dt, { target: t, entityManager: this.em, obstacles });
       }
       for (const a of this.allies) {
         if (!a.ai) continue;
-        a.ai.update(dt, { target: this._nearest(a.position, redAlive), entityManager: this.em, obstacles });
+        let t = this._nearest(a.position, redAlive);
+        if (zoneT && (!t || a.position.distanceTo(t.position) > 75)) t = zoneT;
+        a.ai.update(dt, { target: t, entityManager: this.em, obstacles });
       }
 
       this.em.update(dt);
@@ -2352,6 +2471,21 @@ class Game {
         for (const t of this.em.tanks) t.faceCamera(this.camera);
       } else {
         this._updateCameraDeath(dt);          // 阵亡观战：看向最近敌人，告诉玩家战场朝向
+      }
+
+      if (this.objective === 'capture' && this.captureZone) {
+        let blue = 0, red = 0;
+        const inZ = (t) => t && t.alive && t.position.distanceTo(this._zoneTarget.position) < 22;
+        if (inZ(this.player)) blue++;
+        for (const a of this.allies) if (inZ(a)) blue++;
+        for (const e of this.enemies) if (inZ(e)) red++;
+        const rate = (100 / 25) * dt;   // 无争议 ~25s 占满
+        if (blue > red) this.captureProgress = Math.min(100, this.captureProgress + rate);
+        else if (red > blue) this.captureProgress = Math.max(-100, this.captureProgress - rate);
+        const lead = this.captureProgress;
+        this.captureZone.material.color.setHex(lead > 1 ? 0x4f7a3a : lead < -1 ? 0x7a2a2a : 0x554a2a);
+        this.captureZoneRing.material.color.setHex(lead > 1 ? 0x66ff66 : lead < -1 ? 0xff6666 : 0xffdd44);
+        this.hud.setCapture(lead);
       }
 
       this._updateHUD();
@@ -2505,7 +2639,11 @@ class Game {
 
   _checkEnd() {
     if (this.state !== 'playing') return;
-    if (!this.endless && this.kills >= this.enemyTickets) { this._end(true); return; }
+    if (this.objective === 'capture') {
+      // 占领模式：进度先满 100% 的一方获胜
+      if (this.captureProgress >= 100) { this._end(true); return; }
+      if (this.captureProgress <= -100) { this._end(false); return; }
+    } else if (!this.endless && this.kills >= this.enemyTickets) { this._end(true); return; }
     if (this.playerLives <= 0 && this.respawnTimer <= 0 && !(this.player && this.player.alive)) {
       this._end(false);
     }
@@ -2554,6 +2692,7 @@ class Game {
     this.input.dispose();
     this.hud.dispose();
     this.sfx.stopEngine();
+    this._clearCapture();
     this.em.clear();
     if (this.terrain) this.scene.remove(this.terrain.group);
     this.renderer.dispose();
@@ -2591,8 +2730,10 @@ let pendingMode = 'tank';
 let game = null;
 let difficulty = 'normal';
 let endless = false;
+let objective = 'battle';   // 陆战目标：'battle'(歼灭) | 'capture'(占领)
 const bestEl = document.getElementById('best');
 const endlessBtn = document.getElementById('btn-endless');
+const objectiveBtn = document.getElementById('btn-objective');
 
 // —— 存档：金币 / 已拥有坦克 / 当前选用 ——
 const STORAGE_KEY = 'warthunder_meta_v1';
@@ -2631,6 +2772,12 @@ function renderEndlessBtn() {
   if (!endlessBtn) return;
   endlessBtn.textContent = `♾ 无尽模式：${endless ? '开启' : '关闭'}`;
   endlessBtn.classList.toggle('active', endless);
+}
+function renderObjectiveBtn() {
+  if (!objectiveBtn) return;
+  objectiveBtn.textContent = `🎯 占领模式：${objective === 'capture' ? '开启' : '关闭'}`;
+  objectiveBtn.classList.toggle('active', objective === 'capture');
+  objectiveBtn.style.display = pendingMode === 'tank' ? '' : 'none';   // 仅陆战可选
 }
 
 // —— 科技树 ——
@@ -2734,7 +2881,8 @@ function renderLoadout() {
   loEls.name.textContent = t.name;
   loEls.weapon.textContent = weaponDesc(isTank, t);
   loEls.stats.innerHTML = statBars(isTank, t);
-  loEls.summary.textContent = `难度：${DIFFICULTY_LABELS[difficulty]}　·　无尽：${endless ? '开' : '关'}　·　💰 ${meta.money}`;
+  loEls.summary.textContent = `难度：${DIFFICULTY_LABELS[difficulty]}　·　无尽：${endless ? '开' : '关'}${isTank ? `　·　目标：${objective === 'capture' ? '占领' : '歼灭'}` : ''}　·　💰 ${meta.money}`;
+  renderObjectiveBtn();
   const cycling = owned.length > 1;
   loEls.prev.disabled = !cycling;
   loEls.next.disabled = !cycling;
@@ -2767,6 +2915,7 @@ function startGame(mode) {
     tankType: meta.selected,
     planeType: meta.selectedPlane,
     endless,
+    objective,
     hudContainer,
     onExit: backToMenu,
     onResult: ({ win, kills, endless: isEndless }) => {
@@ -2794,7 +2943,7 @@ function backToMenu() {
   if (game) { game.dispose(); game = null; }
   hudContainer.classList.add('hidden');
   menu.classList.remove('hidden');
-  renderMoney(); renderBest(); renderEndlessBtn();
+  renderMoney(); renderBest(); renderEndlessBtn(); renderObjectiveBtn();
 }
 
 document.getElementById('btn-tank').addEventListener('click', () => showLoadout('tank'));
@@ -2814,6 +2963,7 @@ document.querySelectorAll('.diff-btn').forEach((btn) => {
 });
 
 if (endlessBtn) endlessBtn.addEventListener('click', () => { endless = !endless; renderEndlessBtn(); });
+if (objectiveBtn) objectiveBtn.addEventListener('click', () => { objective = objective === 'capture' ? 'battle' : 'capture'; renderObjectiveBtn(); renderLoadout(); });
 if (techtreeBtn) techtreeBtn.addEventListener('click', openTechTree);
 if (techtreeEl) techtreeEl.addEventListener('click', (e) => {
   const card = e.target.closest('.tt-card');
