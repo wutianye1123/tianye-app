@@ -560,7 +560,12 @@ function createRaceTrack() {
             new THREE.MeshBasicMaterial({ color: 0x00ff88, transparent: true, opacity: 0.3, side: THREE.DoubleSide }));
         glowPlane.position.y = GATE_SIZE.h / 2;
 
-        g.add(leftPost, rightPost, beam, glowPlane);
+        // 门顶信标：无光照高亮球，远距离/任何角度都能看见（解决"看不见门"）
+        const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.6, 12, 8),
+            new THREE.MeshBasicMaterial({ color: 0xffff00 }));
+        beacon.position.y = GATE_SIZE.h + 1.5;
+
+        g.add(leftPost, rightPost, beam, glowPlane, beacon);
         g.position.set(p.x, 0, p.z);
         const next = RACE_TRACK[(i + 1) % RACE_TRACK.length];
         g.lookAt(next.x, 0, next.z);
@@ -944,15 +949,16 @@ function checkGatePass() {
 function updateGateColors() {
     for (let i = 0; i < gates.length; i++) {
         const g = gates[i];
+        const glow = g.children[3], beacon = g.children[4];
         if (g.userData.passed) {
-            g.children[3].material.color.setHex(0xffaa00);
-            g.children[3].material.opacity = 0.5;
+            glow.material.color.setHex(0xffaa00); glow.material.opacity = 0.5;
+            if (beacon) beacon.material.color.setHex(0xffaa00);
         } else if (i === currentGate) {
-            g.children[3].material.color.setHex(0x00ff88);
-            g.children[3].material.opacity = 0.6;
+            glow.material.color.setHex(0x00ff88); glow.material.opacity = 0.8;   // 当前门更醒目
+            if (beacon) beacon.material.color.setHex(0x00ff88);
         } else {
-            g.children[3].material.color.setHex(0xff8800);
-            g.children[3].material.opacity = 0.15;
+            glow.material.color.setHex(0xff8800); glow.material.opacity = 0.4;   // 未来门从 0.15 提到 0.4，看得见
+            if (beacon) beacon.material.color.setHex(0xff8800);
         }
     }
 }
