@@ -74,9 +74,11 @@ export function makeTrackTexture() {
   return t;
 }
 
-// 地形高度场（分层正弦，起伏丘陵）。
+// 地形高度场（分层正弦，起伏丘陵）。terrainScale 按地图调整起伏强度（全局，所有调用方一致）。
+let terrainScale = 1;
+export function setTerrainScale(s) { terrainScale = s; }
 export function terrainHeight(x, z) {
-  return Math.sin(x * 0.013) * Math.cos(z * 0.014) * 11
+  return (Math.sin(x * 0.013) * Math.cos(z * 0.014) * 11
     + Math.sin(x * 0.03 + 1.3) * Math.cos(z * 0.026 + 0.5) * 4
-    + Math.sin((x + z) * 0.006) * 7;
+    + Math.sin((x + z) * 0.006) * 7) * terrainScale;
 }

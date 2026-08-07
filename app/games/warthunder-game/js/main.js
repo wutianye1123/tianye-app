@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTexture, camoTexture, makeTrackTexture, terrainHeight } from './lib.js';
+import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTexture, camoTexture, makeTrackTexture, terrainHeight, setTerrainScale } from './lib.js';
 
 // 坦克贴地姿态用的临时对象（避免每帧分配）
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
@@ -1677,24 +1677,40 @@ function setupEnvironment(scene, mode) {
 
 
 
-// 创建地面 + 障碍物 + 边界，返回 { group, obstacles, half }。
-function createTerrain(scene, mode) {
+// 地图主题：不同地形（色调 / 雾 / 密度 / 城镇街区 / 起伏）。菜单"🗺 地图"按钮在这些里循环。
+const MAPS = [
+  { id:'city',    name:'城镇巷战', urban:true,  towns:0, density:0.4, fog:0x706a62, bg:0x8a847c, gLow:[0.30,0.29,0.26], gHigh:[0.42,0.40,0.36], leaf:0x3a4030, wall:0x5a544c, height:0.45, wallColor:0x9aa0a0 },
+  { id:'open',    name:'旷野',     urban:false, towns:2, density:1.3, fog:0xbfd3c4, bg:0xbfd3c4, gLow:[0.34,0.48,0.24], gHigh:[0.50,0.45,0.27], leaf:0x3f6b35, wall:0x6b5d3f, height:1.0, wallColor:0x88ff99 },
+  { id:'hills',   name:'丘陵山地', urban:false, towns:1, density:1.0, fog:0xaab39a, bg:0xbfd3c4, gLow:[0.28,0.43,0.20], gHigh:[0.46,0.42,0.26], leaf:0x356b30, wall:0x6b5d3f, height:1.6, wallColor:0x88ff99 },
+  { id:'desert',  name:'沙漠',     urban:false, towns:1, density:0.85,fog:0xd8c994, bg:0xe8d7a8, gLow:[0.76,0.66,0.40], gHigh:[0.88,0.78,0.52], leaf:0x6b6030, wall:0x8a7a4a, height:0.7, wallColor:0xe0c878 },
+  { id:'forest',  name:'密林',     urban:false, towns:0, density:1.7, fog:0x8fae84, bg:0xaec5a4, gLow:[0.15,0.32,0.13], gHigh:[0.30,0.40,0.20], leaf:0x2a5a25, wall:0x4a4030, height:1.0, wallColor:0x88ff99 },
+  { id:'factory', name:'工业厂区', urban:false, towns:0, density:1.4, fog:0x6f6f74, bg:0x808086, gLow:[0.26,0.26,0.28], gHigh:[0.37,0.37,0.40], leaf:0x3a4030, wall:0x4a4a4e, height:0.5, wallColor:0xaaaaaa },
+  { id:'snow',    name:'雪原',     urban:false, towns:1, density:1.1, fog:0xd6dfe6, bg:0xe8eef2, gLow:[0.80,0.84,0.88], gHigh:[0.92,0.94,0.97], leaf:0x3a5a40, wall:0x6a6a6a, height:1.1, wallColor:0xc0d0e0 },
+];
+
+// 创建地面 + 障碍物 + 边界，返回 { group, obstacles, half }。mapId 决定地形主题。
+function createTerrain(scene, mode, mapId) {
   const group = new THREE.Group();
   const obstacles = [];
 
   const half = (mode === 'plane' ? CONFIG.plane.worldSize : CONFIG.tank.worldSize);
+  const theme = MAPS.find((m) => m.id === mapId) || MAPS[1];
+  if (theme.height != null) setTerrainScale(theme.height);   // 按地图调整起伏
+  scene.background = new THREE.Color(theme.bg);              // 按地图覆盖天空/雾
+  scene.fog = new THREE.Fog(theme.fog, 120, mode === 'plane' ? 700 : 450);
 
-  // 地面（细分高度场 + 顶点色：低处绿、高处棕）
+  // 地面（细分高度场 + 顶点色：按地图调色板，低处→高处渐变）
   const groundSize = half * 2 + 400;
   const groundGeo = new THREE.PlaneGeometry(groundSize, groundSize, 120, 120);
   groundGeo.rotateX(-Math.PI / 2);
   const gpos = groundGeo.attributes.position;
   const gcol = [];
+  const [loR, loG, loB] = theme.gLow, [hiR, hiG, hiB] = theme.gHigh;
   for (let i = 0; i < gpos.count; i++) {
     const y = terrainHeight(gpos.getX(i), gpos.getZ(i));
     gpos.setY(i, y);
     const t = clamp((y + 15) / 30, 0, 1); // -15..15 → 0..1
-    gcol.push(0.36 + t * 0.30, 0.50 - t * 0.15, 0.25);
+    gcol.push(loR + (hiR - loR) * t, loG + (hiG - loG) * t, loB + (hiB - loB) * t);
   }
   gpos.needsUpdate = true;
   groundGeo.setAttribute('color', new THREE.Float32BufferAttribute(gcol, 3));
@@ -1716,33 +1732,47 @@ function createTerrain(scene, mode) {
   const wallH = mode === 'plane' ? 220 : 14;
   const wall = new THREE.Mesh(
     new THREE.CylinderGeometry(half, half, wallH, 64, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0x88ff99, transparent: true, opacity: 0.08, side: THREE.DoubleSide })
+    new THREE.MeshBasicMaterial({ color: theme.wallColor || 0x88ff99, transparent: true, opacity: 0.08, side: THREE.DoubleSide })
   );
   wall.position.y = wallH / 2;
   group.add(wall);
 
-  // 障碍物（陆战加密 + 多样：城镇建筑群 / 建筑 / 岩石 / 树 / 沙袋墙 / 残骸 / 油桶）
+  // 障碍物：按地图主题（密度 / 城镇街区 / 小镇群）
   const baseCount = (mode === 'plane' ? 24 : 40) * (half / (mode === 'plane' ? 400 : 260));
-  const obstacleCount = Math.round(mode === 'tank' ? baseCount * 2.1 : baseCount);
+  const obstacleCount = Math.round(baseCount * (mode === 'tank' ? (theme.density || 1) : 1));
+  const addBuilding = (x, z, pal) => {
+    const w = randRange(7, 16), h = randRange(7, 22), d = randRange(7, 16);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
+      new THREE.MeshStandardMaterial({ color: pal, roughness: 0.9 }));
+    m.position.set(x, h / 2 + terrainHeight(x, z), z);
+    m.castShadow = true; m.receiveShadow = true;
+    group.add(m);
+    obstacles.push({ position: new THREE.Vector3(x, 0, z), radius: Math.max(w, d) / 2 });
+  };
 
-  // 陆战：先撒 2~3 个"城镇"建筑群，营造战争雷霆城镇掩体感
-  if (mode === 'tank') {
-    const towns = randInt(2, 3);
-    for (let c = 0; c < towns; c++) {
-      const cx = randRange(-half * 0.55, half * 0.55);
-      const cz = randRange(-half * 0.55, half * 0.55);
-      if (Math.hypot(cx, cz) < 55) continue;   // 避开中央战场
-      for (let k = 0; k < randInt(5, 9); k++) {
-        const x = cx + randRange(-24, 24), z = cz + randRange(-24, 24);
-        if (Math.abs(x) < 22 && Math.abs(z) < 22) continue;
-        const w = randRange(6, 13), h = randRange(6, 16), d = randRange(6, 13);
-        const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
-          new THREE.MeshStandardMaterial({ color: 0x80766a, roughness: 0.9 }));
-        m.position.set(x, h / 2 + terrainHeight(x, z), z);
-        m.castShadow = true; m.receiveShadow = true;
-        group.add(m);
-        obstacles.push({ position: new THREE.Vector3(x, 0, z), radius: Math.max(w, d) / 2 });
+  // 城镇图：街区网格——连续楼房 + 街道，密集巷战（战争雷霆城镇感）
+  if (theme.urban && mode === 'tank') {
+    const cell = 78, street = 18, pal = 0x7c7268;
+    for (let bx = -half + cell; bx < half - cell; bx += cell + street) {
+      for (let bz = -half + cell; bz < half - cell; bz += cell + street) {
+        if (Math.hypot(bx, bz) < 95) continue;   // 中央战场/占领点留空
+        addBuilding(bx + randRange(-cell / 3, cell / 3), bz - cell / 2 + randRange(-3, 3), pal);
+        addBuilding(bx + randRange(-cell / 3, cell / 3), bz + cell / 2 + randRange(-3, 3), pal);
+        addBuilding(bx - cell / 2 + randRange(-3, 3), bz + randRange(-cell / 3, cell / 3), pal);
+        addBuilding(bx + cell / 2 + randRange(-3, 3), bz + randRange(-cell / 3, cell / 3), pal);
+        if (Math.random() < 0.5) addBuilding(bx + randRange(-10, 10), bz + randRange(-10, 10), pal);
       }
+    }
+  }
+
+  // 小镇群（非城镇图：散落村镇）
+  for (let c = 0; c < (theme.towns || 0); c++) {
+    const cx = randRange(-half * 0.55, half * 0.55), cz = randRange(-half * 0.55, half * 0.55);
+    if (Math.hypot(cx, cz) < 60) continue;
+    for (let k = 0; k < randInt(5, 9); k++) {
+      const x = cx + randRange(-24, 24), z = cz + randRange(-24, 24);
+      if (Math.abs(x) < 22 && Math.abs(z) < 22) continue;
+      addBuilding(x, z, 0x80766a);
     }
   }
 
@@ -1784,7 +1814,7 @@ function createTerrain(scene, mode) {
       trunk.castShadow = true;
       const leaves = new THREE.Mesh(
         new THREE.ConeGeometry(randRange(2.5, 4), randRange(5, 8), 7),
-        new THREE.MeshStandardMaterial({ color: 0x3f6b35, roughness: 1, flatShading: true })
+        new THREE.MeshStandardMaterial({ color: theme.leaf || 0x3f6b35, roughness: 1, flatShading: true })
       );
       leaves.position.y = trunkH + 3;
       leaves.castShadow = true;
@@ -1797,7 +1827,7 @@ function createTerrain(scene, mode) {
       const w = randRange(8, 16), h = randRange(1.6, 2.4), d = randRange(1.5, 2.5);
       mesh = new THREE.Mesh(
         new THREE.BoxGeometry(w, h, d),
-        new THREE.MeshStandardMaterial({ color: 0x6b5d3f, roughness: 1, flatShading: true })
+        new THREE.MeshStandardMaterial({ color: theme.wall || 0x6b5d3f, roughness: 1, flatShading: true })
       );
       mesh.position.set(x, h / 2 + terrainHeight(x, z), z);
       mesh.rotation.y = randRange(0, Math.PI);
@@ -1948,7 +1978,7 @@ class Sfx {
 }
 
 class Game {
-  constructor({ canvas, mode = 'tank', difficulty = 'normal', tankType = 'medium', planeType = 'fighter', endless = false, objective = 'battle', hudContainer, onExit, onResult } = {}) {
+  constructor({ canvas, mode = 'tank', difficulty = 'normal', tankType = 'medium', planeType = 'fighter', endless = false, objective = 'battle', mapId = 'open', hudContainer, onExit, onResult } = {}) {
     this.canvas = canvas;
     this.mode = mode;
     this.difficulty = difficulty;
@@ -1956,6 +1986,7 @@ class Game {
     this.planeType = planeType;
     this.endless = endless;
     this.objective = mode === 'tank' ? objective : 'battle';   // 'battle'(歼灭) | 'capture'(占领，仅陆战)
+    this.mapId = mode === 'tank' ? mapId : 'open';             // 地图主题（仅陆战）
     this.onExit = onExit;
     this.onResult = onResult;
     this.state = 'playing';
@@ -2054,7 +2085,7 @@ class Game {
   // —— 比赛初始化 ——
   _initMatch(mode) {
     applyDifficulty(this.difficulty); // 按难度重算 CONFIG
-    this.terrain = createTerrain(this.scene, mode);
+    this.terrain = createTerrain(this.scene, mode, this.mapId);
     const R = CONFIG.rules;
     this.kills = 0;
     this.playerLives = R.playerLives;
@@ -2731,9 +2762,11 @@ let game = null;
 let difficulty = 'normal';
 let endless = false;
 let objective = 'battle';   // 陆战目标：'battle'(歼灭) | 'capture'(占领)
+let mapIndex = 1;           // 陆战地图主题索引（MAPS[1]='open' 默认）
 const bestEl = document.getElementById('best');
 const endlessBtn = document.getElementById('btn-endless');
 const objectiveBtn = document.getElementById('btn-objective');
+const mapBtn = document.getElementById('btn-map');
 
 // —— 存档：金币 / 已拥有坦克 / 当前选用 ——
 const STORAGE_KEY = 'warthunder_meta_v1';
@@ -2778,6 +2811,11 @@ function renderObjectiveBtn() {
   objectiveBtn.textContent = `🎯 占领模式：${objective === 'capture' ? '开启' : '关闭'}`;
   objectiveBtn.classList.toggle('active', objective === 'capture');
   objectiveBtn.style.display = pendingMode === 'tank' ? '' : 'none';   // 仅陆战可选
+}
+function renderMapBtn() {
+  if (!mapBtn) return;
+  mapBtn.textContent = `🗺 地图：${MAPS[mapIndex].name}`;
+  mapBtn.style.display = pendingMode === 'tank' ? '' : 'none';   // 仅陆战可选
 }
 
 // —— 科技树 ——
@@ -2881,8 +2919,9 @@ function renderLoadout() {
   loEls.name.textContent = t.name;
   loEls.weapon.textContent = weaponDesc(isTank, t);
   loEls.stats.innerHTML = statBars(isTank, t);
-  loEls.summary.textContent = `难度：${DIFFICULTY_LABELS[difficulty]}　·　无尽：${endless ? '开' : '关'}${isTank ? `　·　目标：${objective === 'capture' ? '占领' : '歼灭'}` : ''}　·　💰 ${meta.money}`;
+  loEls.summary.textContent = `难度：${DIFFICULTY_LABELS[difficulty]}　·　无尽：${endless ? '开' : '关'}${isTank ? `　·　目标：${objective === 'capture' ? '占领' : '歼灭'}　·　🗺 ${MAPS[mapIndex].name}` : ''}　·　💰 ${meta.money}`;
   renderObjectiveBtn();
+  renderMapBtn();
   const cycling = owned.length > 1;
   loEls.prev.disabled = !cycling;
   loEls.next.disabled = !cycling;
@@ -2916,6 +2955,7 @@ function startGame(mode) {
     planeType: meta.selectedPlane,
     endless,
     objective,
+    mapId: MAPS[mapIndex].id,
     hudContainer,
     onExit: backToMenu,
     onResult: ({ win, kills, endless: isEndless }) => {
@@ -2964,6 +3004,7 @@ document.querySelectorAll('.diff-btn').forEach((btn) => {
 
 if (endlessBtn) endlessBtn.addEventListener('click', () => { endless = !endless; renderEndlessBtn(); });
 if (objectiveBtn) objectiveBtn.addEventListener('click', () => { objective = objective === 'capture' ? 'battle' : 'capture'; renderObjectiveBtn(); renderLoadout(); });
+if (mapBtn) mapBtn.addEventListener('click', () => { mapIndex = (mapIndex + 1) % MAPS.length; renderMapBtn(); renderLoadout(); });
 if (techtreeBtn) techtreeBtn.addEventListener('click', openTechTree);
 if (techtreeEl) techtreeEl.addEventListener('click', (e) => {
   const card = e.target.closest('.tt-card');
