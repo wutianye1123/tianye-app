@@ -116,14 +116,24 @@ const DIFFICULTY_LABELS = { easy: '简单', normal: '普通', hard: '困难' };
 
 // —— 坦克型号 ——（在难度调整后的基础数值上再乘这些倍率；scale 为体积）
 const TANK_TYPES = [
-  { id:'medium',  name:'中型坦克',   icon:'🛡️', scale:1.0,  hp:1.0,  speed:1.0, turn:1.0, turret:1.0, reload:1.0, dmg:1.0,  rank:1, rp:0,    prereq:null,     price:0 },
-  { id:'light',   name:'轻型坦克',   icon:'🚙', scale:0.85, hp:0.75, speed:1.5, turn:1.5, turret:1.7, reload:0.7, dmg:0.75, rank:2, rp:300,  prereq:'medium', price:1500 },
-  { id:'scout',   name:'侦察战车',   icon:'🏍️', scale:0.8,  hp:0.5,  speed:1.7, turn:1.8, turret:1.8, reload:0.6, dmg:0.5,  rank:2, rp:300,  prereq:'medium', price:1000 },
-  { id:'td',      name:'坦克歼击车', icon:'🎯', scale:1.05, hp:1.1,  speed:0.9, turn:0.8, turret:0.7, reload:1.4, dmg:2.8,  rank:3, rp:800,  prereq:'light',  price:3500 },
-  { id:'heavy',   name:'重型坦克',   icon:'🐢', scale:1.2,  hp:2.0,  speed:0.7, turn:0.7, turret:0.9, reload:1.3, dmg:2.2,  rank:4, rp:1600, prereq:'td',     price:4500 },
-  { id:'assault', name:'突击重炮',   icon:'💥', scale:1.3,  hp:2.6,  speed:0.6, turn:0.6, turret:0.85,reload:1.6, dmg:3.4,  rank:5, rp:3200, prereq:'heavy',  price:9000 },
+  // Rank 1
+  { id:'medium',  name:'T-34-85',     icon:'🇷🇺', scale:1.0,  hp:1.0,  speed:1.0,  turn:1.0,  turret:1.0,  reload:1.0, dmg:1.0,  rank:1, rp:0,    prereq:null,      price:0 },
+  { id:'m4',      name:'M4A3 谢尔曼',  icon:'🇺🇸', scale:1.0,  hp:1.15, speed:0.95, turn:1.0,  turret:1.0,  reload:1.1, dmg:0.95, rank:1, rp:200,  prereq:null,      price:800 },
+  // Rank 2
+  { id:'panzer2', name:'II 号坦克',    icon:'🇩🇪', scale:0.78, hp:0.6,  speed:1.4,  turn:1.6,  turret:1.6,  reload:0.7, dmg:0.6,  rank:2, rp:300,  prereq:'medium',  price:1000 },
+  { id:'light',   name:'M24 霞飞',     icon:'🇺🇸', scale:0.85, hp:0.75, speed:1.5,  turn:1.5,  turret:1.7,  reload:0.7, dmg:0.8,  rank:2, rp:300,  prereq:'medium',  price:1500 },
+  { id:'scout',   name:'234/2 美洲狮', icon:'🇩🇪', scale:0.8,  hp:0.5,  speed:1.7,  turn:1.8,  turret:1.8,  reload:0.6, dmg:0.5,  rank:2, rp:350,  prereq:'medium',  price:1200 },
+  // Rank 3
+  { id:'td',      name:'SU-100',      icon:'🇷🇺', scale:1.05, hp:1.1,  speed:0.9,  turn:0.8,  turret:0.7,  reload:1.4, dmg:2.8,  rank:3, rp:800,  prereq:'light',   price:3500 },
+  { id:'panther', name:'黑豹 V',       icon:'🇩🇪', scale:1.1,  hp:1.3,  speed:1.05, turn:0.85, turret:0.9,  reload:1.1, dmg:1.9,  rank:3, rp:900,  prereq:'td',      price:4200 },
+  // Rank 4
+  { id:'heavy',   name:'虎 I',        icon:'🇩🇪', scale:1.2,  hp:2.0,  speed:0.7,  turn:0.7,  turret:0.9,  reload:1.3, dmg:2.2,  rank:4, rp:1600, prereq:'panther', price:4500 },
+  { id:'is2',     name:'IS-2',        icon:'🇷🇺', scale:1.2,  hp:2.2,  speed:0.65, turn:0.65, turret:0.8,  reload:1.5, dmg:2.6,  rank:4, rp:2000, prereq:'heavy',   price:5500 },
+  // Rank 5
+  { id:'t80',     name:'T-80U',       icon:'🇷🇺', scale:1.1,  hp:2.4,  speed:1.2,  turn:1.1,  turret:1.3,  reload:0.9, dmg:2.5,  rank:5, rp:3000, prereq:'is2',     price:8800 },
+  { id:'assault', name:'鼠式',        icon:'🇩🇪', scale:1.3,  hp:2.6,  speed:0.6,  turn:0.6,  turret:0.85, reload:1.6, dmg:3.4,  rank:5, rp:3200, prereq:'is2',     price:9500 },
 ];
-function tankTypeById(id) { return TANK_TYPES.find((t) => t.id === id) || TANK_TYPES[1]; }
+function tankTypeById(id) { return TANK_TYPES.find((t) => t.id === id) || TANK_TYPES[0]; }
 function randomTankType() { return TANK_TYPES[Math.floor(Math.random() * TANK_TYPES.length)]; }
 
 // —— 飞机型号 ——（hp 血量、speed 速度、agi 机动、dmg 火力；均为相对倍率）
