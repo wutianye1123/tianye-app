@@ -483,7 +483,7 @@ class HUD {
       const dz = p.z - playerPos.z;
       const fwd = dx * hs + dz * hc;          // 沿前进方向（>0 在前方）
       const rgt = dx * hc - dz * hs;          // 沿右侧（>0 在右边）
-      return { px: cx + rgt * scale, py: cy - fwd * scale }; // 屏幕Y向下，前方在上方
+      return { px: cx - rgt * scale, py: cy - fwd * scale }; // 屏右=世界-x(朝+z时手性翻转)，与3D追尾视角左右一致
     };
     const dot = (p, color, r) => {
       const { px, py } = project(p);
@@ -2360,22 +2360,20 @@ class Game {
       this.camera.lookAt(muzzle.clone().addScaledVector(dir, 60));
       this._setFov(26, dt);
     } else {
-      // 相机跟炮塔方位(turretWorldYaw)并贴坡倾斜；瞄准方向=炮膛指向(再叠加炮管俯仰 barrelPitch)，
-      // 使屏幕正中十字随抬炮/压炮上下移动（正中准星=炮口指向）。
-      const tw = t.turretWorldYaw;
-      const bp = t.barrelPitch || 0;          // 正值=炮口下压
+      // 相机跟"鼠标瞄准方位"(_aimYaw)，不再跟炮塔方位——鼠标一动相机立刻转，炮塔随后 slew 对齐。
+      const ay = this._aimYaw ?? t.heading;
       const tp = t.position;
       const dd = 1.2;
       _tankN.set(terrainHeight(tp.x - dd, tp.z) - terrainHeight(tp.x + dd, tp.z), 2 * dd, terrainHeight(tp.x, tp.z - dd) - terrainHeight(tp.x, tp.z + dd)).normalize();
-      _tankFwd.set(Math.sin(tw), 0, Math.cos(tw));
+      _tankFwd.set(Math.sin(ay), 0, Math.cos(ay));
       _tankFwd.addScaledVector(_tankN, -_tankFwd.dot(_tankN)).normalize(); // 投到坡面（影响相机位置）
       const desired = tp.clone().addScaledVector(_tankFwd, -12).add(new THREE.Vector3(0, 4.5, 0));
       desired.y = Math.max(desired.y, terrainHeight(desired.x, desired.z) + 2);
       if (this._snapCam) { this.camera.position.copy(desired); this._snapCam = false; }
       else this.camera.position.lerp(desired, 0.2);
-      // 炮膛指向（方位+俯仰，炮塔已被反旋转保持水平）：从炮塔高度看向远处，正中十字即炮口指向
-      const boreDir = new THREE.Vector3(Math.sin(tw) * Math.cos(bp), -Math.sin(bp), Math.cos(tw) * Math.cos(bp));
-      this.camera.lookAt(tp.clone().add(new THREE.Vector3(0, 2.0, 0)).addScaledVector(boreDir, 60));
+      // 视角看向鼠标瞄准点：屏幕正中十字 = 鼠标指向（炮塔随后转过来对齐，炮膛=十字）
+      const look = this._tankAimPt ? this._tankAimPt.clone() : tp.clone().addScaledVector(_tankFwd, 60).add(new THREE.Vector3(0, 2, 0));
+      this.camera.lookAt(look);
       this._setFov(62, dt);
     }
   }
@@ -2436,9 +2434,10 @@ class Game {
     this._raf = requestAnimationFrame(this._animate);
     const dt = Math.min(this.clock.getDelta(), 0.05);
     if (this.mode === 'tank' && this.player && this.player.alive) {
-      // 战争雷霆炮手式：十字准星固定屏幕中央（=炮口指向），圆环跟随世界锁定瞄准点；
-      // 炮塔转到对准它时，圆环滑到屏幕中央与十字重合，炮塔就停。
-      this.hud.positionCrosshair(window.innerWidth / 2, window.innerHeight / 2);
+      // 十字准星 = 炮膛实际指向（炮口 + 炮管方向投影到屏幕）：随炮塔转，不锁屏幕中央。
+      // 相机跟鼠标、炮塔随后 slew 对齐时，准星从偏处滑向中央（与红环重合即对准）。
+      const _bore = this.player.getMuzzleWorld(new THREE.Vector3()).addScaledVector(this.player.getBarrelDir(), 80).project(this.camera);
+      this.hud.positionCrosshair((_bore.x * 0.5 + 0.5) * window.innerWidth, (-_bore.y * 0.5 + 0.5) * window.innerHeight);
       if (this._tankAimPt) {
         const sp = this._tankAimPt.clone().project(this.camera);
         this.hud.positionAimCircle(sp.x, sp.y, sp.z < 1);
