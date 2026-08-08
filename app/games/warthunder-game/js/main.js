@@ -831,40 +831,44 @@ class Tank {
     const darkMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.9 });
     const metalMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.4, metalness: 0.65 });
 
-    // 车体 + 倾斜前装甲
+    // 车体：按真实侧影挤出（倾斜前装甲 + 平车顶 + 倾斜车尾），不再是方块
     const hullY = hh * 0.5 + 0.4;
-    this.hull = new THREE.Mesh(new THREE.BoxGeometry(hw, hh, hl), bodyMat);
-    this.hull.position.y = hullY;
+    const slope = g.slope ?? 0.5;
+    const G = clamp(slope * hl * 0.5, hl * 0.15, hl * 0.55);   // 前装甲水平投影（越陡越长）
+    const R = hl * 0.18;                                        // 车尾斜面投影
+    const prof = new THREE.Shape();
+    prof.moveTo(-hl / 2, 0); prof.lineTo(hl / 2, 0); prof.lineTo(hl / 2, hh * 0.35);
+    prof.lineTo(hl / 2 - G, hh); prof.lineTo(-hl / 2 + R, hh); prof.lineTo(-hl / 2, hh * 0.55);
+    prof.closePath();
+    const hullGeo = new THREE.ExtrudeGeometry(prof, { depth: hw, bevelEnabled: false, steps: 1 });
+    hullGeo.translate(0, 0, -hw / 2);   // 宽度居中
+    hullGeo.rotateY(-Math.PI / 2);       // length→+Z(朝前)，宽度→X
+    this.hull = new THREE.Mesh(hullGeo, bodyMat);
+    this.hull.position.y = 0.4;          // 底贴履带
     this.hull.castShadow = true; this.hull.receiveShadow = true;
     this.group.add(this.hull);
-    // 大面积倾斜前装甲（真实坦克标志）+ 后部发动机舱
-    const glacis = new THREE.Mesh(new THREE.BoxGeometry(hw * 0.99, hh * 0.95, hl * 0.40), bodyMat);
-    glacis.position.set(0, hullY + hh * 0.18, hl * 0.40);
-    glacis.rotation.x = -(g.slope ?? 0.5); glacis.castShadow = true;   // 前装甲倾角按型号（T-34/黑豹 陡，虎/谢尔曼 缓）
-    this.group.add(glacis);
-    const engDeck = new THREE.Mesh(new THREE.BoxGeometry(hw * 0.9, hh * 0.5, hl * 0.20), bodyMat);
-    engDeck.position.set(0, hullY + hh * 0.30, -hl * 0.42); engDeck.castShadow = true;
-    this.group.add(engDeck);
 
-    // 履带 + 负重轮 + 翼子板
+    // 履带 + 负重轮 + 主动轮 + 托带轮 + 翼子板（按车体大小缩放，小车小履带）
+    const ts = clamp(hh / 1.1, 0.72, 1.05);   // 履带尺寸系数：小车(II号/霞飞/美洲狮)缩小
+    const wheelR = 0.62 * ts;
     for (const sx of [-1, 1]) {
       const tmat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 1, map: makeTrackTexture() });
       if (sx < 0) this.trackMatL = tmat; else this.trackMatR = tmat;
-      const track = new THREE.Mesh(new THREE.BoxGeometry(0.85, 1.35, hl * 1.05), tmat);
-      track.position.set(sx * (hw / 2 + 0.35), 0.62, 0);
+      const track = new THREE.Mesh(new THREE.BoxGeometry(0.85, wheelR * 2.2, hl * 1.05), tmat);
+      track.position.set(sx * (hw / 2 + 0.35), wheelR, 0);
       track.castShadow = true; this.group.add(track);
       const span = hl * 0.82;
-      for (let i = 0; i < g.wheels; i++) {   // 真实大小负重轮
+      for (let i = 0; i < g.wheels; i++) {   // 负重轮
         const z = -span / 2 + (span * i) / Math.max(1, g.wheels - 1);
-        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.5, 12), darkMat);
+        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(wheelR, wheelR, 0.5, 12), darkMat);
         wheel.rotation.z = Math.PI / 2;
-        wheel.position.set(sx * (hw / 2 + 0.35), 0.6, z);
+        wheel.position.set(sx * (hw / 2 + 0.35), wheelR, z);
         wheel.castShadow = true; this.group.add(wheel);
       }
-      const sprocket = new THREE.Mesh(new THREE.CylinderGeometry(0.80, 0.80, 0.5, 10), darkMat);  // 主动轮（车头）
-      sprocket.rotation.z = Math.PI / 2; sprocket.position.set(sx * (hw / 2 + 0.35), 0.65, span / 2 + 0.5); this.group.add(sprocket);
-      const roller = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.5, 8), darkMat);     // 托带轮（车顶）
-      roller.rotation.z = Math.PI / 2; roller.position.set(sx * (hw / 2 + 0.35), 1.25, 0); this.group.add(roller);
+      const sprocket = new THREE.Mesh(new THREE.CylinderGeometry(wheelR * 1.3, wheelR * 1.3, 0.5, 10), darkMat);  // 主动轮（车头）
+      sprocket.rotation.z = Math.PI / 2; sprocket.position.set(sx * (hw / 2 + 0.35), wheelR * 1.05, span / 2 + 0.5); this.group.add(sprocket);
+      const roller = new THREE.Mesh(new THREE.CylinderGeometry(wheelR * 0.35, wheelR * 0.35, 0.5, 8), darkMat);   // 托带轮（车顶）
+      roller.rotation.z = Math.PI / 2; roller.position.set(sx * (hw / 2 + 0.35), wheelR * 2.0, 0); this.group.add(roller);
       const fender = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.12, hl * 0.98), bodyMat);
       fender.position.set(sx * (hw / 2 + 0.7), hullY + hh * 0.5, 0);
       this.group.add(fender);
@@ -909,40 +913,46 @@ class Tank {
       mesh.position.set(x, y, z); mesh.rotation.x = rx; mesh.castShadow = true; turret.add(mesh);
     };
     switch (g.turret) {
-      case 'cyl':
-        add(new THREE.Mesh(new THREE.CylinderGeometry(tw * 0.5, tw * 0.55, th, 14), bodyMat));
+      case 'dome': { // 铸造圆炮塔（T-34/谢尔曼/IS-2）：旋转曲面，光滑圆润
+        const pts = [[tw*0.55,0],[tw*0.52,th*0.25],[tw*0.46,th*0.5],[tw*0.36,th*0.75],[tw*0.22,th*0.92],[tw*0.08,th*1.02],[0,th*1.05]]
+          .map(([x, y]) => new THREE.Vector2(x, y));
+        add(new THREE.Mesh(new THREE.LatheGeometry(pts, 18), bodyMat));
         break;
-      case 'casemate': // 低矮固定战斗室（歼击车）
+      }
+      case 'cyl': { // 圆柱炮塔也走旋转面（更圆润）
+        const pts = [[tw*0.5,0],[tw*0.5,th*0.8],[tw*0.42,th*0.95],[0,th*0.98]].map(([x, y]) => new THREE.Vector2(x, y));
+        add(new THREE.Mesh(new THREE.LatheGeometry(pts, 16), bodyMat));
+        break;
+      }
+      case 'box':   // 焊接方炮塔（虎I/黑豹）：带斜前装甲（真实就是 welded 方块）
+        add(new THREE.Mesh(new THREE.BoxGeometry(tw, th, tw * 1.1), bodyMat));
+        add(new THREE.Mesh(new THREE.BoxGeometry(tw * 0.85, th * 0.7, tw * 0.25), bodyMat), 0, 0, tw * 0.55, -0.5);
+        break;
+      case 'flat':  // 现代低矮方炮塔（T-80U）
+        add(new THREE.Mesh(new THREE.BoxGeometry(tw, th, tw * 1.0), bodyMat));
+        add(new THREE.Mesh(new THREE.BoxGeometry(tw * 0.5, th * 0.6, tw * 0.3), bodyMat), 0, th * 0.2, tw * 0.5);
+        break;
+      case 'casemate': // 歼击车固定战斗室
         add(new THREE.Mesh(new THREE.BoxGeometry(tw, th, tw * 0.7), bodyMat));
         add(new THREE.Mesh(new THREE.BoxGeometry(tw * 0.9, th * 0.85, tw * 0.18), bodyMat), 0, 0, tw * 0.42, -0.5);
         break;
-      case 'massive': // 巨型炮塔 + 附加装甲（突击重炮）
+      case 'massive': // 巨型炮塔（鼠式）
         add(new THREE.Mesh(new THREE.BoxGeometry(tw, th, tw * 0.85), bodyMat));
         add(new THREE.Mesh(new THREE.BoxGeometry(tw * 1.05, th * 0.5, tw * 0.2), bodyMat), 0, -th * 0.2, tw * 0.45);
         break;
       case 'open': // 开顶侦察
         add(new THREE.Mesh(new THREE.BoxGeometry(tw, th, tw * 0.8), bodyMat));
         break;
-      case 'dome': // 铸造圆炮塔（T-34/谢尔曼/IS-2）：圆柱 + 半球顶
-        add(new THREE.Mesh(new THREE.CylinderGeometry(tw * 0.5, tw * 0.56, th * 0.8, 16), bodyMat));
-        add(new THREE.Mesh(new THREE.SphereGeometry(tw * 0.42, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), bodyMat), 0, th * 0.35, 0);
-        break;
-      case 'flat': // 现代低矮方炮塔（T-80U）
-        add(new THREE.Mesh(new THREE.BoxGeometry(tw, th, tw * 1.0), bodyMat));
-        add(new THREE.Mesh(new THREE.BoxGeometry(tw * 0.5, th * 0.6, tw * 0.3), bodyMat), 0, th * 0.2, tw * 0.5);
-        break;
-      case 'box':
-      default:
-        add(new THREE.Mesh(new THREE.BoxGeometry(tw, th, tw * 1.1), bodyMat));
-        add(new THREE.Mesh(new THREE.BoxGeometry(tw * 0.85, th * 0.7, tw * 0.25), bodyMat), 0, 0, tw * 0.55, -0.5);
-        break;
     }
-    // 炮盾：炮管根部圆柱（真实坦克标志）
+    // 炮盾：炮管根部圆柱
     if (g.turret !== 'casemate' && g.turret !== 'open') {
       add(new THREE.Mesh(new THREE.CylinderGeometry(tw * 0.24, tw * 0.26, th * 0.55, 12), bodyMat), 0, th * 0.08, tw * 0.42, Math.PI / 2);
     }
+    // 车长指挥塔（顶部小圆罩）
     if (g.turret !== 'open' && g.turret !== 'casemate') {
-      add(new THREE.Mesh(new THREE.CylinderGeometry(tw * 0.18, tw * 0.2, th * 0.35, 10), bodyMat), -tw * 0.22, th * 0.6, -tw * 0.1);
+      const cupola = new THREE.Mesh(new THREE.CylinderGeometry(tw*0.14, tw*0.15, th*0.22, 10), bodyMat);
+      cupola.position.set(tw*0.2, (g.turret==='dome' || g.turret==='cyl') ? th*0.95 : th*0.62, -tw*0.12);
+      cupola.castShadow = true; turret.add(cupola);
     }
   }
 
