@@ -2892,6 +2892,7 @@ function renderLoadout() {
   loEls.weapon.textContent = weaponDesc(isTank, t);
   loEls.stats.innerHTML = statBars(isTank, t);
   loEls.summary.textContent = `难度：${DIFFICULTY_LABELS[difficulty]}　·　无尽：${endless ? '开' : '关'}${isTank ? `　·　目标：${objective === 'capture' ? '占领' : '歼灭'}　·　🗺 ${MAPS[mapIndex].name}` : ''}　·　💰 ${meta.money}`;
+  renderEndlessBtn();
   renderObjectiveBtn();
   renderMapBtn();
   const cycling = owned.length > 1;
