@@ -773,12 +773,17 @@ class EntityManager {
 
 // 每种型号的几何规格：hull[宽,高,长]、炮塔样式与尺寸、炮管[半径,长]、负重轮数、是否有炮口制退器。
 const GEOM = {
-  light:   { hull:[3.0, 0.9, 4.6], turret:'cyl',     turretSize:[1.8, 0.95], barrel:[0.14, 2.8], wheels:5, brake:false },
-  medium:  { hull:[3.4, 1.1, 5.4], turret:'box',     turretSize:[2.4, 1.0 ], barrel:[0.18, 3.4], wheels:6, brake:false },
-  heavy:   { hull:[4.0, 1.4, 6.4], turret:'box',     turretSize:[3.0, 1.25], barrel:[0.24, 3.6], wheels:7, brake:true  },
-  td:      { hull:[3.6, 1.05,6.2], turret:'casemate',turretSize:[2.8, 0.95], barrel:[0.26, 4.6], wheels:6, brake:true  },
-  assault: { hull:[4.6, 1.7, 7.0], turret:'massive', turretSize:[3.4, 1.5 ], barrel:[0.32, 3.4], wheels:7, brake:true  },
-  scout:   { hull:[2.6, 0.8, 3.8], turret:'open',    turretSize:[1.5, 0.55], barrel:[0.12, 2.3], wheels:4, brake:false },
+  medium:  { hull:[3.4, 1.0, 5.4], turret:'dome',     turretSize:[2.3, 1.0 ], barrel:[0.17, 3.6], wheels:5, brake:false, slope:0.85 }, // T-34-85
+  m4:      { hull:[3.2, 1.5, 5.2], turret:'dome',     turretSize:[2.2, 1.1 ], barrel:[0.16, 3.0], wheels:6, brake:false, slope:0.45 }, // M4A3 谢尔曼（高）
+  panzer2: { hull:[2.6, 0.95,4.0], turret:'box',      turretSize:[1.6, 0.7 ], barrel:[0.08, 1.8], wheels:5, brake:false, slope:0.40 }, // II 号（小）
+  light:   { hull:[2.9, 1.0, 4.6], turret:'dome',     turretSize:[1.9, 0.9 ], barrel:[0.14, 2.6], wheels:5, brake:false, slope:0.60 }, // M24 霞飞
+  scout:   { hull:[2.6, 0.9, 4.0], turret:'box',      turretSize:[1.5, 0.6 ], barrel:[0.12, 2.2], wheels:8, brake:false, slope:0.50 }, // 234/2 美洲狮（8 轮）
+  td:      { hull:[3.6, 1.1, 6.2], turret:'casemate', turretSize:[3.0, 1.0 ], barrel:[0.26, 4.8], wheels:6, brake:true,  slope:0.70 }, // SU-100
+  panther: { hull:[3.6, 1.2, 6.0], turret:'box',      turretSize:[2.6, 1.1 ], barrel:[0.18, 5.0], wheels:7, brake:true,  slope:0.95 }, // 黑豹 V（长炮管、陡前装甲）
+  heavy:   { hull:[3.9, 1.5, 6.4], turret:'box',      turretSize:[3.0, 1.25], barrel:[0.24, 3.8], wheels:8, brake:true,  slope:0.40 }, // 虎 I（方正高大）
+  is2:     { hull:[3.6, 1.3, 6.0], turret:'dome',     turretSize:[2.8, 1.15], barrel:[0.30, 4.2], wheels:6, brake:true,  slope:0.85 }, // IS-2（122mm 粗管）
+  t80:     { hull:[3.6, 1.1, 6.0], turret:'flat',     turretSize:[3.0, 0.9 ], barrel:[0.22, 4.4], wheels:6, brake:false, slope:0.90 }, // T-80U（现代低矮）
+  assault: { hull:[4.6, 1.8, 7.4], turret:'massive',  turretSize:[3.6, 1.6 ], barrel:[0.34, 3.8], wheels:8, brake:true,  slope:0.50 }, // 鼠式（巨大）
 };
 class Tank {
   constructor({ side = 'player', team = 'blue', color = 0x4a6b3a, type = 'medium' } = {}) {
@@ -834,7 +839,7 @@ class Tank {
     this.group.add(this.hull);
     const glacis = new THREE.Mesh(new THREE.BoxGeometry(hw * 0.96, hh * 0.55, hl * 0.28), bodyMat);
     glacis.position.set(0, hullY + hh * 0.1, hl * 0.5);
-    glacis.rotation.x = -0.5; glacis.castShadow = true;
+    glacis.rotation.x = -(g.slope ?? 0.5); glacis.castShadow = true;   // 前装甲倾角按型号（T-34/黑豹 陡，虎/谢尔曼 缓）
     this.group.add(glacis);
 
     // 履带 + 负重轮 + 翼子板
@@ -909,6 +914,14 @@ class Tank {
         break;
       case 'open': // 开顶侦察
         add(new THREE.Mesh(new THREE.BoxGeometry(tw, th, tw * 0.8), bodyMat));
+        break;
+      case 'dome': // 铸造圆炮塔（T-34/谢尔曼/IS-2）：圆柱 + 半球顶
+        add(new THREE.Mesh(new THREE.CylinderGeometry(tw * 0.5, tw * 0.56, th * 0.8, 16), bodyMat));
+        add(new THREE.Mesh(new THREE.SphereGeometry(tw * 0.42, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), bodyMat), 0, th * 0.35, 0);
+        break;
+      case 'flat': // 现代低矮方炮塔（T-80U）
+        add(new THREE.Mesh(new THREE.BoxGeometry(tw, th, tw * 1.0), bodyMat));
+        add(new THREE.Mesh(new THREE.BoxGeometry(tw * 0.5, th * 0.6, tw * 0.3), bodyMat), 0, th * 0.2, tw * 0.5);
         break;
       case 'box':
       default:
