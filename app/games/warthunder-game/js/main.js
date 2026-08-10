@@ -22,7 +22,7 @@ const CONFIG = {
     enemyReloadTime: 5.0, // 敌方装填更长
     enemySpread: 0.06,    // 敌方炮弹散布（越大越不准）
     enemyFireChance: 0.4, // 敌方瞄准后单次开火概率
-    shellSpeed: 90,
+    shellSpeed: 150,           // 炮弹更快（世界大战打飞机时追得上）
     shellDamage: 35,      // 玩家炮弹伤害
     enemyShellDamage: 14, // 敌方炮弹伤害较低
     shellGravity: 6,
@@ -47,12 +47,13 @@ const CONFIG = {
     enemySpread: 0.045,
     enemyFireChance: 0.5,
     bulletLife: 2.0,
-    radius: 6.5,
+    radius: 10,
     gravity: 12,
     worldSize: 800,
     ceiling: 220,
     spawnAltitude: 70,
     missile: { count: 6, damage: 55, speed: 120, cooldown: 0.8, homing: 3.0, life: 5, radius: 0.5, regen: 7 },
+    bomb: { count: 8, damage: 800, gravity: 25, radius: 40, life: 12, regen: 6 },
   },
   // 战争雷霆式规则：致命殉爆/起火、玩家多条命、敌方票数与刷新波次。
   rules: {
@@ -132,18 +133,34 @@ const TANK_TYPES = [
   // Rank 5
   { id:'t80',     name:'T-80U',       icon:'🇷🇺', scale:1.1,  hp:2.4,  speed:1.2,  turn:1.1,  turret:1.3,  reload:0.9, dmg:2.5,  rank:5, rp:3000, prereq:'is2',     price:8800 },
   { id:'assault', name:'鼠式',        icon:'🇩🇪', scale:1.3,  hp:2.6,  speed:0.6,  turn:0.6,  turret:0.85, reload:1.6, dmg:3.4,  rank:5, rp:3200, prereq:'is2',     price:9500 },
+  { id:'m1a2',    name:'M1A2 艾布拉姆斯', icon:'🇺🇸', scale:1.4,  hp:3.5, speed:1.9, turn:2.0, turret:2.0,  reload:0.5, dmg:3.6, rank:6, rp:6000, prereq:'is2', price:20000 }, // 满级终极坦克：每一项都拉到全场最高
+  { id:'aa',      name:'ZSU-23-4 石勒喀河', icon:'🇷🇺', scale:0.85, hp:0.7, speed:1.2, turn:1.5, turret:2.0, reload:0.1, dmg:0.4, rank:2, rp:400, prereq:'medium', price:1500 }, // 防空坦克：高仰角速射打飞机
 ];
 function tankTypeById(id) { return TANK_TYPES.find((t) => t.id === id) || TANK_TYPES[0]; }
 function randomTankType() { return TANK_TYPES[Math.floor(Math.random() * TANK_TYPES.length)]; }
 
 // —— 飞机型号 ——（hp 血量、speed 速度、agi 机动、dmg 火力；均为相对倍率）
 const PLANE_TYPES = [
-  { id:'trainer',   name:'教练机',     icon:'🛩️', hp:0.6,  speed:0.95, agi:1.15, dmg:0.7,  rank:1, rp:0,    prereq:null,       price:0 },
-  { id:'fighter',   name:'战斗机',     icon:'✈️', hp:1.0,  speed:1.0,  agi:1.0,  dmg:1.0,  rank:1, rp:0,    prereq:null,       price:0 },
-  { id:'intercept', name:'截击机',     icon:'🛫', hp:0.85, speed:1.25, agi:0.85, dmg:1.1,  rank:2, rp:400,  prereq:'fighter', price:2500 },
-  { id:'heavy',     name:'重型战斗机', icon:'🛩️', hp:1.4,  speed:0.9,  agi:0.8,  dmg:1.35, rank:3, rp:1000, prereq:'intercept',price:4000 },
-  { id:'attacker',  name:'攻击机',     icon:'✈️', hp:1.7,  speed:0.8,  agi:0.7,  dmg:1.5,  rank:3, rp:1000, prereq:'heavy',    price:6000 },
-  { id:'jet',       name:'喷气战斗机', icon:'🚀', hp:1.0,  speed:1.5,  agi:1.2,  dmg:1.4,  rank:5, rp:3000, prereq:'heavy',    price:11000 },
+  // Rank 1（初始）
+  { id:'trainer',   name:'初教-6',        icon:'🇨🇳', hp:0.6,  speed:0.95, agi:1.15, dmg:0.7,  rank:1, rp:0,    prereq:null,      price:0 },
+  { id:'fighter',   name:'F-16 战隼',     icon:'🇺🇸', hp:1.0,  speed:1.05, agi:1.1,  dmg:1.0,  rank:1, rp:0,    prereq:null,      price:0 },
+  // Rank 2
+  { id:'mig29',     name:'MiG-29 支点',   icon:'🇷🇺', hp:0.9,  speed:1.1,  agi:1.15, dmg:0.95, rank:2, rp:400,  prereq:'fighter', price:2200 },
+  { id:'j10',       name:'歼-10 猛龙',    icon:'🇨🇳', hp:0.95, speed:1.15, agi:1.1,  dmg:1.0,  rank:2, rp:500,  prereq:'fighter', price:2600 },
+  { id:'intercept', name:'MiG-31 捕狐犬', icon:'🇷🇺', hp:0.9,  speed:1.35, agi:0.75, dmg:1.15, rank:3, rp:900,  prereq:'mig29',   price:3800 },
+  // Rank 3
+  { id:'rafale',    name:'阵风 Rafale',   icon:'🇫🇷', hp:1.1,  speed:1.1,  agi:1.15, dmg:1.1,  rank:3, rp:1000, prereq:'j10',     price:4200 },
+  { id:'heavy',     name:'F-15 鹰',       icon:'🇺🇸', hp:1.4,  speed:1.05, agi:0.85, dmg:1.25, rank:3, rp:1100, prereq:'mig29',   price:4500 },
+  { id:'attacker',  name:'A-10 雷电II',   icon:'🇺🇸', hp:1.8,  speed:0.7,  agi:0.6,  dmg:1.7,  rank:4, rp:1600, prereq:'heavy',   price:6000 },
+  // Rank 4
+  { id:'su35',      name:'Su-35 侧卫',    icon:'🇷🇺', hp:1.5,  speed:1.25, agi:1.05, dmg:1.35, rank:4, rp:2200, prereq:'heavy',   price:7500 },
+  { id:'typhoon',   name:'台风 Typhoon',  icon:'🇪🇺', hp:1.25, speed:1.2,  agi:1.2,  dmg:1.2,  rank:4, rp:2400, prereq:'rafale',  price:8000 },
+  { id:'bomber',    name:'Tu-22M 逆火',   icon:'🇷🇺', hp:1.5, speed:0.9,  agi:0.8,  dmg:2.5, missiles:true, fastMissile:true, rank:4, rp:2000, prereq:'heavy', price:7000 }, // 轰炸机：导弹+炸弹，转向快，血量适中
+  // Rank 5（顶）
+  { id:'jet',       name:'F-22 猛禽',     icon:'🇺🇸', hp:1.3,  speed:1.45, agi:1.3,  dmg:1.4, missiles:true, rank:5, rp:3200, prereq:'su35',    price:10000 },
+  { id:'j20',       name:'歼-20 威龙',    icon:'🇨🇳', hp:1.3,  speed:1.5,  agi:1.25, dmg:1.4,  rank:5, rp:3500, prereq:'typhoon', price:11000 },
+  { id:'f35',       name:'F-35 闪电II',   icon:'🇺🇸', hp:2.0,  speed:1.6,  agi:1.5,  dmg:1.8, missiles:true, fastMissile:true, rank:6, rp:6000, prereq:'j20', price:20000 }, // 满级终极战机：每一项都拉到全场最高+导弹
+  { id:'f35b',      name:'B-21 突袭者',   icon:'🇺🇸', hp:2.2,  speed:1.65, agi:1.55, dmg:1.85, missiles:true, fastMissile:true, bombs:true, rank:6, rp:8000, prereq:'f35', price:28000 }, // 满级隐身轰炸机：全满+导弹+炸弹，极贵
 ];
 function planeTypeById(id) { return PLANE_TYPES.find((p) => p.id === id) || PLANE_TYPES[0]; }
 function randomPlaneType() { return PLANE_TYPES[Math.floor(Math.random() * PLANE_TYPES.length)]; }
@@ -378,12 +395,13 @@ class HUD {
   setModules(mods) {
     if (!this.modulesEl) this.modulesEl = this.container.querySelector('#modules');
     if (!this.modulesEl) return;
-    if (!mods) { this.modulesEl.textContent = ''; return; }
-    const parts = [];
-    if (mods.track > 0) parts.push(`🛞 履带 ${Math.ceil(mods.track)}s`);
-    if (mods.barrel > 0) parts.push(`🎯 炮管 ${Math.ceil(mods.barrel)}s`);
-    if (mods.engine > 0) parts.push(`⚙️ 发动机 ${Math.ceil(mods.engine)}s`);
-    this.modulesEl.textContent = parts.join('　');
+    if (!mods) { this.modulesEl.innerHTML = ''; return; }
+    const col = (v) => v > 0 ? '#f44' : '#4f4';
+    const label = (v) => v > 0 ? `${Math.ceil(v)}s` : 'OK';
+    this.modulesEl.innerHTML =
+      `<span style="color:${col(mods.track)}">🛞履带 ${label(mods.track)}</span> ` +
+      `<span style="color:${col(mods.barrel)};margin-left:8px">🎯炮管 ${label(mods.barrel)}</span> ` +
+      `<span style="color:${col(mods.engine)};margin-left:8px">⚙️发动机 ${label(mods.engine)}</span>`;
   }
 
   // 命中反馈：在准星处闪一个标记。hit=命中(金)，crit=致命(橙)，kill=击毁(红)。
@@ -704,7 +722,22 @@ class EntityManager {
 
     // 清理失效弹丸
     this.projectiles = this.projectiles.filter((p) => {
-      if (!p.alive) { this.scene.remove(p.mesh); return false; }
+      if (!p.alive) {
+        this.scene.remove(p.mesh);
+        if (p.mesh.geometry) p.mesh.geometry.dispose();
+        if (p.mesh.material) p.mesh.material.dispose();
+        if (p.isBomb) {   // 炸弹落地/命中：范围爆炸（冲击波）
+          const _bp = p.mesh.position.clone();
+          this.addEffect(new Explosion(_bp.clone().add(new THREE.Vector3(0, 2, 0)), 14, 0xff6600));
+          const _R = p.bombRadius || 20;
+          for (const t of [...this.tanks, ...this.planes]) {
+            if (!t.alive || t === p.owner) continue;
+            const _d = t.position.distanceTo(_bp);
+            if (_d < _R) { t.onHit(p.damage * Math.max(0.6, 1 - _d / _R)); t._lastAttacker = p.owner; }   // 最低60%伤害，不是边缘就没伤害
+          }
+        }
+        return false;
+      }
       return true;
     });
     // 清理失效特效
@@ -740,12 +773,13 @@ class EntityManager {
   // 从场景与列表中移除已死亡载具，返回本次移除的列表（供 Game 计分 / 判定）。
   cullDead() {
     const removed = [];
+    const _dispose = (g) => { g.traverse((c) => { if (c.geometry) c.geometry.dispose(); if (c.material) { Array.isArray(c.material) ? c.material.forEach((m) => m.dispose()) : c.material.dispose(); } }); };
     this.tanks = this.tanks.filter((t) => {
-      if (!t.alive) { this.scene.remove(t.group); removed.push(t); return false; }
+      if (!t.alive) { _dispose(t.group); this.scene.remove(t.group); removed.push(t); return false; }
       return true;
     });
     this.planes = this.planes.filter((p) => {
-      if (!p.alive) { this.scene.remove(p.group); removed.push(p); return false; }
+      if (!p.alive) { _dispose(p.group); this.scene.remove(p.group); removed.push(p); return false; }
       return true;
     });
     return removed;
@@ -784,6 +818,8 @@ const GEOM = {
   is2:     { hull:[3.6, 1.3, 6.0], turret:'dome',     turretSize:[2.8, 1.15], barrel:[0.30, 4.2], wheels:6, brake:true,  slope:0.85 }, // IS-2（122mm 粗管）
   t80:     { hull:[3.6, 1.1, 6.0], turret:'flat',     turretSize:[3.0, 0.9 ], barrel:[0.22, 4.4], wheels:6, brake:false, slope:0.90 }, // T-80U（现代低矮）
   assault: { hull:[4.6, 1.8, 7.4], turret:'massive',  turretSize:[3.6, 1.6 ], barrel:[0.34, 3.8], wheels:8, brake:true,  slope:0.50 }, // 鼠式（巨大）
+  m1a2:    { hull:[4.2, 1.4, 6.8], turret:'flat',     turretSize:[3.2, 1.0], barrel:[0.30, 4.6], wheels:7, brake:true,  slope:0.85 }, // M1A2 现代主战坦克
+  aa:      { hull:[3.0, 1.0, 5.0], turret:'box',      turretSize:[2.2, 1.0], barrel:[0.06, 2.0], wheels:6, brake:false, slope:0.50 }, // 防空坦克
 };
 class Tank {
   constructor({ side = 'player', team = 'blue', color = 0x4a6b3a, type = 'medium' } = {}) {
@@ -817,6 +853,7 @@ class Tank {
     this.maxSpeed = (isEnemy ? CONFIG.tank.enemySpeed : CONFIG.tank.speed) * tt.speed;
     this.reloadTime = (isEnemy ? CONFIG.tank.enemyReloadTime : CONFIG.tank.reloadTime) * tt.reload;
     this.shellDamage = (isEnemy ? CONFIG.tank.enemyShellDamage : CONFIG.tank.shellDamage) * tt.dmg;
+    if (!isEnemy && tt.dmg >= 2.5) this.shellDamage = 99999;   // 玩家方"一击必杀"型号(SU-100/IS-2/T-80U/鼠式)：一炮秒杀，不管打哪
     this.turretSpeed = CONFIG.tank.turretSpeed * tt.turret;
     this.turnSpeed = CONFIG.tank.turnSpeed * tt.turn;
     this.fireSpread = isEnemy ? CONFIG.tank.enemySpread : (side === 'ally' ? 0.03 : 0);
@@ -1013,7 +1050,7 @@ class Tank {
     else this.turretYaw += clamp(diff, -speed * dt, speed * dt);
     // 炮管俯仰：瞄向瞄准点本身——近/低处自动大角度压炮，远处水平，高处抬头。
     const muzzleY = this.group.position.y + 2.0;
-    const targetPitch = clamp(Math.atan2(muzzleY - worldPoint.y, horiz), -0.4, 0.4);
+    const targetPitch = clamp(Math.atan2(muzzleY - worldPoint.y, horiz), -1.4, 0.4);   // 上仰放宽到~80°(打飞机)；正值=压炮
     this.barrelPitch += (targetPitch - this.barrelPitch) * Math.min(1, 8 * dt);
   }
 
@@ -1052,8 +1089,8 @@ class Tank {
       }
     }
     if (this.extCooldown > 0) this.extCooldown -= dt;
-    // 模块损伤自动修复（倒数）
-    if (this.modules) for (const k in this.modules) if (this.modules[k] > 0) this.modules[k] = Math.max(0, this.modules[k] - dt);
+    // 模块损伤自动修复（倒数，慢速）
+    if (this.modules) for (const k in this.modules) if (this.modules[k] > 0) this.modules[k] = Math.max(0, this.modules[k] - dt * 0.5);
     // 履带差速滚动：左履带=油门-转向、右履带=油门+转向
     if (this.trackMatL) this.trackMatL.map.offset.y += ((this.lastThrottle || 0) * 1.5 - (this._lastTurn || 0) * 1.2) * dt;
     if (this.trackMatR) this.trackMatR.map.offset.y += ((this.lastThrottle || 0) * 1.5 + (this._lastTurn || 0) * 1.2) * dt;
@@ -1157,12 +1194,21 @@ const INST = {
 
 // 每种型号的几何：fuse[机身长,半径]、wing 翼展、sweep 后掠、prop 螺旋桨、engines 发动机数。
 const PGEOM = {
-  fighter:   { fuse:[6.5, 0.55], wing:8.5,  sweep:0.0,  prop:true,  engines:1 },
-  trainer:   { fuse:[5.5, 0.45], wing:7.5,  sweep:0.0,  prop:true,  engines:1 },
-  intercept: { fuse:[8.0, 0.55], wing:9.5,  sweep:0.35, prop:true,  engines:1 },
-  heavy:     { fuse:[8.5, 0.7 ], wing:12.0, sweep:0.1,  prop:true,  engines:2 },
-  attacker:  { fuse:[6.0, 0.78], wing:10.5, sweep:0.0,  prop:true,  engines:1 },
-  jet:       { fuse:[8.5, 0.5 ], wing:9.0,  sweep:0.6,  prop:false, engines:1 },
+  trainer:   { fuse:[5.5, 0.45], wing:7.5,  sweep:0.0,  prop:true,  engines:1 },  // 初教-6（螺旋桨教练机）
+  fighter:   { fuse:[7.0, 0.5 ], wing:9.0,  sweep:0.3,  prop:false, engines:1 },  // F-16
+  mig29:     { fuse:[7.5, 0.5 ], wing:9.5,  sweep:0.35, prop:false, engines:2 },  // MiG-29
+  j10:       { fuse:[7.5, 0.5 ], wing:9.0,  sweep:0.4,  prop:false, engines:1 },  // 歼-10
+  intercept: { fuse:[9.0, 0.55], wing:10.0, sweep:0.35, prop:false, engines:2 },  // MiG-31
+  rafale:    { fuse:[7.5, 0.5 ], wing:9.5,  sweep:0.45, prop:false, engines:2 },  // 阵风
+  heavy:     { fuse:[9.0, 0.65], wing:13.0, sweep:0.25, prop:false, engines:2 },  // F-15
+  attacker:  { fuse:[6.5, 0.8 ], wing:11.0, sweep:0.1,  prop:false, engines:2 },  // A-10
+  su35:      { fuse:[9.5, 0.55], wing:11.5, sweep:0.3,  prop:false, engines:2 },  // Su-35
+  typhoon:   { fuse:[8.0, 0.5 ], wing:10.0, sweep:0.4,  prop:false, engines:2 },  // 台风
+  jet:       { fuse:[9.0, 0.5 ], wing:10.0, sweep:0.6,  prop:false, engines:2 },  // F-22
+  j20:       { fuse:[10.0,0.55], wing:11.0, sweep:0.55, prop:false, engines:2 },  // 歼-20
+  f35:       { fuse:[9.0, 0.6 ], wing:9.5,  sweep:0.5,  prop:false, engines:1 },  // F-35
+  bomber:    { fuse:[13.0,0.8 ], wing:18.0, sweep:0.3,  prop:false, engines:2 }, // 轰炸机（大型双发）
+  f35b:      { fuse:[9.5, 0.55], wing:10.5, sweep:0.55, prop:false, engines:1 }, // B-21 隐身轰炸机（小而快）
 };
 class Plane {
   constructor({ side = 'player', team = 'blue', color = 0x3a6b9e, type = 'fighter' } = {}) {
@@ -1197,8 +1243,13 @@ class Plane {
 
     // 导弹（仅玩家的喷气机）：敌方/队友一律无机弹
     const mc = CONFIG.plane.missile;
-    this.maxMissiles = (type === 'jet' && side === 'player') ? mc.count : 0;
+    const _pt = planeTypeById(type);
+    this.maxMissiles = (_pt.missiles && side === 'player') ? mc.count : 0;
+    this.missileSpeedMul = _pt.fastMissile ? 4.5 : 1;   // F-35/轰炸机：导弹 4.5 倍速
     this.missiles = this.maxMissiles;
+    const bc = CONFIG.plane.bomb;
+    this.maxBombs = ((type === 'bomber' || _pt.bombs) && side === 'player') ? bc.count : 0;
+    this.bombs = this.maxBombs;
     this.missileCooldown = 0;
     this.missileRegen = 0;
 
@@ -1392,6 +1443,14 @@ class Plane {
         this.missiles = Math.min(this.maxMissiles, this.missiles + 1);
       }
     }
+    // 炸弹自动补充：每 regen 秒 +1
+    if (this.maxBombs > 0 && this.bombs < this.maxBombs) {
+      this.bombRegen = (this.bombRegen || 0) + dt;
+      if (this.bombRegen >= CONFIG.plane.bomb.regen) {
+        this.bombRegen = 0;
+        this.bombs = Math.min(this.maxBombs, this.bombs + 1);
+      }
+    }
     if (this.burning && this.alive) {
       this.health -= CONFIG.rules.crit.burnDps * dt;
       if (this.health <= 0) { this.health = 0; this.alive = false; }
@@ -1404,7 +1463,21 @@ class Plane {
     const liftFactor = clamp(this.speed / CONFIG.plane.maxSpeed, 0, 1);
     this.group.position.y -= CONFIG.plane.gravity * dt * (1 - liftFactor) * 0.5;
     const gnd = terrainHeight(this.group.position.x, this.group.position.z) + 2;
-    if (this.group.position.y <= gnd) { this.group.position.y = gnd; this.health = 0; this.alive = false; }
+    if (this.group.position.y <= gnd) {
+      this.group.position.y = gnd; this.health = 0; this.alive = false;
+      // 坠机爆炸：伤害附近实体（冲击波，像炸弹）
+      if (this.em && !this._crashed) {
+        this._crashed = true;
+        const _pos = this.position.clone();
+        this.em.addEffect(new Explosion(_pos.clone().add(new THREE.Vector3(0, 2, 0)), 10, 0xff6600));
+        const _R = 28, _dmg = 100;
+        for (const t of [...this.em.tanks, ...this.em.planes]) {
+          if (t === this || !t.alive) continue;
+          const _d = t.position.distanceTo(_pos);
+          if (_d < _R) { t.onHit(_dmg * (1 - _d / _R)); t._lastAttacker = this; }
+        }
+      }
+    }
     if (this.group.position.y > CONFIG.plane.ceiling) this.group.position.y = CONFIG.plane.ceiling;
     // 边界夹紧（不能飞出地图）
     const lim = this.worldSize;
@@ -1496,19 +1569,37 @@ class Plane {
       const to = t.position.clone().sub(this.position);
       const d = to.length();
       if (d > 700) continue;
-      if (fwd.dot(to.clone().normalize()) < 0.4) continue; // 需大致在前方
+      if (fwd.dot(to.clone().normalize()) < -0.3) continue; // 世界大战：允许打下方地面坦克
       if (d < bestD) { bestD = d; best = t; }
     }
     const mc = CONFIG.plane.missile;
     const dir = best ? best.position.clone().sub(this.position).normalize() : fwd;
     const proj = new Projectile({
       position: this.position.clone().addScaledVector(fwd, 2), direction: dir,
-      speed: mc.speed, damage: mc.damage, owner: this, ownerTeam: this.team,
+      speed: mc.speed * (this.missileSpeedMul || 1), damage: mc.damage, owner: this, ownerTeam: this.team,
       gravity: 0, life: mc.life, color: 0xff5544, size: mc.radius,
     });
     proj.target = best; proj.homing = mc.homing;
     em.addProjectile(proj);
     this.missiles -= 1; this.missileCooldown = mc.cooldown;
+    return true;
+  }
+
+  // 投炸弹（无追踪、有重力、落地范围爆炸）
+  tryDropBomb(em) {
+    if (!this.alive || this.bombs <= 0) return false;
+    const bc = CONFIG.plane.bomb;
+    const fwd = this.forwardVector();
+    const proj = new Projectile({
+      position: this.position.clone().addScaledVector(fwd, -2).add(new THREE.Vector3(0, -1, 0)),
+      direction: new THREE.Vector3(0, -1, 0), speed: 1,
+      damage: bc.damage, owner: this, ownerTeam: this.team,
+      gravity: bc.gravity, life: bc.life, color: 0x555555, size: 0.6,
+    });
+    proj.velocity.copy(fwd.clone().multiplyScalar(this.speed * 1.2).add(new THREE.Vector3(0, -5, 0)));
+    proj.isBomb = true; proj.bombRadius = bc.radius;
+    em.addProjectile(proj);
+    this.bombs -= 1;
     return true;
   }
 
@@ -1638,8 +1729,11 @@ class PlaneAI {
     const dist = toT.length() || 1;
     const desired = toT.multiplyScalar(1 / dist);
 
-    // 略提前量：瞄向目标稍前方
-    const lead = target.forwardVector().multiplyScalar(Math.min(dist * 0.15, 20));
+    // 略提前量：瞄向目标稍前方（跨类型：飞机用 forwardVector，坦克用 heading 算前向）
+    const tgtFwd = (typeof target.forwardVector === 'function')
+      ? target.forwardVector()
+      : new THREE.Vector3(Math.sin(target.heading || 0), 0, Math.cos(target.heading || 0));
+    const lead = tgtFwd.multiplyScalar(Math.min(dist * 0.15, 20));
     const aimPt = target.position.clone().add(lead);
     const aimDir = aimPt.sub(plane.position).normalize();
 
@@ -1649,6 +1743,10 @@ class PlaneAI {
       const side = new THREE.Vector3().crossVectors(aimDir, new THREE.Vector3(0, 1, 0)).normalize();
       aimDir.addScaledVector(side, Math.sin(this._jink) * 0.5).normalize();
     }
+
+    // 地形规避：低空时强制上仰（世界大战打地面目标时防坠机）
+    const groundClear = plane.position.y - terrainHeight(plane.position.x, plane.position.z);
+    if (groundClear < 5) { aimDir.y = Math.max(aimDir.y, 0.2 + (5 - groundClear) * 0.05); aimDir.normalize(); }   // 低空限制降到5：飞机能贴近地面扫射坦克
 
     plane.aimToward(aimDir, dt, 0.6); // 敌机用更柔的坡度，便于玩家追瞄
     plane.throttle = dist > 70 ? 1 : 0.7;
@@ -2002,7 +2100,7 @@ class Sfx {
 }
 
 class Game {
-  constructor({ canvas, mode = 'tank', difficulty = 'normal', tankType = 'medium', planeType = 'fighter', endless = false, objective = 'battle', mapId = 'open', hudContainer, onExit, onResult } = {}) {
+  constructor({ canvas, mode = 'tank', difficulty = 'normal', tankType = 'medium', planeType = 'fighter', endless = false, objective = 'battle', mapId = 'open', worldwar = false, ownedTanks = ['medium'], ownedPlanes = ['fighter'], hudContainer, onExit, onResult } = {}) {
     this.canvas = canvas;
     this.mode = mode;
     this.difficulty = difficulty;
@@ -2011,6 +2109,9 @@ class Game {
     this.endless = endless;
     this.objective = mode === 'tank' ? objective : 'battle';   // 'battle'(歼灭) | 'capture'(占领，仅陆战)
     this.mapId = mode === 'tank' ? mapId : 'open';             // 地图主题（仅陆战）
+    this.worldwar = worldwar;                                  // 世界大战：混合作战（坦克+飞机同场）
+    this.ownedTanks = ownedTanks;                              // 已拥有的坦克型号（选载具面板用）
+    this.ownedPlanes = ownedPlanes;                            // 已拥有的飞机型号
     this.onExit = onExit;
     this.onResult = onResult;
     this.state = 'playing';
@@ -2083,7 +2184,7 @@ class Game {
 
   _setupHint() {
     if (this.mode === 'tank') {
-      this.hud.setHint('<b>点击画面锁定鼠标</b>（炮塔可无限转，Esc 解锁）· <b>WASD</b> 车体 · <b>左键</b>主炮 · <b>空格</b>机枪 · <b>C</b>瞄准镜 · <b>F</b>灭火');
+      this.hud.setHint('<b>点击画面锁定鼠标</b>（炮塔可无限转，Esc 解锁）· <b>WASD</b> 车体 · <b>左键</b>主炮 · <b>空格</b>机枪 · <b>Shift</b>瞄准镜 · <b>R</b>修车 · <b>F</b>灭火');
     } else {
       this.hud.setHint('<b>点击画面锁定鼠标</b>（指哪飞哪，自动改平，Esc 解锁）· <b>W/S</b>油门 · <b>Shift</b>加力 · <b>左键</b>开火 · <b>右键/X</b>导弹(喷气机) · <b>F</b>灭火');
     }
@@ -2136,7 +2237,7 @@ class Game {
 
     this._setupObjective();
     this.hud.setCenterMessage('');
-    this.hud.addFeed(this.objective === 'capture' ? '战斗开始 · 占领中央据点！' : '战斗开始 · 队友已就位', 'info');
+    this.hud.addFeed(this.worldwar ? '世界大战 · 坦克+飞机混合作战！死后按 T/P 选新载具' : (this.objective === 'capture' ? '战斗开始 · 占领中央据点！' : '战斗开始 · 队友已就位'), 'info');
   }
 
   // 占领模式：据点设置/清理。中央圆柱+光环，蓝南红北出生。
@@ -2184,6 +2285,7 @@ class Game {
       this.player.group.position.copy(base);
       this.player.group.quaternion.identity();
       this.em.addPlane(this.player);
+      if (this.worldwar) this.player.worldSize = CONFIG.tank.worldSize;
     }
     this.gunnerView = false;
     this._snapCam = true;
@@ -2194,7 +2296,8 @@ class Game {
   }
 
   _spawnEnemy() {
-    if (this.mode === 'tank') {
+    const asTank = this.worldwar ? Math.random() < 0.5 : (this.mode === 'tank');
+    if (asTank) {
       const e = new Tank({ side: 'enemy', team: 'red', color: 0x9a7b3e, type: randomTankType().id });
       const h = CONFIG.tank.worldSize;
       // 红方一律从地图北侧边缘出生（和蓝方南北对角）
@@ -2212,6 +2315,7 @@ class Game {
       e.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), toCenter);
       e.ai = new PlaneAI(e);
       this.em.addPlane(e);
+      if (this.worldwar) e.worldSize = CONFIG.tank.worldSize;   // 世界大战：飞机用坦克地图大小，不飞出地图
       this.enemies.push(e);
     }
     // 无尽模式：随击杀数提升敌方血量（递增难度）
@@ -2235,7 +2339,8 @@ class Game {
     this.hud.addFeed('⚠ 精英敌方载具出现！', 'kill');
   }
   _spawnAlly() {
-    if (this.mode === 'tank') {
+    const asTank = this.worldwar ? Math.random() < 0.5 : (this.mode === 'tank');
+    if (asTank) {
       const e = new Tank({ side: 'ally', team: 'blue', color: 0x3a6b8a, type: randomTankType().id });
       const h = CONFIG.tank.worldSize;
       // 蓝方(玩家队)从南侧边缘出生，和玩家一起
@@ -2250,6 +2355,7 @@ class Game {
       e.group.quaternion.identity();
       e.ai = new PlaneAI(e);
       this.em.addPlane(e);
+      if (this.worldwar) e.worldSize = CONFIG.tank.worldSize;
       this.allies.push(e);
     }
   }
@@ -2278,7 +2384,7 @@ class Game {
 
     // 战争雷霆炮手式：鼠标按"增量"移动瞄准点（从当前瞄准处平滑旋转，不跳到绝对世界点）。
     // 指针锁定时用 movement（无限旋转）；未锁定时用 clientX 差值（保证总能转，只是到屏幕边缘为止）。
-    const YAW_SENS = 0.0026, H_SENS = 0.06, R = 90;
+    const YAW_SENS = 0.0026, H_SENS = this.worldwar ? 0.15 : 0.06, R = 90;
     let mdx, mdy;
     if (document.pointerLockElement === this.canvas) {
       const mv = inp.consumeMovement(); mdx = mv.x; mdy = mv.y;
@@ -2289,14 +2395,27 @@ class Game {
     }
     this._lastMx = inp.mouseX; this._lastMy = inp.mouseY;
     this._aimYaw = (this._aimYaw ?? t.heading) - mdx * YAW_SENS;       // 鼠标左右 → 瞄准方位
-    this._aimHeight = clamp((this._aimHeight ?? 0) - mdy * H_SENS, -28, 28); // 鼠标上下 → 抬炮/压炮
+    this._aimHeight = clamp((this._aimHeight ?? 0) - mdy * H_SENS, -28, this.worldwar ? 120 : 28); // 世界大战抬高到120：能瞄天上飞机
     this._tankAimPt = t.position.clone().add(new THREE.Vector3(Math.sin(this._aimYaw) * R, 2 + this._aimHeight, Math.cos(this._aimYaw) * R));
     t.aimTurretAt(this._tankAimPt, dt, 0);
+
+    // 修车（按住 R）：不能动但可以开火/灭火，消耗时间修血+模块
+    this._repairing = inp.isDown('KeyR') && t.health < t.maxHealth;
+    if (this._repairing) {
+      t.drive(0, 0, dt);   // 修车时不能移动（覆盖上面的 drive）
+      t.health = Math.min(t.maxHealth, t.health + 15 * dt);
+      if (t.modules) {
+        if (t.modules.track > 0) t.modules.track = Math.max(0, t.modules.track - dt * 3);
+        if (t.modules.barrel > 0) t.modules.barrel = Math.max(0, t.modules.barrel - dt * 3);
+        if (t.modules.engine > 0) t.modules.engine = Math.max(0, t.modules.engine - dt * 3);
+      }
+      this.hud.setCenterMessage(`🔧 修车中… ${Math.floor(t.health)}/${t.maxHealth}`);
+    }
 
     if (inp.mouseDown) t.tryFire(this.em);
     if (inp.isDown('Space')) t.tryFireMG(this.em);
     if (this._consumePress(inp, 'KeyF')) this._extinguish(t);
-    this.gunnerView = inp.isDown('KeyC');
+    this.gunnerView = inp.isDown('ShiftLeft') || inp.isDown('ShiftRight');
   }
 
   _handleInputPlane(dt) {
@@ -2324,11 +2443,21 @@ class Game {
       if (inp.isDown('KeyS')) td -= 1;
       p.setThrottleInput(td, dt);
     }
+    // 修车（按住 R）：飞机也能修，但减速
+    this._repairing = inp.isDown('KeyR') && p.health < p.maxHealth;
+    if (this._repairing) {
+      p.health = Math.min(p.maxHealth, p.health + 12 * dt);
+      this.hud.setCenterMessage(`🔧 维修中… ${Math.floor(p.health)}/${p.maxHealth}`);
+    }
+
     if (inp.mouseDown) p.tryFire(this.em);
     if (this._consumePress(inp, 'KeyF')) this._extinguish(p);
     // 导弹（喷气机）：右键或 X
     if ((inp.rightMouseDown || inp.isDown('KeyX')) && p.missiles > 0) {
       if (p.tryFireMissile(this.em, this.enemies)) { this.hud.addFeed(`🚀 导弹 ${p.missiles}/${p.maxMissiles}`, 'info'); this.sfx.missile(p.position); }
+    }
+    if (this._consumePress(inp, 'KeyB') && p.bombs > 0) {
+      if (p.tryDropBomb(this.em)) { this.hud.addFeed(`💣 炸弹 ${p.bombs}/${p.maxBombs}`, 'info'); }
     }
   }
 
@@ -2354,7 +2483,7 @@ class Game {
     if (this.gunnerView) {
       const muzzle = t.getMuzzleWorld();
       const dir = t.getBarrelDir();
-      const desired = muzzle.clone().addScaledVector(dir, -1.8).add(new THREE.Vector3(0, 0.15, 0));
+      const desired = muzzle.clone().addScaledVector(dir, -2.0).add(new THREE.Vector3(0, 0.6, 0));   // 抬到炮管上方，避免被炮管遮挡
       if (this._snapCam) { this.camera.position.copy(desired); this._snapCam = false; }
       else this.camera.position.lerp(desired, 0.5);
       this.camera.lookAt(muzzle.clone().addScaledVector(dir, 60));
@@ -2432,6 +2561,7 @@ class Game {
   _animate = () => {
     if (this._disposed) return;
     this._raf = requestAnimationFrame(this._animate);
+    try {
     const dt = Math.min(this.clock.getDelta(), 0.05);
     if (this.mode === 'tank' && this.player && this.player.alive) {
       // 十字准星 = 炮膛实际指向（炮口 + 炮管方向投影到屏幕）：随炮塔转，不锁屏幕中央。
@@ -2468,9 +2598,29 @@ class Game {
     }
 
     if (this.state === 'playing') {
+      // 世界大战：死后选载具面板
+      if (this._wwPick) {
+        if (!this._wwPanel) this._showWWPanel();
+      } else if (this._wwPanel) {
+        this._wwPanel.remove(); this._wwPanel = null;
+        if (this.input) this.input.canvas.style.cursor = 'none';
+      }
       if (this.player && this.player.alive) {
         if (this.mode === 'tank') this._handleInputTank(dt);
         else this._handleInputPlane(dt);
+        // 长按 J 3秒自爆（世界大战：快速换载具）
+        if (this.worldwar && this.input.isDown('KeyJ')) {
+          this._jHold = (this._jHold || 0) + dt;
+          this.hud.setCenterMessage(`💥 自爆倒计时 ${Math.max(0, Math.ceil(3 - this._jHold))}s`);
+          if (this._jHold >= 3) {
+            this.player.health = 0; this.player.alive = false;
+            this._jHold = 0;
+            this.hud.addFeed('💥 已自爆', 'info');
+          }
+        } else if (this._jHold) {
+          this._jHold = 0;
+          if (this.player && this.player.alive) this.hud.setCenterMessage('');
+        }
       }
 
       // AI 按队伍选目标：敌人锁定蓝队（玩家/队友），队友锁定红队
@@ -2494,7 +2644,7 @@ class Game {
       this.em.update(dt);
       if (this.mode === 'tank') this._resolveObstacles();
 
-      const targets = this.mode === 'tank' ? this.em.tanks : this.em.planes;
+      const targets = this.worldwar ? [...this.em.tanks, ...this.em.planes] : (this.mode === 'tank' ? this.em.tanks : this.em.planes);
       const hits = this.em.checkCollisions(targets);
       for (const h of hits) {
         if (h.owner === this.player) {
@@ -2536,16 +2686,49 @@ class Game {
       }
 
       this._updateHUD();
+      // 炸弹落点十字（CCIP）：模拟炸弹弹道，投影到屏幕显示 DOM 十字（高空也看得见）
+      if (this.mode === 'plane' && this.player && this.player.alive && this.player.maxBombs > 0) {
+        const bp = this.player.position.clone();
+        const bv = this.player.forwardVector().multiplyScalar(this.player.speed * 1.2).add(new THREE.Vector3(0, -5, 0));
+        const bg = CONFIG.plane.bomb.gravity;
+        let _hitGround = false;
+        for (let i = 0; i < 600; i++) {
+          bv.y -= bg * 0.016;
+          bp.addScaledVector(bv, 0.016);
+          if (bp.y <= terrainHeight(bp.x, bp.z) + 0.1) { _hitGround = true; break; }
+        }
+        if (!this._bombX) {
+          this._bombX = document.createElement('div');
+          this._bombX.style.cssText = 'position:fixed;width:60px;height:60px;pointer-events:none;z-index:50;transform:translate(-50%,-50%);display:none;';
+          this._bombX.innerHTML = '<svg viewBox="0 0 60 60" width="60" height="60"><circle cx="30" cy="30" r="25" fill="none" stroke="#ff0000" stroke-width="4"/><circle cx="30" cy="30" r="10" fill="none" stroke="#ff0000" stroke-width="4"/><line x1="30" y1="0" x2="30" y2="60" stroke="#ff0000" stroke-width="4"/><line x1="0" y1="30" x2="60" y2="30" stroke="#ff0000" stroke-width="4"/></svg>';
+          document.body.appendChild(this._bombX);
+        }
+        if (_hitGround) {
+          const sp = bp.clone().project(this.camera);
+          const sx = sp.x * 0.5 + 0.5;
+          const sy = -sp.y * 0.5 + 0.5;
+          // 只在落点在屏幕合理范围内 + 前方 + 离飞机不太远时显示
+          if (sp.z > -1 && sp.z < 1 && sx > -0.1 && sx < 1.1 && sy > -0.1 && sy < 1.1) {
+            this._bombX.style.display = 'block';
+            this._bombX.style.left = (sx * window.innerWidth) + 'px';
+            this._bombX.style.top = (sy * window.innerHeight) + 'px';
+          } else { this._bombX.style.display = 'none'; }
+        } else { this._bombX.style.display = 'none'; }   // 没找到落点（飞太高/朝上）→ 隐藏
+      } else if (this._bombX) {
+        this._bombX.style.display = 'none';
+      }
       this._checkEnd();
     }
 
+    } catch (err) { console.error('⚠ _animate:', err); if (!this._aErr) { this._aErr = true; try { this.hud.addFeed('⚠ ' + (err.message || err), 'info'); } catch (e) {} } }
     this.renderer.render(this.scene, this.camera);
   };
 
   _handleDeaths(removed) {
-    const label = this._entityLabel();
     for (const r of removed) {
-      const scale = this.mode === 'tank' ? 3.5 : 2.5;
+      const isPlane = typeof r.forwardVector === 'function';
+      const label = isPlane ? '飞机' : '坦克';   // 按实体类型定标签（世界大战里坦克/飞机混编）
+      const scale = isPlane ? 2.5 : 3.5;
       this.em.addEffect(new Explosion(r.position.clone().add(new THREE.Vector3(0, 1.5, 0)), scale, 0xffa040));
       const tag = r.lastCrit ? ` · ${r.lastCrit}` : '';
       if (r === this.player) {
@@ -2554,7 +2737,7 @@ class Game {
         this._deathCamTarget = null;          // 观战目标重新选
         this.player = null;
         this.playerLives -= 1;
-        if (this.playerLives > 0) this.respawnTimer = CONFIG.rules.respawnDelay;
+        if (this.playerLives > 0) this.respawnTimer = this.worldwar ? CONFIG.rules.respawnDelay * 1.8 : CONFIG.rules.respawnDelay;
       } else if (r.team === 'red') {
         const wasBoss = r.isBoss;
         this.kills += 1;
@@ -2574,13 +2757,68 @@ class Game {
       this.hud.setCenterMessage(`被击毁 · 复活中 ${Math.ceil(this.respawnTimer)}`);
       if (this.respawnTimer <= 0) {
         this.respawnTimer = -1;
-        this._makePlayer();
-        this.hud.setCenterMessage('');
-        this.hud.addFeed(`已重生（剩余命数 ${this.playerLives}）`, 'info');
+        if (this.worldwar) {
+          this._wwPick = true;
+          // 死亡时立即释放指针锁，让鼠标出现可以直接点载具面板
+          if (document.pointerLockElement) document.exitPointerLock();
+          if (this.input) this.input.canvas.style.cursor = 'auto';
+          this.hud.setCenterMessage('点击选择新载具');
+        } else {
+          this._makePlayer();
+          this.hud.setCenterMessage('');
+          this.hud.addFeed(`已重生（剩余命数 ${this.playerLives}）`, 'info');
+        }
       }
+    } else if (this._wwPick) {
+      this.hud.setCenterMessage('点击选择新载具');
     } else if (this.player && this.player.alive) {
       this.hud.setCenterMessage('');
     }
+  }
+
+  // 世界大战载具选择面板：列出已拥有的坦克+飞机，点击选一辆重生
+  _showWWPanel() {
+    if (this._wwPanel) this._wwPanel.remove();
+    if (this.input) this.input.canvas.style.cursor = 'auto';
+    const panel = document.createElement('div');
+    panel.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.9);border:2px solid rgba(100,180,100,.4);border-radius:12px;padding:20px 24px;z-index:100;max-width:80vw;max-height:80vh;overflow-y:auto;font-family:sans-serif;color:#eee';
+    let html = '<div style="text-align:center;font-size:18px;margin-bottom:14px">选择载具（剩余 ' + Math.max(0, this.playerLives) + ' 命）</div>';
+    html += '<div style="display:flex;gap:20px">';
+    // 坦克
+    html += '<div><div style="font-size:14px;color:#8f8;margin-bottom:8px">🛡 坦克</div>';
+    for (const id of this.ownedTanks) {
+      const t = tankTypeById(id);
+      const sel = (this.mode === 'tank' && this.tankType === id) ? 'border:2px solid #6f6' : 'border:1px solid #555';
+      html += `<div data-mode="tank" data-id="${id}" style="margin:4px 0;padding:8px 14px;background:rgba(40,60,40,.6);border-radius:6px;cursor:pointer;${sel}">${t.icon} ${t.name}</div>`;
+    }
+    html += '</div>';
+    // 飞机
+    html += '<div><div style="font-size:14px;color:#8af;margin-bottom:8px">✈ 飞机</div>';
+    for (const id of this.ownedPlanes) {
+      const p = planeTypeById(id);
+      const sel = (this.mode === 'plane' && this.planeType === id) ? 'border:2px solid #6f6' : 'border:1px solid #555';
+      html += `<div data-mode="plane" data-id="${id}" style="margin:4px 0;padding:8px 14px;background:rgba(40,50,70,.6);border-radius:6px;cursor:pointer;${sel}">${p.icon} ${p.name}</div>`;
+    }
+    html += '</div></div>';
+    panel.innerHTML = html;
+    document.body.appendChild(panel);
+    this._wwPanel = panel;
+    panel.querySelectorAll('[data-mode]').forEach((el) => {
+      el.onmouseenter = () => { el.style.background = el.dataset.mode === 'tank' ? 'rgba(60,100,60,.8)' : 'rgba(60,80,110,.8)'; };
+      el.onmouseleave = () => { el.style.background = el.dataset.mode === 'tank' ? 'rgba(40,60,40,.6)' : 'rgba(40,50,70,.6)'; };
+      el.onclick = () => {
+        this.mode = el.dataset.mode;
+        if (this.mode === 'tank') this.tankType = el.dataset.id;
+        else this.planeType = el.dataset.id;
+        this._wwPick = false;
+        panel.remove(); this._wwPanel = null;
+        if (this.input) this.input.canvas.style.cursor = 'none';
+        this._makePlayer();
+        this.hud.setCenterMessage('');
+        const name = el.textContent.replace(/^\S+\s/, '');
+        this.hud.addFeed(`已重生：${name}（剩余 ${this.playerLives}）`, 'info');
+      };
+    });
   }
 
   _updateEnemySpawns(dt) {
@@ -2637,7 +2875,7 @@ class Game {
       this.hud.setMissiles(this.player.missiles ?? 0, this.player.maxMissiles ?? 0);
       // 小地图：玩家居中、朝上为前进方向；敌人画红点
       const f = this.mode === 'tank' ? null : this.player.forwardVector();
-      const heading = this.mode === 'tank' ? this.player.heading : Math.atan2(f.x, f.z);
+      const heading = this.mode === 'tank' ? (this._aimYaw ?? this.player.heading) : Math.atan2(f.x, f.z);   // 小地图跟瞄准方向（跟相机一致），不跟车身
       this.hud.drawMinimap({
         playerPos: this.player.position,
         playerHeading: heading,
@@ -2702,6 +2940,7 @@ class Game {
     // 程序化退出无 ESC 冷却，也顺带消除下一局开局"要点两次才锁上"的问题。
     if (document.pointerLockElement) document.exitPointerLock();
     this.hud.hideCrosshair();
+    if (this._bombX) this._bombX.style.display = 'none';
     this.hud.setCenterMessage('');
     this.hud.showResult({
       win,
@@ -2736,6 +2975,8 @@ class Game {
     if (this._onDocClickPL) document.removeEventListener('click', this._onDocClickPL);
     if (this._onPLChange) document.removeEventListener('pointerlockchange', this._onPLChange);
     if (document.pointerLockElement) document.exitPointerLock();
+    if (this._wwPanel) { this._wwPanel.remove(); this._wwPanel = null; }
+    if (this._bombX) { this._bombX.remove(); this._bombX = null; }
     this.input.dispose();
     this.hud.dispose();
     this.sfx.stopEngine();
@@ -2779,10 +3020,12 @@ let difficulty = 'normal';
 let endless = false;
 let objective = 'battle';   // 陆战目标：'battle'(歼灭) | 'capture'(占领)
 let mapIndex = 0;           // 陆战地图主题索引（MAPS[0]='city' 默认）
+let worldwar = false;        // 世界大战模式（坦克+飞机混合作战）
 const bestEl = document.getElementById('best');
 const endlessBtn = document.getElementById('btn-endless');
 const objectiveBtn = document.getElementById('btn-objective');
 const mapBtn = document.getElementById('btn-map');
+const worldwarBtn = document.getElementById('btn-worldwar');
 
 // —— 存档：金币 / 已拥有坦克 / 当前选用 ——
 const STORAGE_KEY = 'warthunder_meta_v1';
@@ -2826,12 +3069,18 @@ function renderObjectiveBtn() {
   if (!objectiveBtn) return;
   objectiveBtn.textContent = `🎯 占领模式：${objective === 'capture' ? '开启' : '关闭'}`;
   objectiveBtn.classList.toggle('active', objective === 'capture');
-  objectiveBtn.style.display = pendingMode === 'tank' ? '' : 'none';   // 仅陆战可选
+  objectiveBtn.style.display = (worldwar || pendingMode === 'tank') ? '' : 'none';   // 世界大战时也显示
 }
 function renderMapBtn() {
   if (!mapBtn) return;
   mapBtn.textContent = `🗺 地图：${MAPS[mapIndex].name}`;
-  mapBtn.style.display = pendingMode === 'tank' ? '' : 'none';   // 仅陆战可选
+  mapBtn.style.display = (worldwar || pendingMode === 'tank') ? '' : 'none';   // 世界大战时也显示
+}
+function renderWorldwarBtn() {
+  if (!worldwarBtn) return;
+  worldwarBtn.textContent = `🌍 世界大战：${worldwar ? '开启' : '关闭'}`;
+  worldwarBtn.classList.toggle('active', worldwar);
+  worldwarBtn.style.display = (worldwar || pendingMode === 'tank') ? '' : 'none';   // 世界大战时始终显示
 }
 
 // —— 科技树 ——
@@ -2935,10 +3184,30 @@ function renderLoadout() {
   loEls.name.textContent = t.name;
   loEls.weapon.textContent = weaponDesc(isTank, t);
   loEls.stats.innerHTML = statBars(isTank, t);
-  loEls.summary.textContent = `难度：${DIFFICULTY_LABELS[difficulty]}　·　无尽：${endless ? '开' : '关'}${isTank ? `　·　目标：${objective === 'capture' ? '占领' : '歼灭'}　·　🗺 ${MAPS[mapIndex].name}` : ''}　·　💰 ${meta.money}`;
+  loEls.summary.textContent = `难度：${DIFFICULTY_LABELS[difficulty]}　·　无尽：${endless ? '开' : '关'}${isTank ? `　·　目标：${objective === 'capture' ? '占领' : '歼灭'}　·　🗺 ${MAPS[mapIndex].name}` : ''}${worldwar ? '　·　🌍世界大战' : ''}　·　💰 ${meta.money}`;
   renderEndlessBtn();
   renderObjectiveBtn();
   renderMapBtn();
+  renderWorldwarBtn();
+  // 世界大战：允许在出战页切换坦克/飞机
+  if (!loEls.swapType) {
+    const btn = document.createElement('button');
+    btn.className = 'lo-btn';
+    btn.style.cssText = 'display:none;padding:6px 14px;font-size:13px;';
+    btn.textContent = '切换飞机';
+    loEls.back.parentNode.insertBefore(btn, loEls.start);
+    loEls.swapType = btn;
+    btn.addEventListener('click', () => {
+      pendingMode = pendingMode === 'tank' ? 'plane' : 'tank';
+      renderLoadout();
+    });
+  }
+  if (worldwar) {
+    loEls.swapType.style.display = '';
+    loEls.swapType.textContent = isTank ? '切换飞机 →' : '← 切换坦克';
+  } else {
+    loEls.swapType.style.display = 'none';
+  }
   const cycling = owned.length > 1;
   loEls.prev.disabled = !cycling;
   loEls.next.disabled = !cycling;
@@ -2966,13 +3235,16 @@ function startGame(mode) {
   menu.classList.add('hidden');
   hudContainer.classList.remove('hidden');
   if (game) game.dispose();
-  game = new Game({
+  try { game = new Game({
     canvas, mode, difficulty,
     tankType: meta.selected,
     planeType: meta.selectedPlane,
     endless,
     objective,
     mapId: MAPS[mapIndex].id,
+    worldwar,
+    ownedTanks: meta.owned,
+    ownedPlanes: meta.ownedPlanes,
     hudContainer,
     onExit: backToMenu,
     onResult: ({ win, kills, endless: isEndless }) => {
@@ -2992,7 +3264,10 @@ function startGame(mode) {
         if (sub) sub.textContent = `击毁 ${kills} · +${reward}💰 +${rp}🔬 · 余额 ${meta.money} · 研发 ${meta.rp}`;
       }
     },
-  });
+  }); } catch (err) {
+    document.body.innerHTML = '<pre style="color:#f66;padding:20px;font:14px monospace;white-space:pre-wrap">❌ 启动失败: ' + err.message + '\n\n' + err.stack + '</pre>';
+    console.error(err);
+  }
   window.__game = game;
 }
 
@@ -3000,11 +3275,12 @@ function backToMenu() {
   if (game) { game.dispose(); game = null; }
   hudContainer.classList.add('hidden');
   menu.classList.remove('hidden');
-  renderMoney(); renderBest(); renderEndlessBtn(); renderObjectiveBtn();
+  renderMoney(); renderBest(); renderEndlessBtn(); renderObjectiveBtn(); renderWorldwarBtn();
 }
 
-document.getElementById('btn-tank').addEventListener('click', () => showLoadout('tank'));
-document.getElementById('btn-plane').addEventListener('click', () => showLoadout('plane'));
+document.getElementById('btn-tank').addEventListener('click', () => { worldwar = false; showLoadout('tank'); });
+document.getElementById('btn-plane').addEventListener('click', () => { worldwar = false; showLoadout('plane'); });
+document.getElementById('btn-worldwar-mode').addEventListener('click', () => { worldwar = true; showLoadout('tank'); });
 
 loEls.back.addEventListener('click', hideLoadout);
 loEls.start.addEventListener('click', () => { loadoutEl.classList.add('hidden'); startGame(pendingMode); });
@@ -3022,6 +3298,7 @@ document.querySelectorAll('.diff-btn').forEach((btn) => {
 if (endlessBtn) endlessBtn.addEventListener('click', () => { endless = !endless; renderEndlessBtn(); });
 if (objectiveBtn) objectiveBtn.addEventListener('click', () => { objective = objective === 'capture' ? 'battle' : 'capture'; renderObjectiveBtn(); renderLoadout(); });
 if (mapBtn) mapBtn.addEventListener('click', () => { mapIndex = (mapIndex + 1) % MAPS.length; renderMapBtn(); renderLoadout(); });
+if (worldwarBtn) worldwarBtn.addEventListener('click', () => { worldwar = !worldwar; renderWorldwarBtn(); renderLoadout(); });
 if (techtreeBtn) techtreeBtn.addEventListener('click', openTechTree);
 if (techtreeEl) techtreeEl.addEventListener('click', (e) => {
   const card = e.target.closest('.tt-card');
