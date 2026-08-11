@@ -21,6 +21,7 @@ const CONFIG = {
     reloadTime: 3.0,      // 玩家主炮装填
     enemyReloadTime: 5.0, // 敌方装填更长
     enemySpread: 0.06,    // 敌方炮弹散布（越大越不准）
+    allySpread: 0.03,     // 友军炮弹散布（独立于难度，固定；原硬编码在 Tank 构造里）
     enemyFireChance: 0.4, // 敌方瞄准后单次开火概率
     shellSpeed: 150,           // 炮弹更快（世界大战打飞机时追得上）
     shellDamage: 35,      // 玩家炮弹伤害
@@ -28,6 +29,7 @@ const CONFIG = {
     shellGravity: 6,
     shellLife: 3.5,
     radius: 3.0,
+    captureRadius: 22,    // 占领模式据点半径（_setupObjective 与 inZ 判定共用，改一处即可，原两处硬编码 22）
     worldSize: 450,
   },
   plane: {
@@ -319,7 +321,7 @@ class HUD {
       <div id="crosshair"></div>
       <div id="aim-circle"></div>
       <div id="hitmarker"></div>
-      <div id="lead-reticle"></div>
+      <div id="lead-reticle" style="display:none"></div>
       <div id="stats">
         <div class="bar"><span class="lbl">血量</span><div class="bar-bg"><div class="bar-fg hp" id="hp-fg"></div></div></div>
         <div class="bar"><span class="lbl">装填</span><div class="bar-bg"><div class="bar-fg rl" id="rl-fg"></div></div></div>
@@ -709,6 +711,7 @@ class EntityManager {
     this.planes = [];
     this.projectiles = [];
     this.effects = [];
+    this.obstacles = [];   // 障碍物列表（Game 从 terrain 注入，供炮弹碰撞检测）
   }
 
   addTank(t) { this.tanks.push(t); this.scene.add(t.group); t.em = this; }
@@ -734,6 +737,19 @@ class EntityManager {
     for (const p of this.planes) if (p.alive) p.update(dt);
     for (const p of this.projectiles) p.update(dt);
     for (const e of this.effects) e.update(dt);
+
+    // 炮弹 vs 障碍物（楼房/树等）：穿不过，命中销毁 + 小火花（炸弹靠落点爆炸，不拦）
+    if (this.obstacles && this.obstacles.length) {
+      for (const p of this.projectiles) {
+        if (!p.alive || p.isBomb) continue;
+        for (const ob of this.obstacles) {
+          const dx = p.mesh.position.x - ob.position.x;
+          const dz = p.mesh.position.z - ob.position.z;
+          const rr = (ob.radius || 3) + (p.radius || 0.4);
+          if (dx * dx + dz * dz < rr * rr) { p.alive = false; this.addEffect(new Explosion(p.mesh.position.clone(), 1.2, 0xffa040)); break; }
+        }
+      }
+    }
 
     // 清理失效弹丸
     this.projectiles = this.projectiles.filter((p) => {
@@ -871,10 +887,10 @@ class Tank {
     this.reloadTime = (isEnemy ? CONFIG.tank.enemyReloadTime : CONFIG.tank.reloadTime) * tt.reload;
     this.shellDamage = (isEnemy ? CONFIG.tank.enemyShellDamage : CONFIG.tank.shellDamage) * tt.dmg;
     if (!isEnemy && tt.dmg >= 2.5) this.shellDamage = 99999;   // 玩家方"一击必杀"型号(SU-100/IS-2/T-80U/鼠式)：一炮秒杀，不管打哪
-    if (!isEnemy && type === 'aa') { this.turretSpeed *= 2.5; this.reloadTime *= 0.3; this.maxSpeed *= 1.8; this.turnSpeed *= 1.5; }   // 玩家防空炮：炮塔更快+射速更快+跑得更快+转向更快（敌方不变）
     this.turretSpeed = CONFIG.tank.turretSpeed * tt.turret;
     this.turnSpeed = CONFIG.tank.turnSpeed * tt.turn;
-    this.fireSpread = isEnemy ? CONFIG.tank.enemySpread : (side === 'ally' ? 0.03 : 0);
+    if (!isEnemy && type === 'aa') { this.turretSpeed *= 2.5; this.reloadTime *= 0.3; this.maxSpeed *= 1.8; this.turnSpeed *= 1.5; }   // 玩家防空炮：炮塔更快+射速更快+跑得更快+转向更快（buff 须在赋值之后，否则 *= 被下方赋值覆盖失效）
+    this.fireSpread = isEnemy ? CONFIG.tank.enemySpread : (side === 'ally' ? CONFIG.tank.allySpread : 0);
 
     this._build();
   }
@@ -1497,7 +1513,7 @@ class Plane {
         this.em.addEffect(new Explosion(_pos.clone().add(new THREE.Vector3(0, 2, 0)), 10, 0xff6600));
         const _R = 28, _dmg = 100;
         for (const t of [...this.em.tanks, ...this.em.planes]) {
-          if (t === this || !t.alive) continue;
+          if (t === this || !t.alive || t.team === this.team) continue;   // 不伤同队（坠机不误伤友军，与子弹/炸弹一致）
           const _d = t.position.distanceTo(_pos);
           if (_d < _R) { t.onHit(_dmg * (1 - _d / _R)); t._lastAttacker = this; }
         }
@@ -1525,7 +1541,9 @@ class Plane {
     if (this.bodyMat) {
       if (!this._origColor) this._origColor = new THREE.Color(this.color);
       const target = this.burning ? 0x2a1a14 : this._origColor.getHex();
-      this.bodyMat.color.lerp(new THREE.Color(target), Math.min(1, 4 * dt));
+      this._lerpColor = this._lerpColor || new THREE.Color();   // 缓存 Color 实例，避免每帧 new（起火/灭火颜色过渡）
+      this._lerpColor.setHex(target);
+      this.bodyMat.color.lerp(this._lerpColor, Math.min(1, 4 * dt));
       this.bodyMat.emissive.setHex(this.burning ? 0x3a0a00 : 0x000000);
     }
     // 烟雾：起火冒黑烟；喷气机高油门高空时拉白色凝结尾迹
@@ -1594,7 +1612,7 @@ class Plane {
       const to = t.position.clone().sub(this.position);
       const d = to.length();
       if (d > 700) continue;
-      if (fwd.dot(to.clone().normalize()) < -0.3) continue; // 世界大战：允许打下方地面坦克
+      if (fwd.dot(to.clone().normalize()) < 0) continue; // 只锁前半球目标（含下方地面坦克），跳过正后方避免朝后发射浪费导弹
       if (d < bestD) { bestD = d; best = t; }
     }
     const mc = CONFIG.plane.missile;
@@ -1695,7 +1713,7 @@ class TankAI {
       let hd = flee - tank.heading; hd = Math.atan2(Math.sin(hd), Math.cos(hd));
       tank.drive(-0.9, clamp(hd * 2, -1, 1), dt);
       tank.aimTurretAt(target.position, dt);
-      if (tank.canFire() && dist < 130 && Math.random() < 0.5) tank.tryFire(em);
+      if (tank.canFire() && dist < 130 && Math.random() < 0.25) tank.tryFire(em);   // 撤退时开火更保守（原 0.5 比正常 enemyFireChance 0.4 还高，反直觉）
       return;
     }
 
@@ -1852,7 +1870,7 @@ function setupEnvironment(scene, mode) {
   const sun = new THREE.DirectionalLight(0xfff2d6, 1.1);
   sun.position.set(80, 140, 60);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.mapSize.set(4096, 4096);
   sun.shadow.camera.near = 10;
   sun.shadow.camera.far = 400;
   const s = 120;
@@ -2177,6 +2195,9 @@ class Game {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = this.settings.shadows;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.5, 3000);
@@ -2266,6 +2287,7 @@ class Game {
   _initMatch(mode) {
     applyDifficulty(this.difficulty); // 按难度重算 CONFIG
     this.terrain = createTerrain(this.scene, this.worldwar ? 'tank' : mode, this.mapId);   // 世界大战永远用坦克地形（不管玩家选飞机还是坦克）
+    if (this.em && this.terrain && this.terrain.obstacles) this.em.obstacles = this.terrain.obstacles;   // 障碍物注入 em，供炮弹碰撞检测
     const R = CONFIG.rules;
     this.kills = 0;
     this.playerLives = R.playerLives;
@@ -2300,7 +2322,7 @@ class Game {
     this._clearCapture();
     this.captureProgress = 0;
     if (this.objective !== 'capture') { if (this.hud) this.hud.setCapture(null); return; }
-    const r = 22;
+    const r = CONFIG.tank.captureRadius;
     this.captureZone = new THREE.Mesh(
       new THREE.CylinderGeometry(r, r, 0.4, 40),
       new THREE.MeshBasicMaterial({ color: 0x554a2a, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
@@ -2730,7 +2752,7 @@ class Game {
 
       if (this.objective === 'capture' && this.captureZone) {
         let blue = 0, red = 0;
-        const inZ = (t) => t && t.alive && t.position.distanceTo(this._zoneTarget.position) < 22;
+        const inZ = (t) => t && t.alive && t.position.distanceTo(this._zoneTarget.position) < CONFIG.tank.captureRadius;
         if (inZ(this.player)) blue++;
         for (const a of this.allies) if (inZ(a)) blue++;
         for (const e of this.enemies) if (inZ(e)) red++;
@@ -2781,45 +2803,12 @@ class Game {
     }
 
     } catch (err) { console.error('⚠ _animate:', err); if (!this._aErr) { this._aErr = true; try { this.hud.addFeed('⚠ ' + (err.message || err), 'info'); } catch (e) {} } }
-    // CCIP 炸弹落点标记：放在 try-catch 外面，保证每帧都更新（不会因为游戏逻辑报错而卡住）
-    try {
-      if (this.mode === 'plane' && this.player && this.player.alive && this.player.maxBombs > 0) {
-        const _pfwd = this.player.forwardVector();
-        const bp = this.player.position.clone().addScaledVector(_pfwd, -2).add(new THREE.Vector3(0, -1, 0));
-        const bv = _pfwd.clone().multiplyScalar(this.player.speed * 1.2).add(new THREE.Vector3(0, -5, 0));
-        const bg = CONFIG.plane.bomb.gravity;
-        let _hitGround = false;
-        for (let i = 0; i < 1500; i++) {
-          bv.y -= bg * 0.016;
-          bp.addScaledVector(bv, 0.016);
-          if (bp.y <= terrainHeight(bp.x, bp.z) + 0.1) { _hitGround = true; break; }
-        }
-        if (!this._bombRing) {
-          this._bombRing = new THREE.Mesh(new THREE.RingGeometry(5, 7, 24), new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
-          this._bombRing.rotation.x = -Math.PI / 2;
-          this.scene.add(this._bombRing);
-          this._bombPole = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 50, 6), new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.4 }));
-          this.scene.add(this._bombPole);
-        }
-        if (_hitGround && isFinite(bp.x) && isFinite(bp.z)) {
-          const gy = terrainHeight(bp.x, bp.z);
-          this._bombRing.position.set(bp.x, gy + 0.5, bp.z);
-          this._bombRing.visible = true;
-          this._bombPole.position.set(bp.x, gy + 25, bp.z);
-          this._bombPole.visible = true;
-        } else {
-          this._bombRing.visible = false;
-          this._bombPole.visible = false;
-        }
-      } else {
-        if (this._bombRing) this._bombRing.visible = false;
-        if (this._bombPole) this._bombPole.visible = false;
-      }
-    } catch (e) {}
+    // CCIP 炸弹落点标记的计算已合并到上方主 try 内（原此处重复了一份 1500 步模拟，每帧白跑一遍，已删）
     this.renderer.render(this.scene, this.camera);
   };
 
   _handleDeaths(removed) {
+    const playerRef = this.player;   // 缓存本帧玩家引用：同批死亡里玩家先死时 this.player 已置 null，后续敌人击杀归属会误判为"友方击毁"
     for (const r of removed) {
       const isPlane = typeof r.forwardVector === 'function';
       const label = isPlane ? '飞机' : '坦克';   // 按实体类型定标签（世界大战里坦克/飞机混编）
@@ -2838,7 +2827,7 @@ class Game {
         this.kills += 1;
         if (this.endless && this.kills % 10 === 0) this._spawnBoss(); // 每 10 击杀出一只精英
         const atk = r._lastAttacker;
-        const who = atk === this.player ? '你击毁 ' : (atk && atk.team === 'blue' ? '友方击毁 ' : '击毁 ');
+        const who = atk === playerRef ? '你击毁 ' : (atk && atk.team === 'blue' ? '友方击毁 ' : '击毁 ');
         this.hud.addFeed(`${who}敌方${label}${tag}`, 'kill');
       } else if (r.team === 'blue') {
         this.hud.addFeed(`友方${label}被击毁${tag}`, 'death');
@@ -2981,7 +2970,8 @@ class Game {
       });
       // 模块损伤提示（坦克）/ 提前量瞄准具（飞机）
       this.hud.setModules(this.mode === 'tank' ? this.player.modules : null);
-      if (this.mode === 'plane') this._updateLeadReticle(); else this.hud.positionLead(0, 0, false);
+      // 按载具实体类型判（worldwar 下 this.mode 可能与玩家实际载具不同步；坦克实体永远不显示 lead 提前量环）
+      if (!this.worldwar && typeof this.player.forwardVector === 'function') this._updateLeadReticle(); else this.hud.positionLead(0, 0, false);   // worldwar 混战不显示 lead 提前量环（玩家反馈不需要）；纯飞机模式才显示
     } else {
       this.hud.update({ kills: this.kills, tickets: this.enemyTickets, lives: Math.max(0, this.playerLives), enemiesLeft });
       this.hud.setModules(null);
@@ -3002,7 +2992,7 @@ class Game {
       const dist = R.length();
       if (dist > 700 || dist < 1) continue;
       if (fwd.dot(R.clone().multiplyScalar(1 / dist)) < 0.3) continue; // 只算前方的目标
-      const Vt = e.forwardVector().multiplyScalar(e.speed);
+      const Vt = (typeof e.forwardVector === 'function') ? e.forwardVector().multiplyScalar(e.speed) : new THREE.Vector3();   // Tank 无 forwardVector（worldwar 陆空混编），用零向量=不提前量
       const a = Vt.lengthSq() - B * B, b = 2 * R.dot(Vt), c = R.lengthSq();
       const disc = b * b - 4 * a * c;
       if (disc < 0) continue;
@@ -3036,6 +3026,7 @@ class Game {
     // 程序化退出无 ESC 冷却，也顺带消除下一局开局"要点两次才锁上"的问题。
     if (document.pointerLockElement) document.exitPointerLock();
     this.hud.hideCrosshair();
+    this.hud.positionLead(0, 0, false);   // 结束时清提前量瞄准环，防卡屏残留
     if (this._bombX) this._bombX.style.display = 'none';
     this.hud.setCenterMessage('');
     this.hud.showResult({
@@ -3053,6 +3044,13 @@ class Game {
     this.em.clear();
     if (this.terrain) this.scene.remove(this.terrain.group);
     this.hud.setCenterMessage('');
+    // 重置上一局残留的 per-match 状态（避免瞄准角/错误标志/观战目标串到新局）
+    this._aimYaw = null;
+    this._aimHeight = null;
+    this._jHold = false;
+    this._aErr = false;
+    this._deathCamTarget = null;
+    this._wwPick = false;
     this._setupHint();
     this._initMatch(mode);
   }
@@ -3376,7 +3374,7 @@ function backToMenu() {
 
 document.getElementById('btn-tank').addEventListener('click', () => { worldwar = false; showLoadout('tank'); });
 document.getElementById('btn-plane').addEventListener('click', () => { worldwar = false; showLoadout('plane'); });
-document.getElementById('btn-worldwar-mode').addEventListener('click', () => { worldwar = true; showLoadout('tank'); });
+document.getElementById('btn-worldwar-mode').addEventListener('click', () => { worldwar = true; endless = true; renderEndlessBtn(); showLoadout('tank'); });   // 世界大战默认开启无尽模式（玩家可手动关）
 
 loEls.back.addEventListener('click', hideLoadout);
 loEls.start.addEventListener('click', () => { loadoutEl.classList.add('hidden'); startGame(pendingMode); });
