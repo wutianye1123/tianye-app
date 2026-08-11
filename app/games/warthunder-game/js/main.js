@@ -28,7 +28,7 @@ const CONFIG = {
     shellGravity: 6,
     shellLife: 3.5,
     radius: 3.0,
-    worldSize: 300,
+    worldSize: 450,
   },
   plane: {
     maxHealth: 60,
@@ -50,7 +50,7 @@ const CONFIG = {
     radius: 10,
     gravity: 12,
     worldSize: 800,
-    ceiling: 220,
+    ceiling: 350,
     spawnAltitude: 70,
     missile: { count: 6, damage: 55, speed: 120, cooldown: 0.8, homing: 3.0, life: 5, radius: 0.5, regen: 7 },
     bomb: { count: 8, damage: 800, gravity: 25, radius: 40, life: 12, regen: 6 },
@@ -481,6 +481,21 @@ class HUD {
     this.missilesEl.textContent = `🚀 导弹 ${n}/${max}`;
   }
 
+  // 炸弹/核弹计数（左下角和导弹一起）
+  setBombs(bombs, maxBombs) {
+    if (!this.missilesEl) this.missilesEl = this.container.querySelector('#missiles');
+    if (!this.missilesEl) return;
+    let txt = this.missilesEl.textContent || '';
+    // 先清除旧的炸弹/核弹文字
+    txt = txt.replace(/　💣.*$/, '').replace(/　☢️.*$/, '');
+    if (maxBombs > 0) {
+      txt += `　💣 炸弹 ${bombs}/${maxBombs}`;
+      const nukes = Math.floor(bombs / 3);
+      if (nukes > 0) txt += `　☢️ 核弹 ${nukes}`;
+    }
+    this.missilesEl.textContent = txt;
+  }
+
   // 小地图：玩家居中、朝上为前进方向；敌人画红点。
   drawMinimap({ playerPos, playerHeading, enemies, allies, range = 200 } = {}) {
     const ctx = this.miniCtx;
@@ -728,12 +743,14 @@ class EntityManager {
         if (p.mesh.material) p.mesh.material.dispose();
         if (p.isBomb) {   // 炸弹落地/命中：范围爆炸（冲击波）
           const _bp = p.mesh.position.clone();
-          this.addEffect(new Explosion(_bp.clone().add(new THREE.Vector3(0, 2, 0)), 14, 0xff6600));
+          const _nuke = p.isNuke;
+          this.addEffect(new Explosion(_bp.clone().add(new THREE.Vector3(0, _nuke ? 10 : 2, 0)), _nuke ? 40 : 14, _nuke ? 0xff2200 : 0xff6600));
+          if (_nuke) this.addEffect(new Explosion(_bp.clone().add(new THREE.Vector3(0, 20, 0)), 60, 0xff8800));   // 核弹蘑菇云
           const _R = p.bombRadius || 20;
           for (const t of [...this.tanks, ...this.planes]) {
             if (!t.alive || t === p.owner) continue;
             const _d = t.position.distanceTo(_bp);
-            if (_d < _R) { t.onHit(p.damage * Math.max(0.6, 1 - _d / _R)); t._lastAttacker = p.owner; }   // 最低60%伤害，不是边缘就没伤害
+            if (_d < _R) { t.onHit(p.damage * (_nuke ? Math.max(0.7, 1 - _d / _R) : Math.max(0.6, 1 - _d / _R))); t._lastAttacker = p.owner; }
           }
         }
         return false;
@@ -854,6 +871,7 @@ class Tank {
     this.reloadTime = (isEnemy ? CONFIG.tank.enemyReloadTime : CONFIG.tank.reloadTime) * tt.reload;
     this.shellDamage = (isEnemy ? CONFIG.tank.enemyShellDamage : CONFIG.tank.shellDamage) * tt.dmg;
     if (!isEnemy && tt.dmg >= 2.5) this.shellDamage = 99999;   // 玩家方"一击必杀"型号(SU-100/IS-2/T-80U/鼠式)：一炮秒杀，不管打哪
+    if (!isEnemy && type === 'aa') { this.turretSpeed *= 2.5; this.reloadTime *= 0.3; this.maxSpeed *= 1.8; this.turnSpeed *= 1.5; }   // 玩家防空炮：炮塔更快+射速更快+跑得更快+转向更快（敌方不变）
     this.turretSpeed = CONFIG.tank.turretSpeed * tt.turret;
     this.turnSpeed = CONFIG.tank.turnSpeed * tt.turn;
     this.fireSpread = isEnemy ? CONFIG.tank.enemySpread : (side === 'ally' ? 0.03 : 0);
@@ -927,6 +945,13 @@ class Tank {
     barrel.position.set(0, 0, bl * 0.5);
     barrel.castShadow = true;
     this.barrelPivot.add(barrel);
+    // 防空坦克(ZSU-23-4)：双管
+    if (this.type === 'aa') {
+      const barrel2 = barrel.clone();
+      barrel2.position.x = br * 3;
+      this.barrelPivot.add(barrel2);
+      barrel.position.x = -br * 3;
+    }
     if (g.brake) {
       const brake = new THREE.Mesh(new THREE.CylinderGeometry(br * 1.5, br * 1.5, bl * 0.14, 10), metalMat);
       brake.rotation.x = Math.PI / 2;
@@ -1603,6 +1628,23 @@ class Plane {
     return true;
   }
 
+  // 投核弹（消耗3颗普通炸弹，威力巨大）—仅 B-21
+  tryDropNuke(em) {
+    if (!this.alive || this.bombs < 3) return false;
+    const fwd = this.forwardVector();
+    const proj = new Projectile({
+      position: this.position.clone().addScaledVector(fwd, -2).add(new THREE.Vector3(0, -1, 0)),
+      direction: new THREE.Vector3(0, -1, 0), speed: 1,
+      damage: 3000, owner: this, ownerTeam: this.team,
+      gravity: 18, life: 15, color: 0xff2200, size: 1.2,
+    });
+    proj.velocity.copy(fwd.clone().multiplyScalar(this.speed * 0.8).add(new THREE.Vector3(0, -3, 0)));
+    proj.isBomb = true; proj.isNuke = true; proj.bombRadius = 80;
+    em.addProjectile(proj);
+    this.bombs -= 3;
+    return true;
+  }
+
   onHit(damage) {
     if (!this.alive) return;
     const r = Math.random();
@@ -1658,8 +1700,16 @@ class TankAI {
     }
 
     let turn = clamp(headingDiff * 2, -1, 1);
-    // 距离控制：远了冲，近了退
-    let throttle = dist > 45 ? 1 : dist > 22 ? 0.4 : -0.4;
+    // 距离控制：远了冲，中距停射、近了退、太近倒车+侧移（不再只往前冲）
+    let throttle;
+    if (dist > 55) throttle = 1;            // 远：冲
+    else if (dist > 30) throttle = 0.2;     // 中距：慢慢靠近
+    else if (dist > 15) throttle = -0.2;     // 偏近：微退
+    else throttle = -0.8;                    // 太近：倒车
+    // 侧向移动（增加横向位移，避免直线冲脸）：周期性左右偏转
+    this._strafeTimer = (this._strafeTimer || 0) + dt;
+    if (this._strafeTimer > 2.5 + Math.random() * 2) { this._strafeDir = (this._strafeDir || 1) * -1; this._strafeTimer = 0; }
+    turn += (this._strafeDir || 0) * 0.3;
 
     // 边界回拉：接近地图边缘时朝中心修正
     const lim = tank.worldSize - 40;
@@ -1699,8 +1749,13 @@ class TankAI {
     const isEnemy = tank.team === 'red';
     const aimThresh = isEnemy ? 0.06 : 0.10;
     const fireChance = isEnemy ? CONFIG.tank.enemyFireChance : 0.85;
+    const isAirTarget = typeof target.forwardVector === 'function';   // 目标是飞机
     if (!target.isZone && tank.canFire() && dist < 160 && Math.abs(aimDiff) < aimThresh && Math.random() < fireChance) {
       tank.tryFire(em);
+    }
+    // 打飞机时额外用机枪（密集火力追着飞机打）；敌方不用（太超模）
+    if (isAirTarget && !isEnemy && dist < 120 && Math.abs(aimDiff) < 0.15) {
+      tank.tryFireMG(em);
     }
   }
 }
@@ -2210,7 +2265,7 @@ class Game {
   // —— 比赛初始化 ——
   _initMatch(mode) {
     applyDifficulty(this.difficulty); // 按难度重算 CONFIG
-    this.terrain = createTerrain(this.scene, mode, this.mapId);
+    this.terrain = createTerrain(this.scene, this.worldwar ? 'tank' : mode, this.mapId);   // 世界大战永远用坦克地形（不管玩家选飞机还是坦克）
     const R = CONFIG.rules;
     this.kills = 0;
     this.playerLives = R.playerLives;
@@ -2459,6 +2514,9 @@ class Game {
     if (this._consumePress(inp, 'KeyB') && p.bombs > 0) {
       if (p.tryDropBomb(this.em)) { this.hud.addFeed(`💣 炸弹 ${p.bombs}/${p.maxBombs}`, 'info'); }
     }
+    if (this._consumePress(inp, 'KeyL') && p.bombs >= 3) {
+      if (p.tryDropNuke(this.em)) { this.hud.addFeed(`☢️ 核弹！消耗3颗炸弹`, 'kill'); }
+    }
   }
 
   // 光标射线打地面，返回相机前方的命中点（用于坦克炮塔瞄准）。
@@ -2686,41 +2744,78 @@ class Game {
       }
 
       this._updateHUD();
-      // 炸弹落点十字（CCIP）：模拟炸弹弹道，投影到屏幕显示 DOM 十字（高空也看得见）
+      // 炸弹落点标记（CCIP）：用 3D 地面圆环+竖直光柱标记落点（稳定不卡，不用屏幕投影）
       if (this.mode === 'plane' && this.player && this.player.alive && this.player.maxBombs > 0) {
-        const bp = this.player.position.clone();
-        const bv = this.player.forwardVector().multiplyScalar(this.player.speed * 1.2).add(new THREE.Vector3(0, -5, 0));
+        const _pfwd = this.player.forwardVector();
+        const bp = this.player.position.clone().addScaledVector(_pfwd, -2).add(new THREE.Vector3(0, -1, 0));
+        const bv = _pfwd.clone().multiplyScalar(this.player.speed * 1.2).add(new THREE.Vector3(0, -5, 0));
         const bg = CONFIG.plane.bomb.gravity;
         let _hitGround = false;
-        for (let i = 0; i < 600; i++) {
+        for (let i = 0; i < 1500; i++) {
           bv.y -= bg * 0.016;
           bp.addScaledVector(bv, 0.016);
           if (bp.y <= terrainHeight(bp.x, bp.z) + 0.1) { _hitGround = true; break; }
         }
-        if (!this._bombX) {
-          this._bombX = document.createElement('div');
-          this._bombX.style.cssText = 'position:fixed;width:60px;height:60px;pointer-events:none;z-index:50;transform:translate(-50%,-50%);display:none;';
-          this._bombX.innerHTML = '<svg viewBox="0 0 60 60" width="60" height="60"><circle cx="30" cy="30" r="25" fill="none" stroke="#ff0000" stroke-width="4"/><circle cx="30" cy="30" r="10" fill="none" stroke="#ff0000" stroke-width="4"/><line x1="30" y1="0" x2="30" y2="60" stroke="#ff0000" stroke-width="4"/><line x1="0" y1="30" x2="60" y2="30" stroke="#ff0000" stroke-width="4"/></svg>';
-          document.body.appendChild(this._bombX);
+        if (!this._bombRing) {
+          this._bombRing = new THREE.Mesh(new THREE.RingGeometry(5, 7, 24), new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
+          this._bombRing.rotation.x = -Math.PI / 2;
+          this.scene.add(this._bombRing);
+          this._bombPole = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 50, 6), new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.4 }));
+          this.scene.add(this._bombPole);
         }
-        if (_hitGround) {
-          const sp = bp.clone().project(this.camera);
-          const sx = sp.x * 0.5 + 0.5;
-          const sy = -sp.y * 0.5 + 0.5;
-          // 只在落点在屏幕合理范围内 + 前方 + 离飞机不太远时显示
-          if (sp.z > -1 && sp.z < 1 && sx > -0.1 && sx < 1.1 && sy > -0.1 && sy < 1.1) {
-            this._bombX.style.display = 'block';
-            this._bombX.style.left = (sx * window.innerWidth) + 'px';
-            this._bombX.style.top = (sy * window.innerHeight) + 'px';
-          } else { this._bombX.style.display = 'none'; }
-        } else { this._bombX.style.display = 'none'; }   // 没找到落点（飞太高/朝上）→ 隐藏
-      } else if (this._bombX) {
-        this._bombX.style.display = 'none';
+        if (_hitGround && isFinite(bp.x) && isFinite(bp.z)) {
+          const gy = terrainHeight(bp.x, bp.z);
+          this._bombRing.position.set(bp.x, gy + 0.5, bp.z);
+          this._bombRing.visible = true;
+          this._bombPole.position.set(bp.x, gy + 25, bp.z);
+          this._bombPole.visible = true;
+        } else {
+          this._bombRing.visible = false;
+          this._bombPole.visible = false;
+        }
+      } else {
+        if (this._bombRing) this._bombRing.visible = false;
+        if (this._bombPole) this._bombPole.visible = false;
       }
       this._checkEnd();
     }
 
     } catch (err) { console.error('⚠ _animate:', err); if (!this._aErr) { this._aErr = true; try { this.hud.addFeed('⚠ ' + (err.message || err), 'info'); } catch (e) {} } }
+    // CCIP 炸弹落点标记：放在 try-catch 外面，保证每帧都更新（不会因为游戏逻辑报错而卡住）
+    try {
+      if (this.mode === 'plane' && this.player && this.player.alive && this.player.maxBombs > 0) {
+        const _pfwd = this.player.forwardVector();
+        const bp = this.player.position.clone().addScaledVector(_pfwd, -2).add(new THREE.Vector3(0, -1, 0));
+        const bv = _pfwd.clone().multiplyScalar(this.player.speed * 1.2).add(new THREE.Vector3(0, -5, 0));
+        const bg = CONFIG.plane.bomb.gravity;
+        let _hitGround = false;
+        for (let i = 0; i < 1500; i++) {
+          bv.y -= bg * 0.016;
+          bp.addScaledVector(bv, 0.016);
+          if (bp.y <= terrainHeight(bp.x, bp.z) + 0.1) { _hitGround = true; break; }
+        }
+        if (!this._bombRing) {
+          this._bombRing = new THREE.Mesh(new THREE.RingGeometry(5, 7, 24), new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
+          this._bombRing.rotation.x = -Math.PI / 2;
+          this.scene.add(this._bombRing);
+          this._bombPole = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 50, 6), new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.4 }));
+          this.scene.add(this._bombPole);
+        }
+        if (_hitGround && isFinite(bp.x) && isFinite(bp.z)) {
+          const gy = terrainHeight(bp.x, bp.z);
+          this._bombRing.position.set(bp.x, gy + 0.5, bp.z);
+          this._bombRing.visible = true;
+          this._bombPole.position.set(bp.x, gy + 25, bp.z);
+          this._bombPole.visible = true;
+        } else {
+          this._bombRing.visible = false;
+          this._bombPole.visible = false;
+        }
+      } else {
+        if (this._bombRing) this._bombRing.visible = false;
+        if (this._bombPole) this._bombPole.visible = false;
+      }
+    } catch (e) {}
     this.renderer.render(this.scene, this.camera);
   };
 
@@ -2873,6 +2968,7 @@ class Game {
         enemiesLeft,
       });
       this.hud.setMissiles(this.player.missiles ?? 0, this.player.maxMissiles ?? 0);
+      this.hud.setBombs(this.player.bombs ?? 0, this.player.maxBombs ?? 0);
       // 小地图：玩家居中、朝上为前进方向；敌人画红点
       const f = this.mode === 'tank' ? null : this.player.forwardVector();
       const heading = this.mode === 'tank' ? (this._aimYaw ?? this.player.heading) : Math.atan2(f.x, f.z);   // 小地图跟瞄准方向（跟相机一致），不跟车身
