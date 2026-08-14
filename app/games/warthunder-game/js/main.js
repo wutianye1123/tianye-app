@@ -2942,14 +2942,20 @@ class Game {
     if (this._onAnyKey) { window.removeEventListener('keydown', this._onAnyKey); this._onAnyKey = null; }
     this._hidePauseOverlay();
     this.clock.getDelta();   // 丢弃暂停期间累积的 dt，避免恢复瞬间一帧大跳
-    this._relockPointer();   // 恢复即自动重新锁定指针，玩家不用再点一下画面
+    // 光标立刻视觉消失（不等锁定成功）：Esc 不算用户手势、锁定请求必被浏览器拒，
+    // 但未锁定状态本就有"鼠标差值瞄准"模式照常可玩；玩家第一次点击开火（click 是手势，
+    // 走 _onDocClickPL）即真正锁定——全程无感，只是锁定前鼠标到屏幕边缘炮塔会停转。
+    this.canvas.style.cursor = 'none';
+    this._relockPointer();
   }
   // 重新请求指针锁。Esc 退锁后浏览器有 ~1.25s 冷却期，期间请求会被拒 → 1.3s 后自动重试
-  // （按键/点击的 transient activation 窗口约 5s，重试时仍在窗口内，无需玩家再点击；
-  //  若两次都失败，屏上本来就有"点击锁定"提示兜底）。
+  // （按键/点击的 transient activation 窗口约 5s，重试时仍在窗口内，无需玩家再点击）。
+  // 重试上限 2 次：Esc 恢复路径无手势、锁定必然被拒，无限重试会在玩家后续操作产生手势时
+  // 突然锁鼠（点击路径本来就会锁），还每 1.3s 白打一次请求。
   _relockPointer() {
     if (this._disposed || this.state !== 'playing' || this.paused) return;
     if (document.pointerLockElement === this.canvas) return;
+    let tries = 0;
     const attempt = () => {
       if (this._disposed || this.state !== 'playing' || this.paused) return;
       if (document.pointerLockElement === this.canvas) return;
@@ -2959,6 +2965,7 @@ class Game {
       } catch (e) { retryLater(); }
     };
     const retryLater = () => {
+      if (tries++ >= 2) return;
       clearTimeout(this._relockTO);
       this._relockTO = setTimeout(attempt, 1300);
     };
