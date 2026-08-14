@@ -416,6 +416,26 @@ class HUD {
     this._hitTO = setTimeout(() => { this.hitmarker.style.opacity = '0'; }, 180);
   }
 
+  // 受击方向指示：屏幕边缘按方位角闪红色弧形提示（angle=入射相对玩家朝向的角，0=正前）。
+  // 用一个旋转的渐变弧 div，闪 0.5s 后淡出；多次受击刷新角度与计时。
+  flashDamageDir(angle) {
+    if (!this._dmgDir) {
+      const el = document.createElement('div');
+      // 80px 红色弧（radial-gradient 环 + 只留 60° 扇区可见），挂在 HUD 容器外圈、随受击角旋转
+      el.style.cssText = 'position:fixed;left:50%;top:50%;width:520px;height:520px;margin:-260px 0 0 -260px;' +
+        'pointer-events:none;z-index:50;opacity:0;transition:opacity .25s;' +
+        'background:radial-gradient(circle, transparent 190px, rgba(255,40,20,.75) 218px, rgba(255,40,20,.75) 234px, transparent 258px);' +
+        '-webkit-mask-image:conic-gradient(from -30deg, transparent 0deg, #000 15deg, #000 60deg, transparent 75deg, transparent 360deg);' +
+        'mask-image:conic-gradient(from -30deg, transparent 0deg, #000 15deg, #000 60deg, transparent 75deg, transparent 360deg);';
+      this.container.appendChild(el);
+      this._dmgDir = el;
+    }
+    this._dmgDir.style.transform = `rotate(${angle}rad)`;
+    this._dmgDir.style.opacity = '1';
+    clearTimeout(this._dmgTO);
+    this._dmgTO = setTimeout(() => { this._dmgDir.style.opacity = '0'; }, 500);
+  }
+
   // 击杀/命中提示（战争雷霆式 kill feed），4 秒后淡出。
   addFeed(text, kind = 'kill') {
     if (!this.feedEl) this.feedEl = this.container.querySelector('#feed');
@@ -573,12 +593,41 @@ class HUD {
 
 // 炮弹 / 子弹。直线飞行 + 可选重力下坠 + 生命周期。
 // 命中检测由 EntityManager 用 position + radius 做球体判定。
+// 弹丸几何/材质缓存：每发弹丸原先各 new 一份 SphereGeometry+Material，机枪密集场景
+// 分配/GC 开销大；改为按 size/color 全局缓存复用（弹丸不改 scale/opacity，共享安全）。
+// ⚠️ 因此弹丸销毁时不能 dispose 共享资源（见 EntityManager.update 的 projectiles 清理）。
+const _projGeoCache = new Map();
+const _projMatCache = new Map();
+function projGeo(size) {
+  let g = _projGeoCache.get(size);
+  if (!g) { g = new THREE.SphereGeometry(size, 8, 8); _projGeoCache.set(size, g); }
+  return g;
+}
+function projMat(color) {
+  let m = _projMatCache.get(color);
+  if (!m) { m = new THREE.MeshBasicMaterial({ color }); _projMatCache.set(color, m); }
+  return m;
+}
+
+// 爆炸光源池：每个爆炸原先 new 一个 PointLight，同屏多个动态光源会逼 GPU 对所有受光材质
+// (坦克/飞机/建筑/地形) 重算 fragment，是密集交战掉帧主因。改为全局上限个 PointLight 借用——
+// 池里有空闲就取，没有且未到上限就新建，到上限就返回 null（该爆炸不挂光源，靠 core 闪光球；
+// core 是 MeshBasicMaterial 永亮、不受光，足够亮）。Explosion.dispose 时归还复用。
+const _MAX_EXPLO_LIGHTS = 4;
+const _exploLightPool = [];   // { light: PointLight, inUse: boolean }
+function acquireExplosionLight() {
+  for (const h of _exploLightPool) if (!h.inUse) { h.inUse = true; return h; }
+  if (_exploLightPool.length < _MAX_EXPLO_LIGHTS) {
+    const h = { light: new THREE.PointLight(0xffa040, 0, 40), inUse: true };
+    _exploLightPool.push(h);
+    return h;
+  }
+  return null;
+}
+
 class Projectile {
   constructor({ position, direction, speed, damage, owner = null, ownerTeam, color = 0xffe08a, size = 0.35, gravity = 0, life = 3 }) {
-    this.mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(size, 8, 8),
-      new THREE.MeshBasicMaterial({ color })
-    );
+    this.mesh = new THREE.Mesh(projGeo(size), projMat(color));
     this.mesh.position.copy(position);
     this.radius = size;
     this.velocity = direction.clone().normalize().multiplyScalar(speed);
@@ -630,9 +679,16 @@ class Explosion {
     );
     this.group.add(this.core, this.smoke);
 
-    // 爆炸闪光
-    this.light = new THREE.PointLight(color, 4, 30 * s);
-    this.group.add(this.light);
+    // 爆炸闪光（从全局光源池借用：池满则不挂，靠 core 闪光球——多动态光源是 GPU 杀手）
+    const _lh = acquireExplosionLight();
+    if (_lh) {
+      this._lightHandle = _lh;
+      this.light = _lh.light;
+      this.light.color.setHex(color);
+      this.light.distance = 30 * s;
+      this.light.intensity = 4;
+      this.group.add(this.light);
+    }
 
     this.life = 0.7;
     this.maxLife = 0.7;
@@ -648,8 +704,24 @@ class Explosion {
     this.smoke.scale.setScalar(1 + t * 3.5);
     this.core.material.opacity = Math.max(0, 1 - t * 1.4);
     this.smoke.material.opacity = Math.max(0, 0.8 * (1 - t));
-    this.light.intensity = Math.max(0, 4 * (1 - t * 1.5));
+    if (this.light) this.light.intensity = Math.max(0, 4 * (1 - t * 1.5));
     if (this.life <= 0) this.alive = false;
+  }
+
+  // 归还光源到池（摘下、归零、标记可用），并释放独立几何/材质。
+  dispose() {
+    if (this._disposed) return;
+    this._disposed = true;
+    if (this._lightHandle) {
+      this.group.remove(this.light);
+      this.light.intensity = 0;
+      this._lightHandle.inUse = false;
+      this._lightHandle = null; this.light = null;
+    }
+    this.core.geometry.dispose();
+    this.core.material.dispose();
+    this.smoke.geometry.dispose();
+    this.smoke.material.dispose();
   }
 }
 
@@ -673,6 +745,8 @@ class MuzzleFlash {
     this.mesh.material.opacity = Math.max(0, 1 - t);
     if (this.life <= 0) this.alive = false;
   }
+
+  dispose() { this.mesh.geometry.dispose(); this.mesh.material.dispose(); }
 }
 
 // 烟雾 / 凝结尾迹：缓慢膨胀、上浮、淡出。起火用深灰烟，喷气尾迹用白。
@@ -697,6 +771,9 @@ class Smoke {
     this.mesh.material.opacity = Math.max(0, 0.55 * (1 - t));
     if (this.life <= 0) this.alive = false;
   }
+
+  // 几何 _smokeGeo 全局共享，不释放；只 dispose 独立 material。
+  dispose() { this.mesh.material.dispose(); }
 }
 
 
@@ -728,7 +805,7 @@ class EntityManager {
     if (e.isExplosion && this.sfx) this.sfx.explosion(e.mesh.position);
     if (this.effects.length > 160) { // 上限：丢最老的，防特效失控涨帧
       const old = this.effects.shift();
-      if (old && old.mesh) this.scene.remove(old.mesh);
+      if (old) { if (old.dispose) old.dispose(); if (old.mesh) this.scene.remove(old.mesh); }
     }
   }
 
@@ -755,8 +832,7 @@ class EntityManager {
     this.projectiles = this.projectiles.filter((p) => {
       if (!p.alive) {
         this.scene.remove(p.mesh);
-        if (p.mesh.geometry) p.mesh.geometry.dispose();
-        if (p.mesh.material) p.mesh.material.dispose();
+        // 几何/材质已全局缓存共享（projGeo/projMat），不在此 dispose（否则毁掉缓存）
         if (p.isBomb) {   // 炸弹落地/命中：范围爆炸（冲击波）
           const _bp = p.mesh.position.clone();
           const _nuke = p.isNuke;
@@ -773,9 +849,9 @@ class EntityManager {
       }
       return true;
     });
-    // 清理失效特效
+    // 清理失效特效（统一走 dispose：归还光源/释放几何材质；Smoke 共享几何不在 dispose 里释放）
     this.effects = this.effects.filter((e) => {
-      if (!e.alive) { if (e.mesh) { this.scene.remove(e.mesh); if (e.mesh.material && e.mesh.material.dispose) e.mesh.material.dispose(); } return false; }
+      if (!e.alive) { if (e.dispose) e.dispose(); if (e.mesh) this.scene.remove(e.mesh); return false; }
       return true;
     });
   }
@@ -795,7 +871,7 @@ class EntityManager {
           t.onHit(p.damage);
           p.alive = false;
           this.addEffect(new Explosion(p.mesh.position.clone(), t.radius ? t.radius * 0.6 : 1, 0xffa040));
-          hits.push({ owner: p.owner, killed: wasAlive && !t.alive, crit: t.lastCrit });
+          hits.push({ owner: p.owner, target: t, killed: wasAlive && !t.alive, crit: t.lastCrit });
           break;
         }
       }
@@ -819,10 +895,10 @@ class EntityManager {
   }
 
   clear() {
+    for (const e of this.effects) { if (e.dispose) e.dispose(); if (e.mesh) this.scene.remove(e.mesh); }   // 先归还光源/释放资源
     for (const t of this.tanks) this.scene.remove(t.group);
     for (const p of this.planes) this.scene.remove(p.group);
     for (const p of this.projectiles) this.scene.remove(p.mesh);
-    for (const e of this.effects) if (e.mesh) this.scene.remove(e.mesh);
     this.tanks = []; this.planes = []; this.projectiles = []; this.effects = [];
   }
 }
@@ -2153,6 +2229,12 @@ class Sfx {
   }
   hit() { this._blip(900, 700, 0.08, 0.25, 'sine'); }
   kill() { this._blip(660, 990, 0.18, 0.3, 'triangle'); }
+  // 被击中闷响：低频下坠 + 短促重击，与"打中敌人"的高频叮区分开（战场受击感）。
+  // 两层：200→60Hz 低音坠落(主体) + 90Hz 三角波垫底(金属钝响)。
+  hitTaken() {
+    this._blip(200, 60, 0.22, 0.5, 'sine');
+    this._blip(90, 70, 0.14, 0.25, 'triangle');
+  }
   ui() { this._blip(520, 520, 0.05, 0.18, 'square'); }
   startEngine() {
     this._ensure(); if (!this.ctx || this.engine) return;
@@ -2213,7 +2295,7 @@ class Game {
     // Chromium/Electron 首次常因焦点/手势时序失败（静默 reject）；click 是完整手势、首次即锁，
     // 也和本 app 其他游戏一致（它们用 click，无需点两次）。
     this._onDocClickPL = (e) => {
-      if (this.state !== 'playing' || this._disposed) return;
+      if (this.state !== 'playing' || this._disposed || this.paused) return;   // 暂停中不锁（遮罩在用光标）
       if (document.pointerLockElement === this.canvas) return;
       if (e.button !== 0) return; // 只响应左键（右键 click 不会触发，防御一下）
       try {
@@ -2222,6 +2304,14 @@ class Game {
       } catch (err) {}
     };
     document.addEventListener('click', this._onDocClickPL);
+    // Esc 暂停/恢复（常驻）：指针锁定时 Esc 被浏览器消费（走 _onPLChange 暂停），页面收不到
+    // keydown；这里只处理"未锁定/已暂停"状态的 Esc。
+    this._onEscKey = (e) => {
+      if (e.code !== 'Escape' || e.repeat) return;
+      if (this.state !== 'playing' || this._disposed || this._wwPick) return;
+      this._togglePause();
+    };
+    window.addEventListener('keydown', this._onEscKey);
     // 指针锁定状态变化跟踪：用于在坦克模式显示/隐藏"点击锁定"提示，
     // 并按真实锁定状态切换光标——没锁上时显示十字光标，玩家能立刻看出"还没锁、需再点"
     // （原来 CSS 永久 cursor:none，锁失败也看不见，造成"以为锁了却转不动"）。
@@ -2233,6 +2323,11 @@ class Game {
         // 刚锁定：清掉锁定前累积的鼠标移动 + 重置基点，避免第一帧炮塔/瞄准跳变
         this.input.mvX = 0; this.input.mvY = 0;
         this._lastMx = this.input.mouseX; this._lastMy = this.input.mouseY;
+      } else if (this.state === 'playing' && !this.paused && !this._wwPick && !this._disposed) {
+        // 指针锁定时按 Esc：浏览器直接退出锁定、页面收不到 keydown Escape → 顺势暂停。
+        // 程序化退锁的场景各自有状态守卫：_pause 自身（paused 已 true）、_end（state=over）、
+        // 世界大战选载具（_wwPick 先置 true 再退锁）、dispose（_disposed 先置 true）。
+        this._pause();
       }
     };
     document.addEventListener('pointerlockchange', this._onPLChange);
@@ -2260,9 +2355,9 @@ class Game {
 
   _setupHint() {
     if (this.mode === 'tank') {
-      this.hud.setHint('<b>点击画面锁定鼠标</b>（炮塔可无限转，Esc 解锁）· <b>WASD</b> 车体 · <b>左键</b>主炮 · <b>空格</b>机枪 · <b>Shift</b>瞄准镜 · <b>R</b>修车 · <b>F</b>灭火');
+      this.hud.setHint('<b>点击画面锁定鼠标</b>（炮塔可无限转，Esc 暂停）· <b>WASD</b> 车体 · <b>左键</b>主炮 · <b>空格</b>机枪 · <b>Shift</b>瞄准镜 · <b>R</b>修车 · <b>F</b>灭火');
     } else {
-      this.hud.setHint('<b>点击画面锁定鼠标</b>（指哪飞哪，自动改平，Esc 解锁）· <b>W/S</b>油门 · <b>Shift</b>加力 · <b>左键</b>开火 · <b>右键/X</b>导弹(喷气机) · <b>F</b>灭火');
+      this.hud.setHint('<b>点击画面锁定鼠标</b>（指哪飞哪，自动改平，Esc 暂停）· <b>W/S</b>油门 · <b>Shift</b>加力 · <b>左键</b>开火 · <b>右键/X</b>导弹(喷气机) · <b>F</b>灭火');
     }
   }
 
@@ -2643,6 +2738,8 @@ class Game {
     this._raf = requestAnimationFrame(this._animate);
     try {
     const dt = Math.min(this.clock.getDelta(), 0.05);
+    // Esc 暂停/恢复统一走常驻 _onEscKey（锁定时 Esc 由浏览器退锁、_onPLChange 暂停）。
+    if (this.paused) { this.renderer.render(this.scene, this.camera); return; }
     if (this.mode === 'tank' && this.player && this.player.alive) {
       // 十字准星 = 炮膛实际指向（炮口 + 炮管方向投影到屏幕）：随炮塔转，不锁屏幕中央。
       // 相机跟鼠标、炮塔随后 slew 对齐时，准星从偏处滑向中央（与红环重合即对准）。
@@ -2730,6 +2827,18 @@ class Game {
         if (h.owner === this.player) {
           this.hud.flashHit(h.killed ? 'kill' : (h.crit ? 'crit' : 'hit'));
           if (h.killed) this.sfx.kill(); else this.sfx.hit();
+        } else if (h.target === this.player && this.player && this.player.alive) {
+          // 被击中：低沉闷响 + 屏幕边缘受击方向红弧（与"打中敌人"的清脆音区分，紧张感）
+          this.sfx.hitTaken();
+          // 方向：入射位置(敌弹命中点≈玩家自身)的来源 = 弹丸 owner 方位，转成相对玩家朝向的角
+          const src = h.owner && h.owner.position ? h.owner.position : null;
+          if (src) {
+            const toSrc = src.clone().sub(this.player.position);
+            const myFwd = this.mode === 'plane' ? this.player.forwardVector() : new THREE.Vector3(Math.sin(this.player.heading), 0, Math.cos(this.player.heading));
+            const myRight = new THREE.Vector3(myFwd.z, 0, -myFwd.x);
+            // 屏幕弧指向：angle=0 正前；atan2(x=右分量, y=前分量)，正=右侧
+            this.hud.flashDamageDir(Math.atan2(toSrc.dot(myRight), toSrc.dot(myFwd)));
+          }
         }
       }
 
@@ -2773,9 +2882,10 @@ class Game {
         const bv = _pfwd.clone().multiplyScalar(this.player.speed * 1.2).add(new THREE.Vector3(0, -5, 0));
         const bg = CONFIG.plane.bomb.gravity;
         let _hitGround = false;
-        for (let i = 0; i < 1500; i++) {
-          bv.y -= bg * 0.016;
-          bp.addScaledVector(bv, 0.016);
+        const _BSTEP = 0.04;   // 弹道预测步长：0.04s × 400 = 16s，覆盖炸弹(12s)/核弹(15s)寿命；原 0.016×1500=24s 每帧多跑 ~3 倍
+        for (let i = 0; i < 400; i++) {
+          bv.y -= bg * _BSTEP;
+          bp.addScaledVector(bv, _BSTEP);
           if (bp.y <= terrainHeight(bp.x, bp.z) + 0.1) { _hitGround = true; break; }
         }
         if (!this._bombRing) {
@@ -2807,6 +2917,76 @@ class Game {
     this.renderer.render(this.scene, this.camera);
   };
 
+  // —— 暂停 ——
+  _togglePause() {
+    if (this.paused) this._resume();
+    else this._pause();
+  }
+  _pause() {
+    this.paused = true;
+    if (document.pointerLockElement) document.exitPointerLock();   // 释放指针锁，光标能点遮罩按钮
+    if (this.input) this.input.canvas.style.cursor = 'auto';
+    if (this.sfx) this.sfx.stopEngine();   // 暂停引擎音
+    this._showPauseOverlay();
+    // 暂停期间按任意键恢复（Esc 走 _onEscKey）。关键：非 Esc 键的 keydown 算用户手势，
+    // _resume 里能直接重新锁上指针——浏览器把 Escape 豁免在手势之外（防恶意页锁死用户），
+    // 纯 Esc 恢复永远锁不上，只能靠点击兜底；其他键/点击则全自动。
+    this._onAnyKey = (e) => {
+      if (e.repeat || e.code === 'Escape') return;
+      this._resume();
+    };
+    window.addEventListener('keydown', this._onAnyKey);
+  }
+  _resume() {
+    this.paused = false;
+    if (this._onAnyKey) { window.removeEventListener('keydown', this._onAnyKey); this._onAnyKey = null; }
+    this._hidePauseOverlay();
+    this.clock.getDelta();   // 丢弃暂停期间累积的 dt，避免恢复瞬间一帧大跳
+    this._relockPointer();   // 恢复即自动重新锁定指针，玩家不用再点一下画面
+  }
+  // 重新请求指针锁。Esc 退锁后浏览器有 ~1.25s 冷却期，期间请求会被拒 → 1.3s 后自动重试
+  // （按键/点击的 transient activation 窗口约 5s，重试时仍在窗口内，无需玩家再点击；
+  //  若两次都失败，屏上本来就有"点击锁定"提示兜底）。
+  _relockPointer() {
+    if (this._disposed || this.state !== 'playing' || this.paused) return;
+    if (document.pointerLockElement === this.canvas) return;
+    const attempt = () => {
+      if (this._disposed || this.state !== 'playing' || this.paused) return;
+      if (document.pointerLockElement === this.canvas) return;
+      try {
+        const p = this.canvas.requestPointerLock();
+        if (p && typeof p.catch === 'function') p.catch(retryLater);
+      } catch (e) { retryLater(); }
+    };
+    const retryLater = () => {
+      clearTimeout(this._relockTO);
+      this._relockTO = setTimeout(attempt, 1300);
+    };
+    attempt();
+  }
+  _showPauseOverlay() {
+    if (this._pauseEl) return;
+    const el = document.createElement('div');
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:200;font-family:sans-serif';
+    el.innerHTML = `<div style="background:rgba(20,28,20,.95);border:2px solid rgba(100,180,100,.4);border-radius:14px;padding:28px 40px;text-align:center;color:#eee;min-width:240px">
+      <div style="font-size:26px;margin-bottom:6px">⏸ 已暂停</div>
+      <div style="font-size:13px;color:#aab;margin-bottom:20px">按 <b>任意键</b>（W/空格…）或点击任意处恢复</div>
+      <button id="pause-resume" style="display:block;width:100%;margin:6px 0;padding:10px;font-size:15px;background:rgba(80,140,80,.9);color:#fff;border:none;border-radius:8px;cursor:pointer">继续</button>
+      <button id="pause-menu" style="display:block;width:100%;margin:6px 0;padding:10px;font-size:15px;background:rgba(120,60,60,.9);color:#fff;border:none;border-radius:8px;cursor:pointer">返回主菜单</button>
+    </div>`;
+    document.body.appendChild(el);
+    this._pauseEl = el;
+    el.addEventListener('click', (e) => { if (e.target === el) this._resume(); });   // 点遮罩背景任意处也恢复（click 手势可重锁）
+    el.querySelector('#pause-resume').addEventListener('click', () => this._resume());   // _resume 内自动重新锁定
+    el.querySelector('#pause-menu').addEventListener('click', () => {
+      this._hidePauseOverlay(); this.paused = false;
+      if (this.onExit) this.onExit();
+    });
+  }
+  _hidePauseOverlay() {
+    if (this._pauseEl) { this._pauseEl.remove(); this._pauseEl = null; }
+  }
+
   _handleDeaths(removed) {
     const playerRef = this.player;   // 缓存本帧玩家引用：同批死亡里玩家先死时 this.player 已置 null，后续敌人击杀归属会误判为"友方击毁"
     for (const r of removed) {
@@ -2828,7 +3008,9 @@ class Game {
         if (this.endless && this.kills % 10 === 0) this._spawnBoss(); // 每 10 击杀出一只精英
         const atk = r._lastAttacker;
         const who = atk === playerRef ? '你击毁 ' : (atk && atk.team === 'blue' ? '友方击毁 ' : '击毁 ');
-        this.hud.addFeed(`${who}敌方${label}${tag}`, 'kill');
+        // 玩家击杀即时奖励提示：金额=外部结算公式的逐杀值（无尽 150/50，普通 120/40），只提前显示、结算不变
+        const bonus = atk === playerRef ? ` +${this.endless ? 150 : 120}💰+${this.endless ? 50 : 40}🔬` : '';
+        this.hud.addFeed(`${who}敌方${label}${tag}${bonus}`, 'kill');
       } else if (r.team === 'blue') {
         this.hud.addFeed(`友方${label}被击毁${tag}`, 'death');
       }
@@ -2888,8 +3070,11 @@ class Game {
     document.body.appendChild(panel);
     this._wwPanel = panel;
     panel.querySelectorAll('[data-mode]').forEach((el) => {
-      el.onmouseenter = () => { el.style.background = el.dataset.mode === 'tank' ? 'rgba(60,100,60,.8)' : 'rgba(60,80,110,.8)'; };
-      el.onmouseleave = () => { el.style.background = el.dataset.mode === 'tank' ? 'rgba(40,60,40,.6)' : 'rgba(40,50,70,.6)'; };
+      const hoverBg = el.dataset.mode === 'tank' ? 'rgba(60,100,60,.85)' : 'rgba(60,80,110,.85)';
+      const idleBg = el.dataset.mode === 'tank' ? 'rgba(40,60,40,.6)' : 'rgba(40,50,70,.6)';
+      el.onmouseenter = () => { el.style.background = hoverBg; };
+      el.onmouseleave = () => { el.style.background = idleBg; };
+      el.ontouchstart = () => { el.style.background = hoverBg; };   // 触屏无 hover 态：按下即时高亮给反馈
       el.onclick = () => {
         this.mode = el.dataset.mode;
         if (this.mode === 'tank') this.tankType = el.dataset.id;
@@ -3051,6 +3236,8 @@ class Game {
     this._aErr = false;
     this._deathCamTarget = null;
     this._wwPick = false;
+    this.paused = false;
+    this._hidePauseOverlay();
     this._setupHint();
     this._initMatch(mode);
   }
@@ -3065,11 +3252,15 @@ class Game {
   dispose() {
     this._disposed = true;
     cancelAnimationFrame(this._raf);
+    clearTimeout(this._relockTO);
     window.removeEventListener('resize', this._onResize);
     if (this._onDocClickPL) document.removeEventListener('click', this._onDocClickPL);
+    if (this._onEscKey) window.removeEventListener('keydown', this._onEscKey);
+    if (this._onAnyKey) window.removeEventListener('keydown', this._onAnyKey);
     if (this._onPLChange) document.removeEventListener('pointerlockchange', this._onPLChange);
     if (document.pointerLockElement) document.exitPointerLock();
     if (this._wwPanel) { this._wwPanel.remove(); this._wwPanel = null; }
+    if (this._pauseEl) { this._pauseEl.remove(); this._pauseEl = null; }
     if (this._bombX) { this._bombX.remove(); this._bombX = null; }
     this.input.dispose();
     this.hud.dispose();
