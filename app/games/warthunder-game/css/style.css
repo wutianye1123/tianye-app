@@ -170,11 +170,12 @@ html, body {
 /* —— 击杀提示 / 中央信息 —— */
 #feed {
   position: absolute;
-  top: 50px;
-  right: 18px;
+  top: 96px;              /* 中上方：占领进度条(54px+20高)下方留 20px 间隙 */
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: center;    /* 跟随居中（原右上角右对齐） */
   gap: 4px;
   font-size: 13px;
 }
