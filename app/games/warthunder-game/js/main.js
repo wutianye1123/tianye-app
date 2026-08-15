@@ -3098,11 +3098,20 @@ class Game {
       sc.cam.position.copy(sc.bullet.position).addScaledVector(dir, -5).addScaledVector(side, 3.5).add(new THREE.Vector3(0, 1.6, 0));
       sc.cam.lookAt(sc.bullet.position.x + dir.x * 12, sc.bullet.position.y + dir.y * 12, sc.bullet.position.z + dir.z * 12);
     } else if (sc.t < sc.replayFly + sc.replayIn) {
-      // 阶段②：穿入段——弹丸从弹着点沿末速方向穿入车体，相机切到车侧看内部模块
-      const p = (sc.t - sc.replayFly) / sc.replayIn;
+      // 阶段②：穿入段——先撞击停滞0.15s(命中装甲的顿挫感)再急剧减速挤入。
+      // easeOutCubic：入口快、车内越来越慢，像炮弹挤压装甲/内部结构逐层受阻，符合现实穿甲节奏。
+      const IN_STALL = 0.15;
       const tt = sc.realT;
       const vEnd = sc.v0.clone(); vEnd.y -= sc.g * tt; const dir = vEnd.normalize();
-      sc.bullet.position.copy(sc.hit).addScaledVector(dir, p * 3.5);
+      if (sc.t < sc.replayFly + IN_STALL) {
+        // 撞击瞬间：弹停在弹着点（穿甲弹在装甲表面碎裂/挤压的一瞬）
+        sc.bullet.position.copy(sc.hit).addScaledVector(dir, 0.3);
+        if (!sc._stallSfx) { sc._stallSfx = true; if (this.sfx) this.sfx.bounce(); }   // 撞击"叮"
+      } else {
+        const p = Math.min(1, (sc.t - sc.replayFly - IN_STALL) / (sc.replayIn - IN_STALL));
+        const ease = 1 - Math.pow(1 - p, 3);   // 先快后慢：穿甲挤压感
+        sc.bullet.position.copy(sc.hit).addScaledVector(dir, 0.3 + ease * 3.2);
+      }
       const vpos = sc.hit.clone().addScaledVector(dir, -2.5);   // 车中心≈弹着点往回2.5m
       const a0 = Math.atan2(sc.hit.x - vpos.x, sc.hit.z - vpos.z);
       const ang = a0 + 1.0;
