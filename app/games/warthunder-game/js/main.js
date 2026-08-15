@@ -1272,11 +1272,6 @@ class Tank {
       pen: this.pen * sh.penMul, shellDef: sh,
     }));
     em.addEffect(new MuzzleFlash(muzzleWorld));
-    // 右上角跟拍：把弹丸引用交给 Game（玩家车才跟拍；AI 弹不跟，别抢窗口）
-    if (this.side === 'player' && this.em && this.em.onPlayerShell) {
-      const list = this.em.projectiles;   // addProjectile 刚 push 的就是这发
-      this.em.onPlayerShell(list[list.length - 1]);
-    }
     this.reloadTimer = this.reloadTime;
     return true;
   }
@@ -2921,7 +2916,7 @@ class Game {
         if (h.owner === this.player) {
           // 跟拍小窗：这发弹命中了敌人 → 从"跟弹"转"X 光特写"（击中就看，不限击毁）
           if (this._shellcam && this._shellcam.phase === 'fly' && this._shellcam.proj === h.proj && typeof h.target.forwardVector !== 'function') {
-            this._beginShellcamImpact(h.target, h.hitPoint);
+            this._startKillReplay(h.target, h.hitPoint, h.killed, h.verdict);
           }
           // 命中反馈按判定结果分级：击毁(红)/致命(橙)/击穿(金)/未击穿(灰蓝)/跳弹(白闪)
           if (h.verdict === 'bounce') {
@@ -2952,9 +2947,8 @@ class Game {
       }
 
       this._updateShellcam(dt);   // 右上角弹药跟拍小窗（须在 cullDead 前：弹死当帧建 X 光并保住 victim）
-      const removed = this.em.cullDead(null);   // 跟拍命中后只是旁观坦克（不改材质/不保留），正常清理
+      const removed = this.em.cullDead(this._shellcam ? this._shellcam.tank : null);   // 回放期间保留 victim 展示
       // 跟拍回调：玩家主炮弹丸生成时开窗（须在 cullDead 前？否——此处只注册一次）
-      if (!this.em.onPlayerShell) this.em.onPlayerShell = (proj) => this._startShellcam(proj);
       this._handleDeaths(removed);
       this.enemies = this.enemies.filter((e) => e.alive);
       this.allies = this.allies.filter((a) => a.alive);
@@ -3030,74 +3024,131 @@ class Game {
     this._renderShellcam();   // 右上角跟拍小窗（scissor 二次渲染，无小窗时零开销）
   };
 
-  // —— 右上角弹药跟拍小窗（shellcam）——
-  // 玩家坦克主炮开火→弹丸入窗跟踪（命中前~1s 弹道直线段）；命中目标→X 光特写 0.8s 自动关。
-  // PiP 用 scissor 二次渲染，不接管主视角/不慢动作/无需任何按键。
-  _startShellcam(proj) {
-    if (this._shellcam) return;   // 已有小窗不重入（连发只跟第一发）
-    this._shellcam = { phase: 'fly', t: 0, proj, xray: null, cam: new THREE.PerspectiveCamera(55, 1.5, 0.5, 3000) };
-  }
-  // 命中转"击中特写"：镜头留在敌坦克旁看击中的动作——命中爆炸、殉爆火球、
-  // 起火冒烟，缓慢环绕拉远，2.6s 后自动关（时长足够看清击毁过程，不再闪没）。
-  _beginShellcamImpact(tank, hitPoint) {
-    const sc = this._shellcam;
-    if (!sc) return;
-    sc.phase = 'impact'; sc.t = 0;
-    sc.impact = {
-      tank,
-      hitPoint: hitPoint ? hitPoint.clone() : tank.position.clone(),
-      dur: 2.6,                 // 命中后看 2.6s：爆炸展开 + 燃烧起来
-      startCam: sc.cam.position.clone(),   // 从跟弹位置平滑过渡到特写位，不硬切
+  // —— 右上角击杀回放（战雷式）——
+  // 开火不显示；命中敌坦克瞬间才开窗，慢动作重演：炮弹从炮管射出→慢速飞行→命中→
+  // （击穿）钻进车体→内部模块→内部爆炸/殉爆火球→结束。主视角/主时间线完全不受影响。
+  _startKillReplay(tank, hitPoint, killed, verdict) {
+    if (this._shellcam) return;   // 回放中不重入
+    const shooter = this.player;
+    if (!shooter || !shooter.position) return;
+    // 快照：炮口（玩家当前位置近似——开火后玩家几乎不动，1s 内偏差可接受）
+    const muzzle = shooter.getMuzzleWorld ? shooter.getMuzzleWorld(new THREE.Vector3()) : shooter.position.clone();
+    const hit = hitPoint ? hitPoint.clone() : tank.position.clone();
+    const sc = {
+      phase: 'fly', t: 0, cam: new THREE.PerspectiveCamera(55, 1.5, 0.5, 3000),
+      tank, killed, verdict,
+      muzzle, hit,
+      flyDur: 1.6, inDur: 0.5, boomDur: 1.6,   // 三段：飞行1.6s/钻入0.5s/爆炸1.6s
+      // 重演弹丸（回放专用，金色亮弹）
+      bullet: new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 10), new THREE.MeshBasicMaterial({ color: 0xffee88 })),
+      // 内部模块组（钻入段显示）
+      modules: new THREE.Group(),
     };
+    sc.bullet.position.copy(muzzle);
+    this.scene.add(sc.bullet);
+    // 内部模块（挂在 victim 位置）
+    sc.modules.position.copy(tank.position);
+    const mk = (x, y, z, sx, sy, sz, color) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 }));
+      m.position.set(x, y, z); sc.modules.add(m); return m;
+    };
+    sc.modCrew = mk(0, 1.0, -1.8, 1.6, 1.0, 1.6, 0x44cc66);     // 乘员舱（绿）
+    sc.modAmmo = mk(0, 1.2, 0.9, 1.6, 1.0, 1.2, 0xffcc33);      // 弹药架（黄）
+    sc.modEng  = mk(0, 1.1, 2.6, 1.8, 1.0, 1.4, 0xff8833);      // 发动机（橙）
+    sc.modFuel = mk(-1.0, 0.9, 0.2, 0.5, 0.7, 1.0, 0xff4444);   // 油箱（红）
+    sc.modules.visible = false;
+    this.scene.add(sc.modules);
+    // victim 半透明（击穿段透视）
+    tank.group.traverse((c) => {
+      if (c.material) {
+        if (!c.userData._kcOrig) c.userData._kcOrig = { transparent: c.material.transparent, opacity: c.material.opacity ?? 1 };
+        c.material.transparent = true; c.material.opacity = 0.22;
+      }
+    });
+    this._shellcam = sc;
   }
   _updateShellcam(dt) {
     const sc = this._shellcam;
     if (!sc) return;
     sc.t += dt;
+    const vpos = sc.tank.position;
+    const dir = _kcTmp.copy(sc.hit).sub(sc.muzzle).normalize();
     if (sc.phase === 'fly') {
-      // 跟弹：镜头在弹尾后上方 3m，看向弹丸前方；弹没了(命中→impact 由 hits 转换/落地)自动关窗
-      const p = sc.proj;
-      if (!p || !p.alive) { this._endShellcam(); return; }
-      if (sc.t > 2.0) { this._endShellcam(); return; }   // 打空了：别跟满弹丸 3.5s 寿命
-      const v = _kcTmp.copy(p.velocity).normalize();
-      sc.cam.position.copy(p.mesh.position).addScaledVector(v, -3).add(new THREE.Vector3(0, 1.2, 0));
-      sc.cam.lookAt(p.mesh.position.x + v.x * 20, p.mesh.position.y + v.y * 20, p.mesh.position.z + v.z * 20);
-    } else if (sc.phase === 'impact') {
-      const im = sc.impact, tank = im.tank;
-      const p = Math.min(1, sc.t / im.dur);
-      // 特写：victim 侧面 12m 缓慢环绕+拉远到 17m、抬升，全程看向坦克中部（看爆炸/起火）
-      const pos = tank.position;
-      const a0 = Math.atan2(im.hitPoint.x - pos.x, im.hitPoint.z - pos.z);
-      const ang = a0 + 1.1 + p * 0.8;
-      const d = 12 + p * 5;
-      _kcTmp.set(pos.x + Math.sin(ang) * d, pos.y + 5 + p * 2.5, pos.z + Math.cos(ang) * d);
-      // 前 0.35s 从跟弹末位置 lerp 过去（硬切会晕）
-      if (p < 0.15) sc.cam.position.lerp(_kcTmp, p / 0.15);
-      else sc.cam.position.copy(_kcTmp);
-      sc.cam.lookAt(pos.x, pos.y + 1.5, pos.z);
-      if (sc.t >= im.dur) { this._endShellcam(); return; }
+      // 慢动作重演：弹丸从炮口飞向弹着点（1.6s），镜头跟在弹侧后上方
+      const p = Math.min(1, sc.t / sc.flyDur);
+      sc.bullet.position.copy(sc.muzzle).addScaledVector(dir, p * sc.muzzle.distanceTo(sc.hit));
+      // 相机：弹道侧方，跟着弹飞，略靠后看向前方
+      const side = new THREE.Vector3(-dir.z, 0, dir.x).normalize();
+      sc.cam.position.copy(sc.bullet.position).addScaledVector(dir, -4).addScaledVector(side, 3).add(new THREE.Vector3(0, 1.5, 0));
+      sc.cam.lookAt(sc.bullet.position.x + dir.x * 15, sc.bullet.position.y + dir.y * 15, sc.bullet.position.z + dir.z * 15);
+      if (sc.t >= sc.flyDur) {
+        sc.phase = 'in'; sc.t = 0;
+        // 只有击穿(pen)才钻进去；跳弹/未击穿命中弹着点就爆（外部小爆）
+        if (sc.verdict !== 'bounce' && sc.verdict !== 'nopen') sc.modules.visible = true;
+        if (this.sfx) this.sfx.bounce();   // 命中"叮"一声（弹着装甲）
+      }
+    } else if (sc.phase === 'in') {
+      // 钻入：弹丸从弹着点穿入车体内 0.5s，镜头切到车侧看内部（半透明车体+模块）
+      const p = Math.min(1, sc.t / sc.inDur);
+      sc.bullet.position.copy(sc.hit).addScaledVector(dir, p * 3.5);
+      const a0 = Math.atan2(sc.hit.x - vpos.x, sc.hit.z - vpos.z);
+      const ang = a0 + 1.0;
+      const d = 9;
+      sc.cam.position.set(vpos.x + Math.sin(ang) * d, vpos.y + 4, vpos.z + Math.cos(ang) * d);
+      sc.cam.lookAt(vpos.x, vpos.y + 1.2, vpos.z);
+      if (sc.t >= sc.inDur) {
+        sc.phase = 'boom'; sc.t = 0;
+        sc.bullet.visible = false;
+        // 内部/外部爆炸：击穿击杀→车内殉爆大火球(主场景特效会另爆一次，这里加内部白闪)
+        if (this.em) {
+          const big = sc.killed ? 6 : 2.5;
+          this.em.addEffect(new Explosion(sc.hit.clone().add(new THREE.Vector3(0, 1, 0)), big, sc.killed ? 0xffaa33 : 0xffa040));
+          if (sc.killed) this.em.addEffect(new Explosion(vpos.clone().add(new THREE.Vector3(0, 3, 0)), 9, 0xff6622));  // 殉爆冲顶
+        }
+      }
+    } else if (sc.phase === 'boom') {
+      // 爆炸段：镜头缓慢环绕+拉远 1.6s，看殉爆火球/燃烧
+      const p = Math.min(1, sc.t / sc.boomDur);
+      const a0 = Math.atan2(sc.hit.x - vpos.x, sc.hit.z - vpos.z);
+      const ang = a0 + 1.0 + p * 0.9;
+      const d = 9 + p * 6;
+      sc.cam.position.set(vpos.x + Math.sin(ang) * d, vpos.y + 4 + p * 3, vpos.z + Math.cos(ang) * d);
+      sc.cam.lookAt(vpos.x, vpos.y + 1.5, vpos.z);
+      if (sc.t >= sc.boomDur) this._endShellcam();
     }
   }
   _endShellcam() {
-    // impact 阶段不改材质/不加组，直接关窗即可
+    const sc = this._shellcam;
+    if (!sc) return;
+    if (sc.bullet) { sc.bullet.geometry.dispose(); sc.bullet.material.dispose(); this.scene.remove(sc.bullet); }
+    if (sc.modules) {
+      sc.modules.traverse((c) => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+      this.scene.remove(sc.modules);
+    }
+    if (sc.tank && sc.tank.group) sc.tank.group.traverse((c) => {
+      if (c.material && c.userData._kcOrig) {
+        c.material.transparent = c.userData._kcOrig.transparent;
+        c.material.opacity = c.userData._kcOrig.opacity;
+        delete c.userData._kcOrig;
+      }
+    });
     this._shellcam = null;
   }
-  // PiP 渲染：主画面后 scissor 出右上角小窗再渲一遍 shellcam 相机
+  // PiP 渲染：主画面后 scissor 出右上角小窗再渲一遍回放相机
   _renderShellcam() {
     const sc = this._shellcam;
     if (!sc) return;
     const w = window.innerWidth, h = window.innerHeight;
-    const pw = Math.round(Math.min(360, w * 0.28)), ph = Math.round(pw / 1.5);
+    const pw = Math.round(Math.min(380, w * 0.30)), ph = Math.round(pw / 1.6);
     const r = this.renderer;
     r.setScissorTest(true);
-    r.setScissor(w - pw - 14, h - ph - 46, pw, ph);   // 右上角（y 从下往上算，留出顶部 46px 给计分）
+    r.setScissor(w - pw - 14, h - ph - 46, pw, ph);   // 右上角（y 从下往上算，留顶部 46px 给计分）
     r.setViewport(w - pw - 14, h - ph - 46, pw, ph);
     sc.cam.aspect = pw / ph; sc.cam.updateProjectionMatrix();
     r.render(this.scene, sc.cam);
     r.setScissorTest(false);
     r.setViewport(0, 0, w, h);   // 还原全屏视口
   }
-
 
   // —— 暂停 ——
   _togglePause() {
