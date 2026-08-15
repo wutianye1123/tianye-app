@@ -120,24 +120,34 @@ const DIFFICULTY_LABELS = { easy: '简单', normal: '普通', hard: '困难' };
 // —— 坦克型号 ——（在难度调整后的基础数值上再乘这些倍率；scale 为体积）
 const TANK_TYPES = [
   // Rank 1
-  { id:'medium',  name:'T-34-85',     icon:'🇷🇺', scale:1.0,  hp:1.0,  speed:1.0,  turn:1.0,  turret:1.0,  reload:1.0, dmg:1.0,  rank:1, rp:0,    prereq:null,      price:0 },
-  { id:'m4',      name:'M4A3 谢尔曼',  icon:'🇺🇸', scale:1.0,  hp:1.15, speed:0.95, turn:1.0,  turret:1.0,  reload:1.1, dmg:0.95, rank:1, rp:200,  prereq:null,      price:800 },
+  { id:'medium',  name:'T-34-85',     icon:'🇷🇺', scale:1.0,  hp:1.0,  speed:1.0,  turn:1.0,  turret:1.0,  reload:1.0, dmg:1.0,  armor:[90,60,45], pen:135, rank:1, rp:0,    prereq:null,      price:0 },
+  { id:'m4',      name:'M4A3 谢尔曼',  icon:'🇺🇸', scale:1.0,  hp:1.15, speed:0.95, turn:1.0,  turret:1.0,  reload:1.1, dmg:0.95, armor:[100,60,45], pen:110, rank:1, rp:200,  prereq:null,      price:800 },
   // Rank 2
-  { id:'panzer2', name:'II 号坦克',    icon:'🇩🇪', scale:0.78, hp:0.6,  speed:1.4,  turn:1.6,  turret:1.6,  reload:0.7, dmg:0.6,  rank:2, rp:300,  prereq:'medium',  price:1000 },
-  { id:'light',   name:'M24 霞飞',     icon:'🇺🇸', scale:0.85, hp:0.75, speed:1.5,  turn:1.5,  turret:1.7,  reload:0.7, dmg:0.8,  rank:2, rp:300,  prereq:'medium',  price:1500 },
-  { id:'scout',   name:'234/2 美洲狮', icon:'🇩🇪', scale:0.8,  hp:0.5,  speed:1.7,  turn:1.8,  turret:1.8,  reload:0.6, dmg:0.5,  rank:2, rp:350,  prereq:'medium',  price:1200 },
+  { id:'panzer2', name:'II 号坦克',    icon:'🇩🇪', scale:0.78, hp:0.6,  speed:1.4,  turn:1.6,  turret:1.6,  reload:0.7, dmg:0.6,  armor:[30,20,15], pen:55, rank:2, rp:300,  prereq:'medium',  price:1000 },
+  { id:'light',   name:'M24 霞飞',     icon:'🇺🇸', scale:0.85, hp:0.75, speed:1.5,  turn:1.5,  turret:1.7,  reload:0.7, dmg:0.8,  armor:[38,25,19], pen:60, rank:2, rp:300,  prereq:'medium',  price:1500 },
+  { id:'scout',   name:'234/2 美洲狮', icon:'🇩🇪', scale:0.8,  hp:0.5,  speed:1.7,  turn:1.8,  turret:1.8,  reload:0.6, dmg:0.5,  armor:[30,20,15], pen:65, rank:2, rp:350,  prereq:'medium',  price:1200 },
   // Rank 3
-  { id:'td',      name:'SU-100',      icon:'🇷🇺', scale:1.05, hp:1.1,  speed:0.9,  turn:0.8,  turret:0.7,  reload:1.4, dmg:2.8,  rank:3, rp:800,  prereq:'light',   price:3500 },
-  { id:'panther', name:'黑豹 V',       icon:'🇩🇪', scale:1.1,  hp:1.3,  speed:1.05, turn:0.85, turret:0.9,  reload:1.1, dmg:1.9,  rank:3, rp:900,  prereq:'td',      price:4200 },
+  { id:'td',      name:'SU-100',      icon:'🇷🇺', scale:1.05, hp:1.1,  speed:0.9,  turn:0.8,  turret:0.7,  reload:1.4, dmg:2.8,  armor:[75,45,45], pen:185, rank:3, rp:800,  prereq:'light',   price:3500 },
+  { id:'panther', name:'黑豹 V',       icon:'🇩🇪', scale:1.1,  hp:1.3,  speed:1.05, turn:0.85, turret:0.9,  reload:1.1, dmg:1.9,  armor:[120,60,50], pen:160, rank:3, rp:900,  prereq:'td',      price:4200 },
   // Rank 4
-  { id:'heavy',   name:'虎 I',        icon:'🇩🇪', scale:1.2,  hp:2.0,  speed:0.7,  turn:0.7,  turret:0.9,  reload:1.3, dmg:2.2,  rank:4, rp:1600, prereq:'panther', price:4500 },
-  { id:'is2',     name:'IS-2',        icon:'🇷🇺', scale:1.2,  hp:2.2,  speed:0.65, turn:0.65, turret:0.8,  reload:1.5, dmg:2.6,  rank:4, rp:2000, prereq:'heavy',   price:5500 },
+  { id:'heavy',   name:'虎 I',        icon:'🇩🇪', scale:1.2,  hp:2.0,  speed:0.7,  turn:0.7,  turret:0.9,  reload:1.3, dmg:2.2,  armor:[110,80,80], pen:165, rank:4, rp:1600, prereq:'panther', price:4500 },
+  { id:'is2',     name:'IS-2',        icon:'🇷🇺', scale:1.2,  hp:2.2,  speed:0.65, turn:0.65, turret:0.8,  reload:1.5, dmg:2.6,  armor:[120,90,60], pen:190, rank:4, rp:2000, prereq:'heavy',   price:5500 },
   // Rank 5
-  { id:'t80',     name:'T-80U',       icon:'🇷🇺', scale:1.1,  hp:2.4,  speed:1.2,  turn:1.1,  turret:1.3,  reload:0.9, dmg:2.5,  rank:5, rp:3000, prereq:'is2',     price:8800 },
-  { id:'assault', name:'鼠式',        icon:'🇩🇪', scale:1.3,  hp:2.6,  speed:0.6,  turn:0.6,  turret:0.85, reload:1.6, dmg:3.4,  rank:5, rp:3200, prereq:'is2',     price:9500 },
-  { id:'m1a2',    name:'M1A2 艾布拉姆斯', icon:'🇺🇸', scale:1.4,  hp:3.5, speed:1.9, turn:2.0, turret:2.0,  reload:0.5, dmg:3.6, rank:6, rp:6000, prereq:'is2', price:20000 }, // 满级终极坦克：每一项都拉到全场最高
-  { id:'aa',      name:'ZSU-23-4 石勒喀河', icon:'🇷🇺', scale:0.85, hp:0.7, speed:1.2, turn:1.5, turret:2.0, reload:0.1, dmg:0.4, rank:2, rp:400, prereq:'medium', price:1500 }, // 防空坦克：高仰角速射打飞机
+  { id:'t80',     name:'T-80U',       icon:'🇷🇺', scale:1.1,  hp:2.4,  speed:1.2,  turn:1.1,  turret:1.3,  reload:0.9, dmg:2.5,  armor:[200,120,70], pen:450, rank:5, rp:3000, prereq:'is2',     price:8800 },
+  { id:'assault', name:'鼠式',        icon:'🇩🇪', scale:1.3,  hp:2.6,  speed:0.6,  turn:0.6,  turret:0.85, reload:1.6, dmg:3.4,  armor:[240,185,160], pen:245, rank:5, rp:3200, prereq:'is2',     price:9500 },
+  { id:'m1a2',    name:'M1A2 艾布拉姆斯', icon:'🇺🇸', scale:1.4,  hp:3.5, speed:1.9, turn:2.0, turret:2.0,  reload:0.5, dmg:3.6, armor:[380,150,90], pen:600, rank:6, rp:6000, prereq:'is2', price:20000 }, // 满级终极坦克：每一项都拉到全场最高
+  { id:'aa',      name:'ZSU-23-4 石勒喀河', icon:'🇷🇺', scale:0.85, hp:0.7, speed:1.2, turn:1.5, turret:2.0, reload:0.1, dmg:0.4, armor:[15,15,15], pen:20, rank:2, rp:400, prereq:'medium', price:1500 }, // 防空坦克：高仰角速射打飞机
 ];
+// —— 弹种 ——（战争雷霆式：1/2/3 切换，中文名）
+// penMul:穿深倍率(乘载具 pen)；dmgMul:后效倍率(乘 shellDamage)；bounceDeg:跳弹角(入射角超过即跳)。
+// 榴弹不跳弹(0=禁用)，未击穿仍溅射 25% 伤害（打薄皮好用）。
+const SHELLS = [
+  { id:'ap',   name:'穿甲榴弹',   penMul:1.0,  dmgMul:1.0,  bounceDeg: 70 },
+  { id:'apcr', name:'硬芯穿甲弹', penMul:1.45, dmgMul:0.55, bounceDeg: 62 },
+  { id:'he',   name:'榴弹',       penMul:0.35, dmgMul:1.8,  bounceDeg: 0, noBounce: true },
+];
+function shellById(id) { return SHELLS.find((s) => s.id === id) || SHELLS[0]; }
+
 function tankTypeById(id) { return TANK_TYPES.find((t) => t.id === id) || TANK_TYPES[0]; }
 function randomTankType() { return TANK_TYPES[Math.floor(Math.random() * TANK_TYPES.length)]; }
 
@@ -406,14 +416,30 @@ class HUD {
       `<span style="color:${col(mods.engine)};margin-left:8px">⚙️发动机 ${label(mods.engine)}</span>`;
   }
 
-  // 命中反馈：在准星处闪一个标记。hit=命中(金)，crit=致命(橙)，kill=击毁(红)。
+  // 命中反馈：在准星处闪一个标记。hit=击穿(金)，crit=致命(橙)，kill=击毁(红)，
+  // nopen=未击穿(灰蓝)，bounce=跳弹(白)。
   flashHit(kind = 'hit') {
     if (!this.hitmarker) return;
     this.hitmarker.classList.toggle('kill', kind === 'kill');
     this.hitmarker.classList.toggle('crit', kind === 'crit');
+    this.hitmarker.classList.toggle('nopen', kind === 'nopen');
+    this.hitmarker.classList.toggle('bounce', kind === 'bounce');
     this.hitmarker.style.opacity = '1';
     clearTimeout(this._hitTO);
     this._hitTO = setTimeout(() => { this.hitmarker.style.opacity = '0'; }, 180);
+  }
+
+  // 弹种显示（坦克）：当前弹名+1/2/3 切换指示，挂 HUD 左下。
+  setShell(shell, pen) {
+    if (!this._shellEl) {
+      const el = document.createElement('div');
+      // 放右下角：不挡左下 stats（血量/装填/计分）和小地图区域，紧凑单行
+      el.style.cssText = 'position:absolute;bottom:14px;right:178px;font:13px/1.4 sans-serif;color:#ddd;text-shadow:0 1px 2px #000;background:rgba(0,0,0,.4);padding:4px 10px;border-radius:8px;pointer-events:none;white-space:nowrap;';
+      this.container.appendChild(el);
+      this._shellEl = el;
+    }
+    this._shellEl.innerHTML = `${shell.icon}${shell.name} <span style="color:#9fd0ff">${Math.round(pen)}mm</span>` +
+      `<span style="color:#888;font-size:11px"> (1/2/3切换)</span>`;
   }
 
   // 受击方向指示：屏幕边缘按方位角闪红色弧形提示（angle=入射相对玩家朝向的角，0=正前）。
@@ -868,10 +894,10 @@ class EntityManager {
         if (t.position.distanceToSquared(p.mesh.position) <= r * r) {
           const wasAlive = t.alive;
           t._lastAttacker = p.owner; // 记录击杀归属
-          t.onHit(p.damage);
+          const verdict = t.onHit(p.damage, p);   // p 传入供装甲判定（穿深/弹种/发射者方位）
           p.alive = false;
           this.addEffect(new Explosion(p.mesh.position.clone(), t.radius ? t.radius * 0.6 : 1, 0xffa040));
-          hits.push({ owner: p.owner, target: t, killed: wasAlive && !t.alive, crit: t.lastCrit });
+          hits.push({ owner: p.owner, target: t, killed: wasAlive && !t.alive, crit: t.lastCrit, verdict });
           break;
         }
       }
@@ -967,6 +993,10 @@ class Tank {
     this.turnSpeed = CONFIG.tank.turnSpeed * tt.turn;
     if (!isEnemy && type === 'aa') { this.turretSpeed *= 2.5; this.reloadTime *= 0.3; this.maxSpeed *= 1.8; this.turnSpeed *= 1.5; }   // 玩家防空炮：炮塔更快+射速更快+跑得更快+转向更快（buff 须在赋值之后，否则 *= 被下方赋值覆盖失效）
     this.fireSpread = isEnemy ? CONFIG.tank.enemySpread : (side === 'ally' ? CONFIG.tank.allySpread : 0);
+    // 装甲/穿深（战争雷霆式：armor[前,侧,后]mm，pen 穿深 mm；老型号无则退化弱值，行为兜底）
+    this.armor = tt.armor || [30, 20, 15];
+    this.pen = tt.pen || 60;
+    this.shellKind = 'ap';   // 当前弹种（玩家 1/2/3 切换；AI 用默认穿甲榴弹）
 
     this._build();
   }
@@ -1226,12 +1256,14 @@ class Tank {
     if (!this.canFire()) return false;
     const muzzleWorld = this.getMuzzleWorld();
     const dir = this._spread(this.getBarrelDir(), this.fireSpread);
+    const sh = shellById(this.shellKind);   // 弹种参数随弹丸下发
     em.addProjectile(new Projectile({
       position: muzzleWorld, direction: dir,
-      speed: CONFIG.tank.shellSpeed, damage: this.shellDamage,
+      speed: CONFIG.tank.shellSpeed, damage: this.shellDamage * sh.dmgMul,
       owner: this, ownerTeam: this.team,
       gravity: CONFIG.tank.shellGravity, life: CONFIG.tank.shellLife,
       color: this.team === 'blue' ? 0xffe08a : 0xff7755, size: 0.45,
+      pen: this.pen * sh.penMul, shellDef: sh,
     }));
     em.addEffect(new MuzzleFlash(muzzleWorld));
     this.reloadTimer = this.reloadTime;
@@ -1251,14 +1283,50 @@ class Tank {
     return true;
   }
 
-  // 战争雷霆式命中：弹药殉爆（秒杀）/起火/模块损坏，否则普通扣血。
-  onHit(damage) {
-    if (!this.alive) return;
+  // 战争雷霆式命中：穿深判定 → 跳弹/未击穿/击穿；击穿后弹药殉爆/起火/模块损坏。
+  // projectile 参数由 EntityManager.checkCollisions 传入（含 pen 穿深与弹种定义）。
+  // 返回 'bounce' | 'nopen' | 'pen'，供击杀反馈区分（跳弹叮/未击穿闷响）。
+  onHit(damage, projectile) {
+    if (!this.alive) return 'pen';
+    // —— 装甲判定（仅带穿深的炮弹走；机枪弹/炸弹冲击波直接进伤害）——
+    let mult = 1;
+    if (projectile && projectile.pen) {
+      const sh = projectile.shellDef || shellById('ap');
+      // 命中方位：来弹水平方向相对车体朝向的夹角 → 前甲/侧甲/后甲分区
+      const shooter = projectile.owner;
+      if (shooter && shooter.position) {
+        const dx = shooter.position.x - this.group.position.x;
+        const dz = shooter.position.z - this.group.position.z;
+        const rel = Math.atan2(dx, dz) - this.heading;   // 0=正前
+        const a = Math.abs(Math.atan2(Math.sin(rel), Math.cos(rel)));
+        // 0..π：前 60°→前甲；60..120°→侧甲；120..π→后甲（斜穿法线增量并入入射角）
+        const plate = a < Math.PI / 3 ? this.armor[0] : (a < 2 * Math.PI / 3 ? this.armor[1] : this.armor[2]);
+        // 入射角：来弹方位与装甲法线的水平夹角（近似：侧甲/后甲垂直面直接用方位角偏移）
+        let incidence = a < Math.PI / 3 ? a : Math.abs(a - Math.PI / 2) * (a < 2 * Math.PI / 3 ? 1 : 0); // 侧甲以接近法线入射为主
+        if (a >= 2 * Math.PI / 3) incidence = Math.abs(a - Math.PI);  // 后甲
+        const incDeg = Math.min(80, incidence * 180 / Math.PI);
+        // 跳弹：入射角超过弹种跳弹角（榴弹 noBounce 不跳）
+        if (!sh.noBounce && incDeg > sh.bounceDeg) {
+          this.lastCrit = null;
+          return 'bounce';
+        }
+        // 等效装甲 = 厚度 / cos(入射角)（80° 封顶防除零，最坏 ×5.7）
+        const eff = plate / Math.max(0.18, Math.cos(incDeg * Math.PI / 180));
+        if (projectile.pen < eff) {
+          // 未击穿：榴弹溅射 25%，其他弹种只留弹坑
+          if (sh.noBounce) { this.takeDamage(damage * 0.25); }
+          this.lastCrit = null;
+          return 'nopen';
+        }
+        // 击穿：穿深富余越多后效越足（≤1.3 倍封顶）
+        mult = 1 + Math.min(0.3, (projectile.pen / eff - 1) * 0.3);
+      }
+    }
     const r = Math.random();
     const c = CONFIG.rules.crit;
     if (r < c.tankInstant) { this.lastCrit = '弹药殉爆'; this.takeDamage(this.health); }
     else {
-      this.takeDamage(damage);
+      this.takeDamage(damage * mult);
       if (r < c.tankFire) { this.burning = true; this.lastCrit = '起火'; }
       else {
         // 模块损伤：履带/炮管/发动机，命中即损坏、若干秒后自动修复
@@ -1269,6 +1337,7 @@ class Tank {
         else this.lastCrit = null;
       }
     }
+    return 'pen';
   }
 
   takeDamage(d) {
@@ -2235,6 +2304,9 @@ class Sfx {
     this._blip(200, 60, 0.22, 0.5, 'sine');
     this._blip(90, 70, 0.14, 0.25, 'triangle');
   }
+  // 跳弹：金属"叮"（高频快衰减）。未击穿：闷"咚"（中低频短促）。
+  bounce() { this._blip(2400, 1200, 0.09, 0.3, 'square'); }
+  nopen() { this._blip(160, 110, 0.1, 0.35, 'sine'); }
   ui() { this._blip(520, 520, 0.05, 0.18, 'square'); }
   startEngine() {
     this._ensure(); if (!this.ctx || this.engine) return;
@@ -2355,7 +2427,7 @@ class Game {
 
   _setupHint() {
     if (this.mode === 'tank') {
-      this.hud.setHint('<b>点击画面锁定鼠标</b>（炮塔可无限转，Esc 暂停）· <b>WASD</b> 车体 · <b>左键</b>主炮 · <b>空格</b>机枪 · <b>Shift</b>瞄准镜 · <b>R</b>修车 · <b>F</b>灭火');
+      this.hud.setHint('<b>点击画面锁定鼠标</b>（炮塔可无限转，Esc 暂停）· <b>WASD</b> 车体 · <b>左键</b>主炮 · <b>1/2/3</b>切弹种 · <b>空格</b>机枪 · <b>Shift</b>瞄准镜 · <b>R</b>修车 · <b>F</b>灭火');
     } else {
       this.hud.setHint('<b>点击画面锁定鼠标</b>（指哪飞哪，自动改平，Esc 暂停）· <b>W/S</b>油门 · <b>Shift</b>加力 · <b>左键</b>开火 · <b>右键/X</b>导弹(喷气机) · <b>F</b>灭火');
     }
@@ -2449,6 +2521,7 @@ class Game {
     const base = this._playerBasePos();
     if (this.mode === 'tank') {
       this.player = new Tank({ side: 'player', color: 0x4f7a3a, type: this.tankType });
+      if (this._shellPref) this.player.shellKind = this._shellPref;   // 弹种偏好跨重生保留
       this.player.group.position.copy(base);
       this.player.heading = 0;
       this.em.addTank(this.player);
@@ -2587,6 +2660,16 @@ class Game {
     if (inp.mouseDown) t.tryFire(this.em);
     if (inp.isDown('Space')) t.tryFireMG(this.em);
     if (this._consumePress(inp, 'KeyF')) this._extinguish(t);
+    // 弹种切换（1/2/3）：偏好存 this._shellPref，跨重生/换车保留
+    for (let i = 0; i < SHELLS.length; i++) {
+      if (this._consumePress(inp, 'Digit' + (i + 1))) {
+        this._shellPref = SHELLS[i].id;
+        t.shellKind = SHELLS[i].id;
+        this.hud.addFeed(`已切换：${SHELLS[i].icon} ${SHELLS[i].name}`, 'info');
+        this.sfx.ui();
+      }
+    }
+    this.hud.setShell(shellById(t.shellKind), t.pen * shellById(t.shellKind).penMul);
     this.gunnerView = inp.isDown('ShiftLeft') || inp.isDown('ShiftRight');
   }
 
@@ -2825,8 +2908,19 @@ class Game {
       const hits = this.em.checkCollisions(targets);
       for (const h of hits) {
         if (h.owner === this.player) {
-          this.hud.flashHit(h.killed ? 'kill' : (h.crit ? 'crit' : 'hit'));
-          if (h.killed) this.sfx.kill(); else this.sfx.hit();
+          // 命中反馈按判定结果分级：击毁(红)/致命(橙)/击穿(金)/未击穿(灰蓝)/跳弹(白闪)
+          if (h.verdict === 'bounce') {
+            this.hud.flashHit('bounce'); this.sfx.bounce();
+            this.hud.addFeed('⤺ 跳弹', 'death');   // 明确文字提示：装甲弹开
+          }
+          else if (h.verdict === 'nopen' && !h.killed) {
+            this.hud.flashHit('nopen'); this.sfx.nopen();
+            this.hud.addFeed('✋ 未击穿', 'death');
+          }
+          else {
+            this.hud.flashHit(h.killed ? 'kill' : (h.crit ? 'crit' : 'hit'));
+            if (h.killed) this.sfx.kill(); else this.sfx.hit();
+          }
         } else if (h.target === this.player && this.player && this.player.alive) {
           // 被击中：低沉闷响 + 屏幕边缘受击方向红弧（与"打中敌人"的清脆音区分，紧张感）
           this.sfx.hitTaken();
