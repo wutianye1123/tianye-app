@@ -3,6 +3,7 @@ import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTe
 
 // 坦克贴地姿态用的临时对象（避免每帧分配）
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
+const _kcTmp = new THREE.Vector3();   // X 光回放相机插值临时量（免每帧 new）
 const _tankM = new THREE.Matrix4(), _tankY = new THREE.Vector3(0, 1, 0);
 const _tankQ = new THREE.Quaternion(), _tankWQ = new THREE.Quaternion();
 
@@ -894,10 +895,11 @@ class EntityManager {
         if (t.position.distanceToSquared(p.mesh.position) <= r * r) {
           const wasAlive = t.alive;
           t._lastAttacker = p.owner; // 记录击杀归属
-          const verdict = t.onHit(p.damage, p);   // p 传入供装甲判定（穿深/弹种/发射者方位）
+          const verdict = t.onHit(p.damage, p);   // p 传入供装甲判定（穿深/弹种/发射者/发射者方位）
+          const hitPoint = p.mesh.position.clone();   // X 光回放用：弹着点（爆炸/移除前留住）
           p.alive = false;
-          this.addEffect(new Explosion(p.mesh.position.clone(), t.radius ? t.radius * 0.6 : 1, 0xffa040));
-          hits.push({ owner: p.owner, target: t, killed: wasAlive && !t.alive, crit: t.lastCrit, verdict });
+          this.addEffect(new Explosion(hitPoint, t.radius ? t.radius * 0.6 : 1, 0xffa040));
+          hits.push({ owner: p.owner, target: t, killed: wasAlive && !t.alive, crit: t.lastCrit, verdict, hitPoint });
           break;
         }
       }
@@ -906,11 +908,15 @@ class EntityManager {
   }
 
   // 从场景与列表中移除已死亡载具，返回本次移除的列表（供 Game 计分 / 判定）。
-  cullDead() {
+  // hold：X 光回放期间要保留展示的受害车（回放结束后下一帧再移除）。
+  cullDead(hold = null) {
     const removed = [];
     const _dispose = (g) => { g.traverse((c) => { if (c.geometry) c.geometry.dispose(); if (c.material) { Array.isArray(c.material) ? c.material.forEach((m) => m.dispose()) : c.material.dispose(); } }); };
     this.tanks = this.tanks.filter((t) => {
-      if (!t.alive) { _dispose(t.group); this.scene.remove(t.group); removed.push(t); return false; }
+      if (!t.alive) {
+        if (t === hold) return true;   // 保留：X 光回放正在展示这辆车
+        _dispose(t.group); this.scene.remove(t.group); removed.push(t); return false;
+      }
       return true;
     });
     this.planes = this.planes.filter((p) => {
@@ -2381,6 +2387,7 @@ class Game {
     this._onEscKey = (e) => {
       if (e.code !== 'Escape' || e.repeat) return;
       if (this.state !== 'playing' || this._disposed || this._wwPick) return;
+      if (this._killcam) return;   // 回放中 Esc 只当"跳过"（_updateKillcam 处理），别顺手暂停
       this._togglePause();
     };
     window.addEventListener('keydown', this._onEscKey);
@@ -2858,6 +2865,14 @@ class Game {
     }
 
     if (this.state === 'playing') {
+      // X 光击杀回放：慢动作 0.25×，只更新特效/AI/弹丸（低速），玩家输入暂停、相机被回放接管
+      const simDt = this._killcam ? dt * 0.25 : dt;
+      if (this._killcam) {
+        this.em.update(simDt);
+        this._updateKillcam(dt);   // 相机用真实 dt（环绕速度不受慢动作影响）
+        this.renderer.render(this.scene, this.camera);
+        return;
+      }
       // 世界大战：死后选载具面板
       if (this._wwPick) {
         if (!this._wwPanel) this._showWWPanel();
@@ -2921,6 +2936,11 @@ class Game {
             this.hud.flashHit(h.killed ? 'kill' : (h.crit ? 'crit' : 'hit'));
             if (h.killed) this.sfx.kill(); else this.sfx.hit();
           }
+          // X 光击杀回放：玩家击毁【坦克】时触发（飞机击毁不做，保持空战节奏）。
+          // 需要 verdict=pen（击穿击杀才有弹道穿透可看；殉爆秒杀也归入击穿类）。
+          if (h.killed && typeof h.target.forwardVector !== 'function' && h.verdict !== 'bounce' && h.verdict !== 'nopen') {
+            this._startKillcam(h.target, h.hitPoint);
+          }
         } else if (h.target === this.player && this.player && this.player.alive) {
           // 被击中：低沉闷响 + 屏幕边缘受击方向红弧（与"打中敌人"的清脆音区分，紧张感）
           this.sfx.hitTaken();
@@ -2936,7 +2956,7 @@ class Game {
         }
       }
 
-      const removed = this.em.cullDead();
+      const removed = this.em.cullDead(this._killcam ? this._killcam.victim : null);
       this._handleDeaths(removed);
       this.enemies = this.enemies.filter((e) => e.alive);
       this.allies = this.allies.filter((a) => a.alive);
@@ -3010,6 +3030,93 @@ class Game {
     // CCIP 炸弹落点标记的计算已合并到上方主 try 内（原此处重复了一份 1500 步模拟，每帧白跑一遍，已删）
     this.renderer.render(this.scene, this.camera);
   };
+
+  // —— X 光击杀回放 ——
+  // 玩家击毁敌坦克：2.2s 慢动作(0.25×)，镜头绕命中点环绕，车体半透明露出内部模块，
+  // 画弹道穿入线。任意开火/移动键跳过（连杀时别拖节奏）。
+  _startKillcam(tank, hitPoint) {
+    if (this._killcam) return;   // 已在回放中不重入（连杀只回放第一辆）
+    this._killcam = {
+      t: 0, dur: 2.2,
+      victim: tank, hitPoint: hitPoint ? hitPoint.clone() : tank.position.clone(),
+      group: new THREE.Group(),
+    };
+    const kc = this._killcam;
+    kc.group.position.copy(tank.position);   // 模块组挂在受害者位置（局部坐标即车体坐标）
+    const mk = (x, y, z, sx, sy, sz, color) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85 }));
+      m.position.set(x, y, z); kc.group.add(m); return m;
+    };
+    mk(0, 1.0, -1.8, 1.6, 1.0, 1.6, 0x44cc66);    // 乘员舱（绿）
+    mk(0, 1.2, 0.9, 1.6, 1.0, 1.2, 0xffcc33);     // 弹药架（黄）
+    mk(0, 1.1, 2.6, 1.8, 1.0, 1.4, 0xff8833);     // 发动机（橙）
+    mk(-1.0, 0.9, 0.2, 0.5, 0.7, 1.0, 0xff4444);  // 油箱（红）
+    // —— 弹道穿入线 + 弹着点亮球 ——
+    const shooter = this.player;
+    if (shooter && shooter.position) {
+      const dir = kc.hitPoint.clone().sub(shooter.position).setY(0).normalize();
+      const lineGeo = new THREE.BufferGeometry().setFromPoints([
+        kc.hitPoint.clone(),
+        kc.hitPoint.clone().addScaledVector(dir, -(tank.radius || 3) * 1.6),
+      ]);
+      kc.group.add(new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0xffee88 })));
+      const pt = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffee88 }));
+      pt.position.copy(kc.hitPoint).sub(tank.position);
+      kc.group.add(pt);
+    }
+    this.scene.add(kc.group);
+    // —— 受害车半透明（爆炸粒子等 BasicMaterial 不受影响，只动载具件）——
+    tank.group.traverse((c) => {
+      if (c.material) {
+        if (!c.userData._kcOrig) c.userData._kcOrig = { transparent: c.material.transparent, opacity: c.material.opacity ?? 1 };
+        c.material.transparent = true;
+        c.material.opacity = 0.25;
+      }
+    });
+    this._snapCam = true;
+    this.hud.setHint('💀 X 光击杀回放 · 任意键跳过');
+  }
+  _updateKillcam(dt) {
+    const kc = this._killcam;
+    if (!kc) return;
+    kc.t += dt;
+    const p = Math.min(1, kc.t / kc.dur);
+    // 环绕相机：弹着点侧方 13→11m，绕 ~60°，弧线抬升后回落
+    const pos = kc.victim.position;
+    const a0 = Math.atan2(kc.hitPoint.x - pos.x, kc.hitPoint.z - pos.z);
+    const ang = a0 + 0.9 + p * 1.05;
+    const dist = 13 - p * 2;
+    const cx = pos.x + Math.sin(ang) * dist;
+    const cz = pos.z + Math.cos(ang) * dist;
+    const cy = pos.y + 5 + Math.sin(p * Math.PI) * 2;
+    if (this._snapCam) { this.camera.position.set(cx, cy, cz); this._snapCam = false; }
+    else this.camera.position.lerp(_kcTmp.set(cx, cy, cz), Math.min(1, 6 * dt));
+    this.camera.lookAt(kc.hitPoint.x, kc.hitPoint.y + 1, kc.hitPoint.z);
+    this._setFov(50 - p * 8, dt);
+    // 任意操作跳过（开火/WASD/空格/Esc——玩家急着干活就别拦）
+    const inp = this.input;
+    if (inp && (inp.mouseDown || inp.isDown('KeyW') || inp.isDown('KeyS') || inp.isDown('KeyA') || inp.isDown('KeyD') || inp.isDown('Space') || inp.isDown('Escape'))) {
+      kc.t = kc.dur;
+    }
+    if (kc.t >= kc.dur) this._endKillcam();
+  }
+  _endKillcam() {
+    const kc = this._killcam;
+    if (!kc) return;
+    // 还原受害车材质（车可能已被 cullDead 移除，traverse 空组安全）
+    kc.victim.group.traverse((c) => {
+      if (c.material && c.userData._kcOrig) {
+        c.material.transparent = c.userData._kcOrig.transparent;
+        c.material.opacity = c.userData._kcOrig.opacity;
+        delete c.userData._kcOrig;
+      }
+    });
+    kc.group.traverse((c) => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+    this.scene.remove(kc.group);
+    this._killcam = null;
+    this._snapCam = true;   // 回玩家相机：立即贴合，别从回放位慢慢飞回来
+    this._setupHint();
+  }
 
   // —— 暂停 ——
   _togglePause() {
@@ -3339,6 +3446,7 @@ class Game {
     this._wwPick = false;
     this.paused = false;
     this._hidePauseOverlay();
+    this._endKillcam();   // 回放中重开：清掉回放组/还原材质（车已随 em.clear 移除，安全）
     this._setupHint();
     this._initMatch(mode);
   }
@@ -3354,6 +3462,7 @@ class Game {
     this._disposed = true;
     cancelAnimationFrame(this._raf);
     clearTimeout(this._relockTO);
+    this._endKillcam();   // 清理 X 光回放组与半透明材质还原
     window.removeEventListener('resize', this._onResize);
     if (this._onDocClickPL) document.removeEventListener('click', this._onDocClickPL);
     if (this._onEscKey) window.removeEventListener('keydown', this._onEscKey);
