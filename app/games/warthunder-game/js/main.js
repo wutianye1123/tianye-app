@@ -3091,65 +3091,78 @@ class Game {
     const sc = this._shellcam;
     if (!sc) return;
     sc.t += dt;
-    const speedup = sc.realT / sc.replayFly;   // 回放1.6s = 真实 realT 秒 → 慢放
+    const speedup = sc.realT / sc.replayFly;
+    // 末速方向（穿入/爆炸共用一份，阶段切换不跳变）
+    if (!sc.dirEnd) {
+      const vEnd = sc.v0.clone(); vEnd.y -= sc.g * sc.realT;
+      sc.dirEnd = vEnd.normalize();
+      sc.vpos = sc.hit.clone().addScaledVector(sc.dirEnd, -2.5);   // 车中心≈弹着点沿末速回退
+      sc.a0 = Math.atan2(sc.hit.x - sc.vpos.x, sc.hit.z - sc.vpos.z);
+    }
     if (sc.t < sc.replayFly) {
-      // 阶段①：按物理公式复现弹道位置 p(t) = p0 + v0·t + ½g·t²（t=回放时间×慢放倍率）
+      // 阶段①：真实弹道慢放 p(t)=p0+v0t+½gt²；相机弹道侧方跟拍
       const tt = sc.t * speedup;
       sc.bullet.position.copy(sc.p0)
         .addScaledVector(sc.v0, tt)
         .add(new THREE.Vector3(0, -0.5 * sc.g * tt * tt, 0));
       const vNow = sc.v0.clone(); vNow.y -= sc.g * tt;
       const dir = vNow.normalize();
-      // 相机：弹道侧方跟拍
       const side = new THREE.Vector3(-dir.z, 0, dir.x).normalize();
       sc.cam.position.copy(sc.bullet.position).addScaledVector(dir, -5).addScaledVector(side, 3.5).add(new THREE.Vector3(0, 1.6, 0));
       sc.cam.lookAt(sc.bullet.position.x + dir.x * 12, sc.bullet.position.y + dir.y * 12, sc.bullet.position.z + dir.z * 12);
     } else if (sc.t < sc.replayFly + sc.replayIn) {
-      // 阶段②：穿入段——先撞击停滞0.15s(命中装甲的顿挫感)再急剧减速挤入。
-      // easeOutCubic：入口快、车内越来越慢，像炮弹挤压装甲/内部结构逐层受阻，符合现实穿甲节奏。
-      const IN_STALL = 0.15;
-      const tt = sc.realT;
-      const vEnd = sc.v0.clone(); vEnd.y -= sc.g * tt; const dir = vEnd.normalize();
-      let p = 0;   // 穿入总进度(0..1，含停滞段)，爆炸触发判定用
+      // 阶段②：撞击停滞0.12s→急剧减速挤入(先快后慢easeOutCubic)→停死在车内3.5m处
+      const IN_STALL = 0.12;
+      const dir = sc.dirEnd;
+      const IN_DIST = 3.5;
+      let p;
       if (sc.t < sc.replayFly + IN_STALL) {
-        // 撞击瞬间：弹停在弹着点（穿甲弹在装甲表面碎裂/挤压的一瞬）
+        p = 0;
         sc.bullet.position.copy(sc.hit).addScaledVector(dir, 0.3);
-        if (!sc._stallSfx) { sc._stallSfx = true; if (this.sfx) this.sfx.bounce(); }   // 撞击"叮"
+        if (!sc._stallSfx) { sc._stallSfx = true; if (this.sfx) this.sfx.bounce(); }
       } else {
         p = Math.min(1, (sc.t - sc.replayFly - IN_STALL) / (sc.replayIn - IN_STALL));
-        const ease = 1 - Math.pow(1 - p, 3);   // 先快后慢：穿甲挤压感
-        sc.bullet.position.copy(sc.hit).addScaledVector(dir, 0.3 + ease * 3.2);
-        // 击穿才亮内部模块（进入穿入即透视）
-        const mg = sc.group.children[1];
-        if (mg && sc.verdict !== 'bounce' && sc.verdict !== 'nopen') mg.visible = true;
+        const ease = 1 - Math.pow(1 - p, 3);
+        sc.bullet.position.copy(sc.hit).addScaledVector(dir, 0.3 + ease * IN_DIST);
       }
-      const vpos = sc.hit.clone().addScaledVector(dir, -2.5);   // 车中心≈弹着点往回2.5m
-      const a0 = Math.atan2(sc.hit.x - vpos.x, sc.hit.z - vpos.z);
-      const ang = a0 + 1.0;
-      sc.cam.position.set(vpos.x + Math.sin(ang) * 9, vpos.y + 4, vpos.z + Math.cos(ang) * 9);
-      sc.cam.lookAt(vpos.x, vpos.y + 1.2, vpos.z);
-      if (p >= 1) {
-        // 穿入结束 → 内部爆炸（层1 专用爆炸：临时 Explosion 不可控层级，改用内置火球）
-        if (!sc.boom) {
-          sc.boom = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 12), new THREE.MeshBasicMaterial({ color: sc.killed ? 0xffaa33 : 0xff8040, transparent: true, opacity: 0.95 }));
-          sc.boom.position.copy(sc.hit).addScaledVector(dir, 2.5);
-          sc.boom.layers.set(1);
-          sc.group.add(sc.boom);
-        }
+      // 击穿进入穿入段即开透视（内部模块可见）
+      const mg = sc.group.children[1];
+      if (mg && sc.verdict !== 'bounce' && sc.verdict !== 'nopen') mg.visible = true;
+      // 相机平滑从跟拍位滑到车侧特写位（0.3s lerp，不硬切）
+      const target = _kcTmp.set(
+        sc.vpos.x + Math.sin(sc.a0 + 1.0) * 9, sc.vpos.y + 4, sc.vpos.z + Math.cos(sc.a0 + 1.0) * 9);
+      if (!sc._camLerp) sc._camLerp = 0;
+      sc._camLerp = Math.min(1, sc._camLerp + dt * 3.3);
+      sc.cam.position.lerp(target, sc._camLerp);
+      sc.cam.lookAt(sc.vpos.x, sc.vpos.y + 1.2, sc.vpos.z);
+      // 穿入到底 → 立即在【弹丸停止位置】起爆（衔接点=弹丸终点，无缝）
+      if (p >= 1 && !sc.boom) {
+        sc.boom = new THREE.Mesh(new THREE.SphereGeometry(1.2, 14, 14), new THREE.MeshBasicMaterial({ color: sc.killed ? 0xffcc55 : 0xff8040, transparent: true, opacity: 1 }));
+        sc.boom.position.copy(sc.bullet.position);   // 火球就在弹丸停住的地方（车内）
+        sc.boom.layers.set(1);
+        sc.group.add(sc.boom);
+        sc.bullet.visible = false;
+        if (this.sfx) this.sfx.explosion(sc.bullet.position);   // 爆炸声
       }
     } else if (sc.t < sc.replayFly + sc.replayIn + sc.replayBoom) {
-      // 阶段③：内部爆炸膨胀+镜头环绕拉远
+      // 阶段③：火球从弹丸终点膨胀(快速冲开→渐熄)+冲顶殉爆柱+镜头环绕拉远
       const p = (sc.t - sc.replayFly - sc.replayIn) / sc.replayBoom;
-      if (sc.boom) { sc.boom.scale.setScalar(1 + p * 5); sc.boom.material.opacity = Math.max(0, 0.95 * (1 - p)); }
-      sc.bullet.visible = false;
-      const tt = sc.realT;
-      const vEnd = sc.v0.clone(); vEnd.y -= sc.g * tt; const dir = vEnd.normalize();
-      const vpos = sc.hit.clone().addScaledVector(dir, -2.5);
-      const a0 = Math.atan2(sc.hit.x - vpos.x, sc.hit.z - vpos.z);
-      const ang = a0 + 1.0 + p * 0.9;
+      if (sc.boom) {
+        const s = 0.5 + Math.pow(Math.min(1, p * 1.8), 0.5) * (sc.killed ? 6 : 3);   // 前30%快速膨胀
+        sc.boom.scale.setScalar(s);
+        sc.boom.material.opacity = Math.max(0, 1 - p * 1.15);
+      }
+      if (sc.killed && !sc.jet && p > 0.15) {   // 殉爆：火从炮塔冲顶而出
+        sc.jet = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 1.0, 8, 10), new THREE.MeshBasicMaterial({ color: 0xffaa33, transparent: true, opacity: 0.9 }));
+        sc.jet.position.copy(sc.vpos).add(new THREE.Vector3(0, 5, 0));
+        sc.jet.layers.set(1);
+        sc.group.add(sc.jet);
+      }
+      if (sc.jet) { sc.jet.scale.y = 1 + p * 1.5; sc.jet.material.opacity = Math.max(0, 0.9 * (1 - p)); }
+      const ang = sc.a0 + 1.0 + p * 0.9;
       const d = 9 + p * 6;
-      sc.cam.position.set(vpos.x + Math.sin(ang) * d, vpos.y + 4 + p * 3, vpos.z + Math.cos(ang) * d);
-      sc.cam.lookAt(vpos.x, vpos.y + 1.5, vpos.z);
+      sc.cam.position.set(sc.vpos.x + Math.sin(ang) * d, sc.vpos.y + 4 + p * 3, sc.vpos.z + Math.cos(ang) * d);
+      sc.cam.lookAt(sc.vpos.x, sc.vpos.y + 1.5, sc.vpos.z);
     } else {
       this._endShellcam();
     }
