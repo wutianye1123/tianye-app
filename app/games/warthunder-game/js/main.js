@@ -2914,8 +2914,8 @@ class Game {
       const hits = this.em.checkCollisions(targets);
       for (const h of hits) {
         if (h.owner === this.player) {
-          // 跟拍小窗：这发弹命中了敌人 → 从"跟弹"转"X 光特写"（击中就看，不限击毁）
-          if (this._shellcam && this._shellcam.phase === 'fly' && this._shellcam.proj === h.proj && typeof h.target.forwardVector !== 'function') {
+          // 击杀回放：玩家炮弹命中敌【坦克】即触发右上角慢动作回放（重演出膛→飞行→穿入→内部爆炸）
+          if (h.target && typeof h.target.forwardVector !== 'function') {
             this._startKillReplay(h.target, h.hitPoint, h.killed, h.verdict);
           }
           // 命中反馈按判定结果分级：击毁(红)/致命(橙)/击穿(金)/未击穿(灰蓝)/跳弹(白闪)
