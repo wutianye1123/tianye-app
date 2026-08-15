@@ -3046,30 +3046,37 @@ class Game {
       group: new THREE.Group(),   // 层1 容器：克隆车+模块+重演弹丸
     };
     if (!sc.p0 || !sc.v0) return;   // 没快照就没法重演（不该发生）
-    // 真实飞行时长：从出膛到命中的弹道时间（解一次标量方程太繁，直接仿真累积到接近命中点）
-    let T = 0; const steps = 240; const h = 0.016;
-    { const v = sc.v0.clone(); const p = sc.p0.clone();
-      for (let i = 0; i < steps; i++) { v.y -= sc.g * h; p.addScaledVector(v, h); T += h;
-        if (p.distanceTo(sc.hit) < 3) break; } }
-    sc.realT = Math.max(0.3, T);
+    // 真实飞行时长=解析解：相对位移 d(t)=p0-p_hit+v0·t+½g·t²，|d|² 最小的 t*（二次函数极值，精确到弹着点）
+    const d0 = sc.p0.clone().sub(sc.hit);   // p0-hit
+    const a2 = sc.v0.lengthSq() - sc.g * sc.v0.y;      // t² 系数: |v0|² - g·v0y
+    const b2 = 2 * (d0.dot(sc.v0) + 0.5 * sc.g * d0.y); // 系数: 2(d0·v0 + ½g·d0y)... 展开后
+    // |d(t)|² = |v0-ĝ偏|… 直接数值安全解：t* = -b/(2a)（a>0 抛物线开口向上）
+    let T = 0.8;
+    if (Math.abs(a2) > 1e-6) {
+      const tStar = -b2 / (2 * a2);
+      if (tStar > 0.05 && tStar < 4) T = tStar;
+    }
+    sc.realT = T;
     // —— 克隆受害车（视觉快照；真车正常销毁，互不干扰）——
     const clone = tank.group.clone(true);
     clone.traverse((c) => {
-      c.traverse && c.traverse(() => {});
-      if (c.material) { c.material = c.material.clone(); c.material.transparent = true; c.material.opacity = 0.35; }
+      if (c.material) { c.material = c.material.clone(); c.material.transparent = true; c.material.opacity = 0.18; c.material.depthWrite = false; }
       c.castShadow = false; c.receiveShadow = false;
     });
     sc.group.add(clone);
-    // —— 内部模块 ——
+    // —— 内部模块（挂在以坦克位置为原点的子组，否则模块在地图原点根本看不到）——
+    const modGroup = new THREE.Group();
+    modGroup.position.copy(tank.position);
+    sc.group.add(modGroup);
     const mk = (x, y, z, sx, sy, sz, color) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 }));
-      m.position.set(x, y, z); sc.group.add(m); return m;
+      m.position.set(x, y, z); modGroup.add(m); return m;
     };
     mk(0, 1.0, -1.8, 1.6, 1.0, 1.6, 0x44cc66);     // 乘员舱（绿）
     mk(0, 1.2, 0.9, 1.6, 1.0, 1.2, 0xffcc33);      // 弹药架（黄）
     mk(0, 1.1, 2.6, 1.8, 1.0, 1.4, 0xff8833);      // 发动机（橙）
     mk(-1.0, 0.9, 0.2, 0.5, 0.7, 1.0, 0xff4444);   // 油箱（红）
-    sc.modules = sc.group.children.slice(4);   // 克隆车是第0个，模块1-4
+    modGroup.visible = false;   // 击穿(穿入段)才显示内部；跳弹/未击穿不进车内
     // —— 重演弹丸（亮金弹）——
     sc.bullet = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 10), new THREE.MeshBasicMaterial({ color: 0xffee88 }));
     sc.group.add(sc.bullet);
@@ -3103,14 +3110,18 @@ class Game {
       const IN_STALL = 0.15;
       const tt = sc.realT;
       const vEnd = sc.v0.clone(); vEnd.y -= sc.g * tt; const dir = vEnd.normalize();
+      let p = 0;   // 穿入总进度(0..1，含停滞段)，爆炸触发判定用
       if (sc.t < sc.replayFly + IN_STALL) {
         // 撞击瞬间：弹停在弹着点（穿甲弹在装甲表面碎裂/挤压的一瞬）
         sc.bullet.position.copy(sc.hit).addScaledVector(dir, 0.3);
         if (!sc._stallSfx) { sc._stallSfx = true; if (this.sfx) this.sfx.bounce(); }   // 撞击"叮"
       } else {
-        const p = Math.min(1, (sc.t - sc.replayFly - IN_STALL) / (sc.replayIn - IN_STALL));
+        p = Math.min(1, (sc.t - sc.replayFly - IN_STALL) / (sc.replayIn - IN_STALL));
         const ease = 1 - Math.pow(1 - p, 3);   // 先快后慢：穿甲挤压感
         sc.bullet.position.copy(sc.hit).addScaledVector(dir, 0.3 + ease * 3.2);
+        // 击穿才亮内部模块（进入穿入即透视）
+        const mg = sc.group.children[1];
+        if (mg && sc.verdict !== 'bounce' && sc.verdict !== 'nopen') mg.visible = true;
       }
       const vpos = sc.hit.clone().addScaledVector(dir, -2.5);   // 车中心≈弹着点往回2.5m
       const a0 = Math.atan2(sc.hit.x - vpos.x, sc.hit.z - vpos.z);
