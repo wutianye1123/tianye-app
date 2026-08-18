@@ -3042,7 +3042,7 @@ class Game {
       v0: proj && proj.launchVel ? proj.launchVel.clone() : null,
       g: proj && proj.gravity ? proj.gravity : CONFIG.tank.shellGravity,
       // 时间映射：真实飞行用了 T 秒，回放放 1.6s → 慢放倍率
-      replayFly: 1.6, replayIn: 0.5, replayBoom: 1.6,
+      replayFly: 1.6, replayIn: 0.9, replayBoom: 1.8,
       group: new THREE.Group(),   // 层1 容器：克隆车+模块+重演弹丸
     };
     if (!sc.p0 || !sc.v0) return;   // 没快照就没法重演（不该发生）
@@ -3130,9 +3130,9 @@ class Game {
       if (mg && sc.verdict !== 'bounce' && sc.verdict !== 'nopen') mg.visible = true;
       // 相机平滑从跟拍位滑到车侧特写位（0.3s lerp，不硬切）
       const target = _kcTmp.set(
-        sc.vpos.x + Math.sin(sc.a0 + 1.0) * 9, sc.vpos.y + 4, sc.vpos.z + Math.cos(sc.a0 + 1.0) * 9);
+        sc.vpos.x + Math.sin(sc.a0 + 1.0) * 7.5, sc.vpos.y + 3.5, sc.vpos.z + Math.cos(sc.a0 + 1.0) * 7.5);
       if (!sc._camLerp) sc._camLerp = 0;
-      sc._camLerp = Math.min(1, sc._camLerp + dt * 3.3);
+      sc._camLerp = Math.min(1, sc._camLerp + dt * 1.8);   // 慢滑到位，看清内部
       sc.cam.position.lerp(target, sc._camLerp);
       sc.cam.lookAt(sc.vpos.x, sc.vpos.y + 1.2, sc.vpos.z);
       // 穿入到底 → 立即在【弹丸停止位置】起爆（衔接点=弹丸终点，无缝）
@@ -3159,8 +3159,8 @@ class Game {
         sc.group.add(sc.jet);
       }
       if (sc.jet) { sc.jet.scale.y = 1 + p * 1.5; sc.jet.material.opacity = Math.max(0, 0.9 * (1 - p)); }
-      const ang = sc.a0 + 1.0 + p * 0.9;
-      const d = 9 + p * 6;
+      const ang = sc.a0 + 1.0 + p * 0.45;   // 环绕减半：慢慢看
+      const d = 7.5 + p * 7;
       sc.cam.position.set(sc.vpos.x + Math.sin(ang) * d, sc.vpos.y + 4 + p * 3, sc.vpos.z + Math.cos(ang) * d);
       sc.cam.lookAt(sc.vpos.x, sc.vpos.y + 1.5, sc.vpos.z);
     } else {
