@@ -3,7 +3,9 @@ import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTe
 
 // 坦克贴地姿态用的临时对象（避免每帧分配）
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
-const _kcTmp = new THREE.Vector3();   // X 光回放相机插值临时量（免每帧 new）
+const _kcTmp = new THREE.Vector3();   // X 光回放临时量（免每帧 new）
+const _scLook = new THREE.Vector3();   // 回放相机平滑视线
+const _scSide = new THREE.Vector3();   // 回放弹道侧向
 const _tankM = new THREE.Matrix4(), _tankY = new THREE.Vector3(0, 1, 0);
 const _tankQ = new THREE.Quaternion(), _tankWQ = new THREE.Quaternion();
 
@@ -3045,17 +3047,15 @@ class Game {
       t: 0, cam: new THREE.PerspectiveCamera(55, 1.6, 0.5, 3000),
       killed, verdict,
       hit: hitPoint ? hitPoint.clone() : tank.position.clone(),
-      // 弹道快照：出膛点+初速+重力（真实炮弹物理；无快照则退化为直线）
       p0: proj && proj.launchPos ? proj.launchPos.clone() : null,
       v0: proj && proj.launchVel ? proj.launchVel.clone() : null,
       g: proj && proj.gravity ? proj.gravity : CONFIG.tank.shellGravity,
-      // 时间映射：真实飞行用了 T 秒，回放放 1.6s → 慢放倍率
       replayFly: 1.6, replayIn: 0.9, replayBoom: 1.8,
-      group: new THREE.Group(),   // 层1 容器：克隆车+模块+重演弹丸
+      group: new THREE.Group(),
+      upY: new THREE.Vector3(0, 1, 0),
     };
-    if (!sc.p0 || !sc.v0) return;   // 没快照就没法重演（不该发生）
-    // 真实飞行时长：细步长数值扫描整条抛物线取离弹着点最近的时刻（解析求极值对带重力的
-    // 四次距离曲线不成立，原公式有偏差——弹丸飞过头再瞬移的根源）。dt=8ms 足够准。
+    if (!sc.p0 || !sc.v0) return;
+    // 真实飞行时长：8ms 细步长扫描整条抛物线，取离弹着点最近的时刻（数值稳定）
     {
       const h = 0.008;
       const v = sc.v0.clone(); const p = sc.p0.clone();
@@ -3067,41 +3067,45 @@ class Game {
       }
       sc.realT = Math.max(0.3, bestT);
     }
-    // —— 克隆受害车（视觉快照；真车正常销毁，互不干扰）——
+    // —— 克隆受害车：战雷 X 光观感=半透明车壳+可见内部 ——
     const clone = tank.group.clone(true);
     clone.traverse((c) => {
-      if (c.material) { c.material = c.material.clone(); c.material.transparent = true; c.material.opacity = 0.18; c.material.depthWrite = false; }
+      if (c.material) { c.material = c.material.clone(); c.material.transparent = true; c.material.opacity = 0.26; c.material.depthWrite = false; }
       c.castShadow = false; c.receiveShadow = false;
     });
     sc.group.add(clone);
-    sc.clone = clone;   // 殉爆微抬用
-    // —— 内部模块（挂在以坦克位置为原点的子组，否则模块在地图原点根本看不到）——
+    sc.clone = clone;
+    // —— 内部模块：半透明暗色块 + 亮色描边（工程图感，不再纯色积木）——
     const modGroup = new THREE.Group();
     modGroup.position.copy(tank.position);
-    modGroup.rotation.y = tank.heading;               // 模块坐标跟车头朝向（原来永远朝北）
-    const ms = (tankTypeById(tank.type) || {}).scale || 1;
-    modGroup.scale.setScalar(ms);                     // 按车型体积缩放（II号0.78/鼠式1.3），模块贴合车体
+    modGroup.rotation.y = tank.heading;
+    modGroup.scale.setScalar((tankTypeById(tank.type) || {}).scale || 1);
     sc.group.add(modGroup);
     const mk = (x, y, z, sx, sy, sz, color) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 }));
+      const g = new THREE.BoxGeometry(sx, sy, sz);
+      const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3, depthWrite: false }));
+      m.add(new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 1 })));
       m.position.set(x, y, z); modGroup.add(m); return m;
     };
-    mk(0, 1.0, -1.8, 1.6, 1.0, 1.6, 0x44cc66);     // 乘员舱（绿）
-    mk(0, 1.2, 0.9, 1.6, 1.0, 1.2, 0xffcc33);      // 弹药架（黄）
-    mk(0, 1.1, 2.6, 1.8, 1.0, 1.4, 0xff8833);      // 发动机（橙）
-    mk(-1.0, 0.9, 0.2, 0.5, 0.7, 1.0, 0xff4444);   // 油箱（红）
-    modGroup.visible = false;   // 击穿(穿入段)才显示内部；跳弹/未击穿不进车内
-    // —— 重演弹丸（亮金弹）+ 出膛枪口闪光 ——
-    sc.bullet = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 10), new THREE.MeshBasicMaterial({ color: 0xffee88, transparent: true, opacity: 1 }));
+    mk(0, 1.0, -1.8, 1.6, 1.0, 1.6, 0x7dffb0);     // 乘员舱（绿）
+    mk(0, 1.2, 0.9, 1.6, 1.0, 1.2, 0xffe066);      // 弹药架（黄）
+    mk(0, 1.1, 2.6, 1.8, 1.0, 1.4, 0xffa96b);      // 发动机（橙）
+    mk(-1.0, 0.9, 0.2, 0.5, 0.7, 1.0, 0xff7d7d);   // 油箱（红）
+    modGroup.visible = false;
+    // —— 重演弹丸：胶囊弹体（沿速度方向），不再发光金球 ——
+    sc.bullet = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 1.0, 4, 8), new THREE.MeshBasicMaterial({ color: 0xffe9b0 }));
     sc.group.add(sc.bullet);
+    // —— 出膛枪口闪光 ——
     sc.muzzleFlash = new THREE.Mesh(new THREE.SphereGeometry(1.6, 10, 10), new THREE.MeshBasicMaterial({ color: 0xffdd88, transparent: true, opacity: 0.9 }));
     sc.muzzleFlash.position.copy(sc.p0);
     sc.group.add(sc.muzzleFlash);
-    // —— 全部设层1（主相机看不到），回放相机层0+1 ——
+    // —— 层1（主相机不可见）——
     sc.group.traverse((c) => c.layers && c.layers.set(1));
-    sc.group.visible = true;
     this.scene.add(sc.group);
-    sc.cam.layers.enable(1);   // 0(场景)默认开 + 层1(回放对象)
+    sc.cam.layers.enable(1);
+    // 相机平滑状态：位置+视线各自指数平滑，阶段切换零跳变
+    sc._look = sc.p0.clone();
+    sc.cam.position.copy(sc.p0).add(new THREE.Vector3(0, 3, -6));
     this._shellcam = sc;
   }
   _updateShellcam(dt) {
@@ -3109,16 +3113,22 @@ class Game {
     if (!sc) return;
     sc.t += dt;
     const speedup = sc.realT / sc.replayFly;
-    // 末速方向（穿入/爆炸共用一份，阶段切换不跳变）
     if (!sc.dirEnd) {
       const vEnd = sc.v0.clone(); vEnd.y -= sc.g * sc.realT;
       sc.dirEnd = vEnd.normalize();
-      sc.vpos = sc.hit.clone().addScaledVector(sc.dirEnd, -2.5);   // 车中心≈弹着点沿末速回退
+      sc.vpos = sc.hit.clone().addScaledVector(sc.dirEnd, -2.5);
       sc.a0 = Math.atan2(sc.hit.x - sc.vpos.x, sc.hit.z - sc.vpos.z);
     }
-    if (sc.t < sc.replayFly) {
-      // 阶段①：真实弹道慢放 p(t)=p0+v0t+½gt²；相机弹道侧方跟拍
-      if (sc.muzzleFlash) {   // 出膛闪光快速衰减（前 0.25s）
+    // 每阶段只产出"期望位置 dPos + 期望视线 dLook"，统一指数平滑（帧率无关）→ 相机永不跳变
+    const dPos = _kcTmp, dLook = _scLook;
+    let phase = 0;
+    if (sc.t < sc.replayFly) phase = 1;
+    else if (sc.t < sc.replayFly + sc.replayIn) phase = 2;
+    else if (sc.t < sc.replayFly + sc.replayIn + sc.replayBoom) phase = 3;
+    else { this._endShellcam(); return; }
+
+    if (phase === 1) {
+      if (sc.muzzleFlash) {
         sc.muzzleFlash.material.opacity = Math.max(0, 0.9 * (1 - sc.t / 0.25));
         sc.muzzleFlash.scale.setScalar(1 + sc.t * 3);
         if (sc.t > 0.25) sc.muzzleFlash.visible = false;
@@ -3129,17 +3139,20 @@ class Game {
         .add(new THREE.Vector3(0, -0.5 * sc.g * tt * tt, 0));
       const vNow = sc.v0.clone(); vNow.y -= sc.g * tt;
       const dir = vNow.normalize();
-      const side = new THREE.Vector3(-dir.z, 0, dir.x).normalize();
-      sc.cam.position.copy(sc.bullet.position).addScaledVector(dir, -5).addScaledVector(side, 3.5).add(new THREE.Vector3(0, 1.6, 0));
-      sc.cam.lookAt(sc.bullet.position.x + dir.x * 12, sc.bullet.position.y + dir.y * 12, sc.bullet.position.z + dir.z * 12);
-    } else if (sc.t < sc.replayFly + sc.replayIn) {
+      sc.bullet.quaternion.setFromUnitVectors(sc.upY, dir);   // 弹体沿速度方向
+      const side = _scSide.set(-dir.z, 0, dir.x).normalize();
+      dPos.copy(sc.bullet.position).addScaledVector(dir, -5).addScaledVector(side, 3.5); dPos.y += 1.6;
+      dLook.copy(sc.bullet.position);   // 盯弹丸本身（比盯前方点稳得多，不随下坠滚转）
+    } else if (phase === 2) {
       const dir = sc.dirEnd;
       const tIn = sc.t - sc.replayFly;
       const mg = sc.group.children[1];
       const isPen = sc.verdict !== 'bounce' && sc.verdict !== 'nopen';
-      if (mg) mg.visible = isPen;   // 只有击穿才透视内部模块
+      if (mg) mg.visible = isPen;
+      // 特写机位（跳弹/未击穿略远一点）
+      const dist = isPen ? 7.5 : 8.5;
+      dPos.set(sc.vpos.x + Math.sin(sc.a0 + 1.0) * dist, sc.vpos.y + 3.5, sc.vpos.z + Math.cos(sc.a0 + 1.0) * dist);
       if (isPen) {
-        // —— 击穿：撞击停滞0.12s→急剧减速挤入(先快后慢)→停死在车内 ——
         const IN_STALL = 0.12, IN_DIST = 3.5;
         let p;
         if (tIn < IN_STALL) {
@@ -3151,92 +3164,75 @@ class Game {
           const ease = 1 - Math.pow(1 - p, 3);
           sc.bullet.position.copy(sc.hit).addScaledVector(dir, 0.3 + ease * IN_DIST);
         }
-        // 相机滑到车侧特写
-        const target = _kcTmp.set(
-          sc.vpos.x + Math.sin(sc.a0 + 1.0) * 7.5, sc.vpos.y + 3.5, sc.vpos.z + Math.cos(sc.a0 + 1.0) * 7.5);
-        if (!sc._camLerp) sc._camLerp = 0;
-        sc._camLerp = Math.min(1, sc._camLerp + dt * 1.8);
-        sc.cam.position.lerp(target, sc._camLerp);
-        sc.cam.lookAt(sc.vpos.x, sc.vpos.y + 1.2, sc.vpos.z);
-        // 挤入到底 → 弹丸停点起爆
-        if (p >= 1 && !sc.boom) {
-          sc.boom = new THREE.Mesh(new THREE.SphereGeometry(1.2, 14, 14), new THREE.MeshBasicMaterial({ color: sc.killed ? 0xffcc55 : 0xff8040, transparent: true, opacity: 1 }));
-          sc.boom.position.copy(sc.bullet.position);
-          sc.boom.layers.set(1);
-          sc.group.add(sc.boom);
-          sc.bullet.visible = false;
-          if (this.sfx && !sc.killed) this.sfx.explosion(sc.bullet.position);
-        }
+        sc.bullet.quaternion.setFromUnitVectors(sc.upY, dir);
+        dLook.copy(sc.vpos); dLook.y += 1.2;
+        if (p >= 1 && !sc.boom) { this._spawnReplayBoom(sc, sc.bullet.position, sc.killed ? 1.4 : 0.9); sc.bullet.visible = false; }
       } else if (sc.verdict === 'bounce') {
-        // —— 跳弹：撞击「叮」→ 沿反射方向弹开飞走（水平面反射：v - 2(v·n)n，n=来弹反向的水平法线近似）——
         if (!sc._stallSfx) { sc._stallSfx = true; if (this.sfx) this.sfx.bounce(); }
         const p = Math.min(1, tIn / sc.replayIn);
         if (!sc.ricochetDir) {
-          const n = sc.dirEnd.clone().negate();   // 装甲面法线≈来弹反方向（近似）
-          const v = sc.dirEnd.clone().multiplyScalar(60);   // 弹开速度大幅衰减(150→60)
-          sc.ricochetDir = v.sub(n.clone().multiplyScalar(2 * v.dot(n))).normalize();
-          sc.ricochetDir.y = Math.abs(sc.ricochetDir.y) * 0.5 + 0.3;   // 弹开必带向上分量
+          const n = sc.dirEnd.clone().negate();
+          const v = sc.dirEnd.clone().multiplyScalar(60);
+          sc.ricochetDir = v.sub(n.multiplyScalar(2 * v.dot(n))).normalize();
+          sc.ricochetDir.y = Math.abs(sc.ricochetDir.y) * 0.5 + 0.3;
           sc.ricochetDir.normalize();
         }
-        sc.bullet.position.copy(sc.hit).addScaledVector(sc.ricochetDir, p * 14);   // 弹开14m淡出
+        sc.bullet.position.copy(sc.hit).addScaledVector(sc.ricochetDir, p * 14);
+        sc.bullet.quaternion.setFromUnitVectors(sc.upY, sc.ricochetDir);
+        sc.bullet.material.transparent = true;
         sc.bullet.material.opacity = 1 - p * 0.9;
-        // 相机留在车侧看弹开
-        const target = _kcTmp.set(
-          sc.vpos.x + Math.sin(sc.a0 + 1.0) * 8, sc.vpos.y + 3.5, sc.vpos.z + Math.cos(sc.a0 + 1.0) * 8);
-        if (!sc._camLerp) sc._camLerp = 0;
-        sc._camLerp = Math.min(1, sc._camLerp + dt * 1.8);
-        sc.cam.position.lerp(target, sc._camLerp);
-        sc.cam.lookAt(sc.bullet.position);
+        dLook.copy(sc.bullet.position);   // 视线跟着弹开的弹走
       } else {
-        // —— 未击穿：弹丸嵌在装甲表面（挤入0.3m停死），榴弹车外炸一下 ——
         const p = Math.min(1, tIn / Math.min(0.4, sc.replayIn));
-        if (!sc._stallSfx) { sc._stallSfx = true; if (this.sfx) this.sfx.nopen(); }   // 闷响
+        if (!sc._stallSfx) { sc._stallSfx = true; if (this.sfx) this.sfx.nopen(); }
         sc.bullet.position.copy(sc.hit).addScaledVector(dir, 0.3 * p);
-        const target = _kcTmp.set(
-          sc.vpos.x + Math.sin(sc.a0 + 1.0) * 8, sc.vpos.y + 3.5, sc.vpos.z + Math.cos(sc.a0 + 1.0) * 8);
-        if (!sc._camLerp) sc._camLerp = 0;
-        sc._camLerp = Math.min(1, sc._camLerp + dt * 1.8);
-        sc.cam.position.lerp(target, sc._camLerp);
-        sc.cam.lookAt(sc.hit.x, sc.hit.y, sc.hit.z);
-        if (p >= 1 && !sc.boom) {
-          // 车外小爆（榴弹溅射视觉；穿甲弹未击穿只留嵌着的弹）
-          sc.boom = new THREE.Mesh(new THREE.SphereGeometry(0.8, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffa060, transparent: true, opacity: 0.9 }));
-          sc.boom.position.copy(sc.hit);
-          sc.boom.layers.set(1);
-          sc.group.add(sc.boom);
-          if (this.sfx && !sc.killed) this.sfx.explosion(sc.hit);
-        }
+        sc.bullet.quaternion.setFromUnitVectors(sc.upY, dir);
+        dLook.copy(sc.hit);
+        if (p >= 1 && !sc.boom) { this._spawnReplayBoom(sc, sc.hit, 0.7); }   // 车外小爆(榴弹溅射)
       }
-    } else if (sc.t < sc.replayFly + sc.replayIn + sc.replayBoom) {
-      // 阶段③：火球膨胀+殉爆炮塔微抬+冲顶火柱+镜头环绕拉远
+    } else {
       const p = (sc.t - sc.replayFly - sc.replayIn) / sc.replayBoom;
+      const s = 0.5 + Math.pow(Math.min(1, p * 1.8), 0.5) * (sc.killed ? 6 : (sc.verdict === 'nopen' ? 2 : 3));
       if (sc.boom) {
-        const s = 0.5 + Math.pow(Math.min(1, p * 1.8), 0.5) * (sc.killed ? 6 : (sc.verdict === 'nopen' ? 2 : 3));
         sc.boom.scale.setScalar(s);
-        sc.boom.material.opacity = Math.max(0, 1 - p * 1.15);
+        if (sc.boom.userData.outer) sc.boom.userData.outer.material.opacity = Math.max(0, 1 - p * 1.15);
+        if (sc.boom.userData.inner) sc.boom.userData.inner.material.opacity = Math.max(0, 1 - p * 2.2);
       }
-      // #5 殉爆：克隆炮塔被冲得微微抬起（战雷炮塔掀飞低配版——克隆车第一个子组里 turret 不好索引，
-      // 直接给整个克隆车一个前倾+微抬姿态扰动，视觉上"被炸得跳了一下"）
       if (sc.killed && sc.clone) {
-        const lift = Math.sin(Math.min(1, p * 1.4) * Math.PI);   // 0→1→0 的抬起再落下
+        const lift = Math.sin(Math.min(1, p * 1.4) * Math.PI);
         sc.clone.rotation.x = lift * 0.12;
         sc.clone.position.y = lift * 0.5;
       }
-      // #6 殉爆火柱：击杀亮橙黄大柱，非击杀不出柱
       if (sc.killed && !sc.jet && p > 0.15) {
         sc.jet = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 1.2, 8, 10), new THREE.MeshBasicMaterial({ color: 0xffcc44, transparent: true, opacity: 0.95 }));
-        sc.jet.position.copy(sc.vpos).add(new THREE.Vector3(0, 5, 0));
+        sc.jet.position.copy(sc.vpos); sc.jet.position.y += 5;
         sc.jet.layers.set(1);
         sc.group.add(sc.jet);
       }
       if (sc.jet) { sc.jet.scale.y = 1 + p * 1.5; sc.jet.material.opacity = Math.max(0, 0.95 * (1 - p)); }
-      const ang = sc.a0 + 1.0 + p * 0.45;   // 环绕减半：慢慢看
+      const ang = sc.a0 + 1.0 + p * 0.45;
       const d = 7.5 + p * 7;
-      sc.cam.position.set(sc.vpos.x + Math.sin(ang) * d, sc.vpos.y + 4 + p * 3, sc.vpos.z + Math.cos(ang) * d);
-      sc.cam.lookAt(sc.vpos.x, sc.vpos.y + 1.5, sc.vpos.z);
-    } else {
-      this._endShellcam();
+      dPos.set(sc.vpos.x + Math.sin(ang) * d, sc.vpos.y + 4 + p * 3, sc.vpos.z + Math.cos(ang) * d);
+      dLook.copy(sc.vpos); dLook.y += 1.5;
     }
+    // 统一指数平滑（~0.15s 收敛）：位置和视线都连续，阶段切换不跳不晃
+    const kp = 1 - Math.exp(-7 * dt);
+    sc.cam.position.lerp(dPos, kp);
+    sc._look.lerp(dLook, kp);
+    sc.cam.lookAt(sc._look);
+  }
+  // 回放火球：双层（内白亮焰心+外橙焰），比单色球有层次
+  _spawnReplayBoom(sc, at, scale) {
+    sc.boom = new THREE.Group();
+    const outer = new THREE.Mesh(new THREE.SphereGeometry(1.2, 14, 14), new THREE.MeshBasicMaterial({ color: sc.killed ? 0xff7733 : 0xd96b2f, transparent: true, opacity: 0.85 }));
+    const inner = new THREE.Mesh(new THREE.SphereGeometry(0.6, 10, 10), new THREE.MeshBasicMaterial({ color: 0xfff3cf, transparent: true, opacity: 1 }));
+    sc.boom.add(outer, inner);
+    sc.boom.userData.outer = outer; sc.boom.userData.inner = inner;
+    sc.boom.position.copy(at);
+    sc.boom.scale.setScalar(scale);
+    sc.boom.traverse((c) => c.layers && c.layers.set(1));
+    sc.group.add(sc.boom);
+    if (this.sfx && !sc.killed) this.sfx.explosion(at);
   }
   _endShellcam() {
     const sc = this._shellcam;
