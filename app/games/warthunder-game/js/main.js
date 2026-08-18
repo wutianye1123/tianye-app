@@ -903,7 +903,11 @@ class EntityManager {
           const wasAlive = t.alive;
           t._lastAttacker = p.owner; // 记录击杀归属
           const verdict = t.onHit(p.damage, p);   // p 传入供装甲判定（穿深/弹种/发射者/发射者方位）
-          const hitPoint = p.mesh.position.clone();   // X 光回放用：弹着点（爆炸/移除前留住）
+          // X 光回放用：弹着点=车体表面（球体判定在离车面~3m 就命中，弹丸中心不贴车；
+          // 沿弹丸→车心方向把命中点贴回球面，回放弹道终点和爆炸才落在装甲上而不是半空中）
+          const _hp = p.mesh.position.clone().sub(t.position);
+          const _hr = Math.max(0.001, _hp.length());
+          const hitPoint = t.position.clone().addScaledVector(_hp.normalize(), (t.radius || 3) + (p.radius || 0.4) * 0.5);
           p.alive = false;
           this.addEffect(new Explosion(hitPoint, t.radius ? t.radius * 0.6 : 1, 0xffa040));
           hits.push({ owner: p.owner, target: t, proj: p, killed: wasAlive && !t.alive, crit: t.lastCrit, verdict, hitPoint });
