@@ -2930,10 +2930,10 @@ class Game {
       const hits = this.em.checkCollisions(targets);
       for (const h of hits) {
         if (h.owner === this.player) {
-          // 击杀回放触发：主炮弹(radius≥0.4)命中敌坦克就播；速射弹(机枪/航炮)只在【击杀】那一发播
-          // ——普通命中不播(10发/s每发重建回放会抽搐)，但机枪磨死坦克也要有死亡回放。
+          // 击杀回放触发：【仅击杀】敌坦克那一发播(主炮/机枪/航炮都一样)——
+          // 未击杀的命中不播：真车还活着，克隆车叠在原地就是"幽灵坦克"，且频繁命中会抽搐。
           if (h.target && typeof h.target.forwardVector !== 'function'
-              && h.proj && (h.killed || (h.proj.radius ?? 0) >= 0.4)) {
+              && h.proj && h.killed) {
             this._startKillReplay(h.target, h.hitPoint, h.killed, h.verdict, h.proj);
           }
           // 命中反馈按判定结果分级：击毁(红)/致命(橙)/击穿(金)/未击穿(灰蓝)/跳弹(白闪)
@@ -3250,8 +3250,18 @@ class Game {
   _endShellcam() {
     const sc = this._shellcam;
     if (!sc) return;
-    sc.group.traverse((c) => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
-    this.scene.remove(sc.group);
+    // ⚠️ 克隆车 clone(true) 与真车【共享 geometry】——绝不能 dispose，否则把（可能还活着的）
+    // 真车 GPU 资源也毁掉，主视角出现渲染异常的幽灵。只释放我们自建的资源：
+    // 模块/弹体/枪口闪光/火球/火柱；克隆车只移出场景，geometry 留给真车（或随真车销毁）。
+    if (sc.bullet) { sc.bullet.geometry.dispose(); sc.bullet.material.dispose(); }
+    if (sc.muzzleFlash) { sc.muzzleFlash.geometry.dispose(); sc.muzzleFlash.material.dispose(); }
+    const g = sc.group;
+    for (let i = g.children.length - 1; i >= 1; i--) {   // children[0]=克隆车跳过
+      const c = g.children[i];
+      c.traverse((m) => { if (m.geometry) m.geometry.dispose(); if (m.material) m.material.dispose(); });
+      g.remove(c);
+    }
+    this.scene.remove(g);
     this._shellcam = null;
   }
   // PiP 渲染：主画面后 scissor 出右上角小窗再渲一遍回放相机
