@@ -857,7 +857,8 @@ class EntityManager {
           const dx = p.mesh.position.x - ob.position.x;
           const dz = p.mesh.position.z - ob.position.z;
           const rr = (ob.radius || 3) + (p.radius || 0.4);
-          if (dx * dx + dz * dz < rr * rr) { p.alive = false; this.addEffect(new Explosion(p.mesh.position.clone(), 1.2, 0xffa040)); break; }
+          // 高度判定：弹丸在障碍顶之上(留1m余量)则飞过——高楼不再拦头顶上的炮弹
+          if (dx * dx + dz * dz < rr * rr && p.mesh.position.y < (ob.height ?? 30) + 1) { p.alive = false; this.addEffect(new Explosion(p.mesh.position.clone(), 1.2, 0xffa040)); break; }
         }
       }
     }
@@ -2133,7 +2134,7 @@ function createTerrain(scene, mode, mapId, worldwar = false) {
     m.position.set(x, h / 2 + terrainHeight(x, z), z);
     m.castShadow = true; m.receiveShadow = true;
     group.add(m);
-    obstacles.push({ position: new THREE.Vector3(x, 0, z), radius: Math.max(w, d) / 2 });
+    obstacles.push({ position: new THREE.Vector3(x, 0, z), radius: Math.max(w, d) / 2, height: h + terrainHeight(x, z) });
   };
 
   // 城镇(街区网格) / 工厂(大片厂房)——密集巷战
@@ -2148,7 +2149,7 @@ function createTerrain(scene, mode, mapId, worldwar = false) {
           const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: buildPal, roughness: 0.85, metalness: 0.2 }));
           m.position.set(bx + randRange(-6, 6), h / 2 + terrainHeight(bx, bz), bz + randRange(-6, 6));
           m.castShadow = true; m.receiveShadow = true; group.add(m);
-          obstacles.push({ position: new THREE.Vector3(m.position.x, 0, m.position.z), radius: Math.max(w, d) / 2 });
+          obstacles.push({ position: new THREE.Vector3(m.position.x, 0, m.position.z), radius: Math.max(w, d) / 2, height: h + terrainHeight(m.position.x, m.position.z) });
           if (Math.random() < 0.6) addBuilding(bx + randRange(-cell / 2, cell / 2), bz + randRange(-cell / 2, cell / 2), 0x4a4a50);
         }
       }
@@ -2164,7 +2165,7 @@ function createTerrain(scene, mode, mapId, worldwar = false) {
             const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: buildPal, roughness: 0.9 }));
             m.position.set(bx + ox, h / 2 + terrainHeight(bx + ox, bz + oz), bz + oz);
             m.castShadow = true; m.receiveShadow = true; group.add(m);
-            obstacles.push({ position: new THREE.Vector3(bx + ox, 0, bz + oz), radius: Math.max(w, d) / 2 });
+            obstacles.push({ position: new THREE.Vector3(bx + ox, 0, bz + oz), radius: Math.max(w, d) / 2, height: h + terrainHeight(bx + ox, bz + oz) });
           };
           place(randRange(-cell / 3, cell / 3), -cell / 2 + randRange(-3, 3));
           place(randRange(-cell / 3, cell / 3), cell / 2 + randRange(-3, 3));
@@ -2223,7 +2224,7 @@ function createTerrain(scene, mode, mapId, worldwar = false) {
     }
     mesh.castShadow = true; mesh.receiveShadow = true;
     group.add(mesh);
-    obstacles.push({ position: new THREE.Vector3(x, 0, z), radius });
+    obstacles.push({ position: new THREE.Vector3(x, 0, z), radius, height: mesh && mesh.geometry && mesh.geometry.parameters && mesh.geometry.parameters.height ? mesh.geometry.parameters.height + terrainHeight(x, z) + 2 : 30 });   // 树冠等杂物的近似顶高
   }
 
   scene.add(group);
