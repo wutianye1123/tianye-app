@@ -811,6 +811,25 @@ class Smoke {
 }
 
 
+// 榴弹溅射范围圈：橙色淡环快速扩散淡出（未击穿溅射的视觉反馈）。
+const _splashGeo = new THREE.RingGeometry(0.7, 1, 24);
+class SplashRing {
+  constructor(position) {
+    this.mesh = new THREE.Mesh(_splashGeo, new THREE.MeshBasicMaterial({ color: 0xff9040, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }));
+    this.mesh.position.copy(position); this.mesh.position.y += 0.3;
+    this.mesh.rotation.x = -Math.PI / 2;
+    this.life = 0.55; this.maxLife = 0.55; this.alive = true;
+  }
+  update(dt) {
+    this.life -= dt;
+    const t = 1 - this.life / this.maxLife;
+    this.mesh.scale.setScalar(1 + t * 7);          // 半径 ~1m→8m 扩散
+    this.mesh.material.opacity = Math.max(0, 0.85 * (1 - t));
+    if (this.life <= 0) this.alive = false;
+  }
+  dispose() { this.mesh.material.dispose(); }   // 几何共享,只释放材质
+}
+
 // ===== js/core/EntityManager.js =====
 
 
@@ -1334,7 +1353,13 @@ class Tank {
         const eff = plate / Math.max(0.18, Math.cos(incDeg * Math.PI / 180));
         if (projectile.pen < eff) {
           // 未击穿：榴弹溅射 25%，其他弹种只留弹坑
-          if (sh.noBounce) { this.takeDamage(damage * 0.25); }
+          if (sh.noBounce) {
+            this.takeDamage(damage * 0.25);
+            // 溅射视觉：命中点橙色淡圈扩散(榴弹爆风范围感;实体经 em 上特效,不直接持场景)
+            if (this.em && projectile.mesh && projectile.mesh.position) {
+              this.em.addEffect(new SplashRing(projectile.mesh.position.clone()));
+            }
+          }
           this.lastCrit = null;
           return 'nopen';
         }
@@ -2248,7 +2273,7 @@ function createTerrain(scene, mode, mapId) {
 // 入口：new Game({ canvas, mode, hudContainer, onExit })。
 // ===== 设置（localStorage 持久化） =====
 const SETTINGS_KEY = 'wt_settings';
-const DEFAULT_SETTINGS = { volume: 0.8, shadows: true, invertY: false, planeGain: 1.0 };
+const DEFAULT_SETTINGS = { volume: 0.8, engineVolume: 0.8, shadows: true, invertY: false, planeGain: 1.0 };
 function loadSettings() {
   try { return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); }
   catch (e) { return Object.assign({}, DEFAULT_SETTINGS); }
@@ -2263,6 +2288,7 @@ class Sfx {
   constructor() {
     this.ctx = null; this.master = null; this.vol = 0.8;
     this.engine = null; this.listener = null; this.muted = false;
+    this.engVol = 0.8;   // 引擎音量分轨（settings.engineVolume）
   }
   _ensure() {
     if (this.ctx) return;
@@ -2273,8 +2299,12 @@ class Sfx {
       this.master = this.ctx.createGain();
       this.master.gain.value = this.vol;
       this.master.connect(this.ctx.destination);
+      this.engGain = this.ctx.createGain();   // 引擎分轨：串在 master 下，只影响引擎音
+      this.engGain.gain.value = this.engVol;
+      this.engGain.connect(this.master);
     } catch (e) { this.ctx = null; }
   }
+  setEngineVolume(v) { this.engVol = v; if (this.engGain) this.engGain.gain.value = v; }
   resume() { this._ensure(); if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
   setVolume(v) { this.vol = v; if (this.master) this.master.gain.value = v; }
   _distGain(pos) {
@@ -2335,7 +2365,7 @@ class Sfx {
     const o = this.ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 60;
     const g = this.ctx.createGain(); g.gain.value = 0;
     const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 520;
-    o.connect(g); g.connect(lp); lp.connect(this.master); o.start();
+    o.connect(g); g.connect(lp); lp.connect(this.engGain || this.master); o.start();   // 引擎走分轨
     this.engine = { osc: o, gain: g };
   }
   updateEngine(throttle, speed01, mode) {
@@ -2429,6 +2459,7 @@ class Game {
     this.em = new EntityManager(this.scene);
     this.sfx = new Sfx();
     this.sfx.setVolume(this.settings.volume);
+    this.sfx.setEngineVolume(this.settings.engineVolume ?? 0.8);
     this.sfx.listener = this.camera;
     this.em.sfx = this.sfx;
     this.em.listener = this.camera;
@@ -2441,6 +2472,7 @@ class Game {
     window.addEventListener('resize', this._onResize);
 
     this._setupHint();
+    this._setupTouchButtons();
     this.clock = new THREE.Clock();
     this._initMatch(mode);
 
@@ -2453,6 +2485,34 @@ class Game {
     } else {
       this.hud.setHint('<b>点击画面锁定鼠标</b>（指哪飞哪，自动改平，Esc 暂停）· <b>W/S</b>油门 · <b>Shift</b>加力 · <b>左键</b>开火 · <b>右键/X</b>导弹(喷气机) · <b>F</b>灭火');
     }
+  }
+
+  // 移动端动作按钮：投弹/核弹/自爆（触屏没有键盘,这些功能之前只有桌面键位 B/L/J）
+  _setupTouchButtons() {
+    if (!('ontouchstart' in window)) return;   // 桌面不显示
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;right:150px;bottom:18px;display:flex;flex-direction:column;gap:10px;z-index:40';
+    const mk = (label, code, color) => {
+      const b = document.createElement('div');
+      b.textContent = label;
+      b.style.cssText = `width:56px;height:56px;border-radius:50%;background:${color};color:#fff;font:20px/56px sans-serif;text-align:center;user-select:none;-webkit-user-select:none;box-shadow:0 2px 8px rgba(0,0,0,.5);touch-action:none`;
+      // 触摸=按键按下边沿:按下次模拟 keydown 进 Input.keys,主循环的 _consumePress 自然消费
+      b.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); this.input.keys.add(code); }, { passive: false });
+      b.addEventListener('touchend', (e) => { e.preventDefault(); e.stopPropagation(); this.input.keys.delete(code); }, { passive: false });
+      wrap.appendChild(b); return b;
+    };
+    this._tbBomb = mk('💣', 'KeyB', 'rgba(90,90,110,.85)');
+    this._tbNuke = mk('☢️', 'KeyL', 'rgba(150,70,50,.85)');
+    this._tbJ = mk('💥', 'KeyJ', 'rgba(120,60,120,.85)');
+    document.body.appendChild(wrap);
+    this._tbWrap = wrap;
+  }
+  _updateTouchButtons() {
+    if (!this._tbWrap) return;
+    const isPlane = this.mode === 'plane' && this.player && this.player.alive;
+    this._tbBomb.style.display = isPlane ? '' : 'none';
+    this._tbNuke.style.display = (isPlane && this.player.maxBombs > 0 && this.player.bombs >= 3) ? '' : 'none';
+    this._tbJ.style.display = (this.worldwar && this.player && this.player.alive) ? '' : 'none';
   }
 
   _entityLabel() { return this.mode === 'tank' ? '坦克' : '飞机'; }
@@ -2871,6 +2931,7 @@ class Game {
       this.hud.hideLockPrompt();
     }
     this.sfx.resume();
+    this._updateTouchButtons();
     const pl = this.player;
     if (pl && pl.alive) {
       if (!this.sfx.engine) this.sfx.startEngine();
@@ -3356,6 +3417,7 @@ class Game {
   }
   _hidePauseOverlay() {
     if (this._pauseEl) { this._pauseEl.remove(); this._pauseEl = null; }
+    if (this._tbWrap) { this._tbWrap.remove(); this._tbWrap = null; }
   }
 
   _handleDeaths(removed) {
@@ -3974,12 +4036,14 @@ renderEndlessBtn();
   const el = document.getElementById('settings');
   const openBtn = document.getElementById('btn-settings');
   const sVol = document.getElementById('set-volume'), sVolV = document.getElementById('set-volume-v');
+  const sEv = document.getElementById('set-engvol'), sEvV = document.getElementById('set-engvol-v');
   const sSh = document.getElementById('set-shadows'), sShV = document.getElementById('set-shadows-v');
   const sIv = document.getElementById('set-inverty'), sIvV = document.getElementById('set-inverty-v');
   const sPg = document.getElementById('set-planegain'), sPgV = document.getElementById('set-planegain-v');
   let cur = loadSettings();
   const refresh = () => {
     sVol.value = cur.volume; sVolV.textContent = Math.round(cur.volume * 100) + '%';
+    if (sEv) { sEv.value = cur.engineVolume ?? 0.8; sEvV.textContent = Math.round((cur.engineVolume ?? 0.8) * 100) + '%'; }
     sSh.value = cur.shadows ? 1 : 0; sShV.textContent = cur.shadows ? '开' : '关';
     sIv.value = cur.invertY ? 1 : 0; sIvV.textContent = cur.invertY ? '开' : '关';
     sPg.value = cur.planeGain; sPgV.textContent = cur.planeGain.toFixed(2);
@@ -3988,6 +4052,7 @@ renderEndlessBtn();
   if (openBtn) openBtn.addEventListener('click', () => { refresh(); el.classList.remove('hidden'); });
   document.getElementById('set-close').addEventListener('click', () => el.classList.add('hidden'));
   sVol.addEventListener('input', () => { cur.volume = parseFloat(sVol.value); saveSettings(cur); if (window.__game) window.__game.sfx.setVolume(cur.volume); sVolV.textContent = Math.round(cur.volume * 100) + '%'; });
+  if (sEv) sEv.addEventListener('input', () => { cur.engineVolume = parseFloat(sEv.value); saveSettings(cur); if (window.__game) window.__game.sfx.setEngineVolume(cur.engineVolume); sEvV.textContent = Math.round(cur.engineVolume * 100) + '%'; });
   sSh.addEventListener('input', () => { cur.shadows = sSh.value === '1'; saveSettings(cur); sShV.textContent = cur.shadows ? '开' : '关'; });
   sIv.addEventListener('input', () => { cur.invertY = sIv.value === '1'; saveSettings(cur); sIvV.textContent = cur.invertY ? '开' : '关'; });
   sPg.addEventListener('input', () => { cur.planeGain = parseFloat(sPg.value); saveSettings(cur); sPgV.textContent = cur.planeGain.toFixed(2); });
