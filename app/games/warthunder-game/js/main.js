@@ -3044,7 +3044,7 @@ class Game {
   _startKillReplay(tank, hitPoint, killed, verdict, proj) {
     if (this._shellcam) this._endShellcam();   // 连杀：新击杀替换当前回放，总播最新一发
     const sc = {
-      t: 0, cam: new THREE.PerspectiveCamera(55, 1.6, 0.5, 3000),
+      t: 0, cam: new THREE.PerspectiveCamera(48, 1.6, 0.5, 3000),
       killed, verdict,
       hit: hitPoint ? hitPoint.clone() : tank.position.clone(),
       p0: proj && proj.launchPos ? proj.launchPos.clone() : null,
@@ -3141,8 +3141,9 @@ class Game {
       const dir = vNow.normalize();
       sc.bullet.quaternion.setFromUnitVectors(sc.upY, dir);   // 弹体沿速度方向
       const side = _scSide.set(-dir.z, 0, dir.x).normalize();
-      dPos.copy(sc.bullet.position).addScaledVector(dir, -5).addScaledVector(side, 3.5); dPos.y += 1.6;
-      dLook.copy(sc.bullet.position);   // 盯弹丸本身（比盯前方点稳得多，不随下坠滚转）
+      dPos.copy(sc.bullet.position).addScaledVector(dir, -8).addScaledVector(side, 5); dPos.y += 2.2;
+      // 视线=弹丸与目标(弹着点)的中点：弹和敌坦克始终同框，不会飞出小窗视野
+      dLook.copy(sc.bullet.position).add(sc.hit).multiplyScalar(0.5);
     } else if (phase === 2) {
       const dir = sc.dirEnd;
       const tIn = sc.t - sc.replayFly;
@@ -3150,7 +3151,7 @@ class Game {
       const isPen = sc.verdict !== 'bounce' && sc.verdict !== 'nopen';
       if (mg) mg.visible = isPen;
       // 特写机位（跳弹/未击穿略远一点）
-      const dist = isPen ? 7.5 : 8.5;
+      const dist = isPen ? 9 : 10;
       dPos.set(sc.vpos.x + Math.sin(sc.a0 + 1.0) * dist, sc.vpos.y + 3.5, sc.vpos.z + Math.cos(sc.a0 + 1.0) * dist);
       if (isPen) {
         const IN_STALL = 0.12, IN_DIST = 3.5;
@@ -3211,7 +3212,7 @@ class Game {
       }
       if (sc.jet) { sc.jet.scale.y = 1 + p * 1.5; sc.jet.material.opacity = Math.max(0, 0.95 * (1 - p)); }
       const ang = sc.a0 + 1.0 + p * 0.45;
-      const d = 7.5 + p * 7;
+      const d = 9 + p * 8;
       dPos.set(sc.vpos.x + Math.sin(ang) * d, sc.vpos.y + 4 + p * 3, sc.vpos.z + Math.cos(ang) * d);
       dLook.copy(sc.vpos); dLook.y += 1.5;
     }
