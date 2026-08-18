@@ -923,6 +923,17 @@ class EntityManager {
           const wasAlive = t.alive;
           t._lastAttacker = p.owner; // 记录击杀归属
           const verdict = t.onHit(p.damage, p);   // p 传入供装甲判定（穿深/弹种/发射者/发射者方位）
+          // 榴弹未击穿→范围爆炸：命中者吃贴甲溅射,再波及附近所有敌方坦克(距离衰减)
+          if (verdict === 'splash') {
+            t.takeDamage(p.damage * 0.25);   // 命中者：贴甲爆 25%（原溅射逻辑）
+            const SR = 10;   // 榴弹爆风半径
+            this.addEffect(new SplashRing(p.mesh.position.clone()));
+            for (const ot of [...this.tanks, ...this.planes]) {
+              if (ot === t || !ot.alive || ot.team === p.ownerTeam) continue;
+              const d2 = ot.position.distanceTo(p.mesh.position);
+              if (d2 < SR) { ot._lastAttacker = p.owner; ot.onHit(p.damage * 0.5 * (1 - d2 / SR), p); }
+            }
+          }
           // X 光回放用：弹着点=车体表面（球体判定在离车面~3m 就命中，弹丸中心不贴车；
           // 沿弹丸→车心方向把命中点贴回球面，回放弹道终点和爆炸才落在装甲上而不是半空中）
           const _hp = p.mesh.position.clone().sub(t.position);
@@ -930,7 +941,7 @@ class EntityManager {
           const hitPoint = t.position.clone().addScaledVector(_hp.normalize(), (t.radius || 3) + (p.radius || 0.4) * 0.5);
           p.alive = false;
           this.addEffect(new Explosion(hitPoint, t.radius ? t.radius * 0.6 : 1, 0xffa040));
-          hits.push({ owner: p.owner, target: t, proj: p, killed: wasAlive && !t.alive, crit: t.lastCrit, verdict, hitPoint });
+          hits.push({ owner: p.owner, target: t, proj: p, killed: wasAlive && !t.alive, crit: t.lastCrit, verdict: verdict === 'splash' ? 'nopen' : verdict, hitPoint });
           break;
         }
       }
@@ -1352,16 +1363,10 @@ class Tank {
         // 等效装甲 = 厚度 / cos(入射角)（80° 封顶防除零，最坏 ×5.7）
         const eff = plate / Math.max(0.18, Math.cos(incDeg * Math.PI / 180));
         if (projectile.pen < eff) {
-          // 未击穿：榴弹溅射 25%，其他弹种只留弹坑
-          if (sh.noBounce) {
-            this.takeDamage(damage * 0.25);
-            // 溅射视觉：命中点橙色淡圈扩散(榴弹爆风范围感;实体经 em 上特效,不直接持场景)
-            if (this.em && projectile.mesh && projectile.mesh.position) {
-              this.em.addEffect(new SplashRing(projectile.mesh.position.clone()));
-            }
-          }
+          // 未击穿：榴弹改走「范围爆炸」(见 checkCollisions 的 needSplash 分支,波及附近敌坦克)，
+          // 这里不再单点扣 25%——范围伤害里命中者自己按中心满衰减拿。
           this.lastCrit = null;
-          return 'nopen';
+          return (sh.noBounce ? 'splash' : 'nopen');
         }
         // 击穿：穿深富余越多后效越足（≤1.3 倍封顶）
         mult = 1 + Math.min(0.3, (projectile.pen / eff - 1) * 0.3);
