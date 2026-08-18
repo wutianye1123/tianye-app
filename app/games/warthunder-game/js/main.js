@@ -1305,11 +1305,12 @@ class Tank {
     if (projectile && projectile.pen) {
       const sh = projectile.shellDef || shellById('ap');
       // 命中方位：来弹水平方向相对车体朝向的夹角 → 前甲/侧甲/后甲分区
-      const shooter = projectile.owner;
-      if (shooter && shooter.position) {
-        const dx = shooter.position.x - this.group.position.x;
-        const dz = shooter.position.z - this.group.position.z;
-        const rel = Math.atan2(dx, dz) - this.heading;   // 0=正前
+      // 用弹丸实际飞行方向（velocity）算入射方位——发射者开火后移走不影响（原来用 owner 位置会偏）
+      const vlen = projectile.velocity.length();
+      if (vlen > 1) {
+        const dx = projectile.velocity.x;
+        const dz = projectile.velocity.z;
+        const rel = Math.atan2(-dx, -dz) - this.heading;   // 来弹方向取反=指向来处；0=正前
         const a = Math.abs(Math.atan2(Math.sin(rel), Math.cos(rel)));
         // 0..π：前 60°→前甲；60..120°→侧甲；120..π→后甲（斜穿法线增量并入入射角）
         const plate = a < Math.PI / 3 ? this.armor[0] : (a < 2 * Math.PI / 3 ? this.armor[1] : this.armor[2]);
@@ -1952,7 +1953,8 @@ class PlaneAI {
     const plane = this.plane;
     if (!plane.alive) return;
     if (!target || !target.alive) {
-      plane.aimToward(new THREE.Vector3(0, -0.2, 1).normalize(), dt); // 没目标就平飞略带下俯
+      plane.throttle = 0.8;   // 保持速度（原不设油门→低速重力下沉，残局敌机自己摔死）
+      plane.aimToward(new THREE.Vector3(0, 0.02, 1).normalize(), dt); // 近似平飞微抬，不再下俯
       return;
     }
 
@@ -2974,7 +2976,9 @@ class Game {
 
       if (this.objective === 'capture' && this.captureZone) {
         let blue = 0, red = 0;
-        const inZ = (t) => t && t.alive && t.position.distanceTo(this._zoneTarget.position) < CONFIG.tank.captureRadius;
+        // 高度门槓：飞机（有 forwardVector）须离地 <15m 才算占点（贴地压制）；掠过头顶不算
+        const inZ = (t) => t && t.alive && t.position.distanceTo(this._zoneTarget.position) < CONFIG.tank.captureRadius
+          && (typeof t.forwardVector !== 'function' || t.position.y - terrainHeight(t.position.x, t.position.z) < 15);
         if (inZ(this.player)) blue++;
         for (const a of this.allies) if (inZ(a)) blue++;
         for (const e of this.enemies) if (inZ(e)) red++;
@@ -3071,6 +3075,9 @@ class Game {
     // —— 内部模块（挂在以坦克位置为原点的子组，否则模块在地图原点根本看不到）——
     const modGroup = new THREE.Group();
     modGroup.position.copy(tank.position);
+    modGroup.rotation.y = tank.heading;               // 模块坐标跟车头朝向（原来永远朝北）
+    const ms = (tankTypeById(tank.type) || {}).scale || 1;
+    modGroup.scale.setScalar(ms);                     // 按车型体积缩放（II号0.78/鼠式1.3），模块贴合车体
     sc.group.add(modGroup);
     const mk = (x, y, z, sx, sy, sz, color) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 }));
