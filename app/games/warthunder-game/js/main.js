@@ -431,7 +431,9 @@ class HUD {
   }
 
   // 弹种显示（坦克）：当前弹名+1/2/3 切换指示，挂 HUD 左下。
+  hideShell() { if (this._shellEl) this._shellEl.style.display = 'none'; }
   setShell(shell, pen) {
+    if (this._shellEl) this._shellEl.style.display = '';
     if (!this._shellEl) {
       const el = document.createElement('div');
       // 放右下角：不挡左下 stats（血量/装填/计分）和小地图区域，紧凑单行
@@ -1287,6 +1289,7 @@ class Tank {
       position: muzzleWorld, direction: dir,
       speed: 160, damage: 4, owner: this, ownerTeam: this.team,
       gravity: 4, life: 1.2, color: 0xffe9a0, size: 0.18,
+      pen: 12, shellDef: { id: 'mg', name: '机枪弹', penMul: 1, dmgMul: 1, bounceDeg: 74, noBounce: false },   // 轻弹：走装甲判定(基本打不穿坦克,只能蹭侦察车/防空炮薄皮)
     }));
     this.mgTimer = 0.1;
     return true;
@@ -1739,6 +1742,7 @@ class Plane {
         owner: this, ownerTeam: this.team,
         gravity: 0, life: CONFIG.plane.bulletLife,
         color: this.team === 'blue' ? 0xfff2a0 : 0xff8855, size: 0.22,
+        pen: 25, shellDef: { id: 'cannon', name: '航炮弹', penMul: 1, dmgMul: 1, bounceDeg: 74, noBounce: false },   // 航炮：对坦克走装甲判定(25mm级,撕得动薄皮撕不动重甲)
       });
     };
     em.addProjectile(mk(mL)); em.addProjectile(mk(mR));
@@ -2683,6 +2687,7 @@ class Game {
   }
 
   _handleInputPlane(dt) {
+    this.hud.hideShell();   // 开飞机时藏掉坦克弹种框（worldwar 切载具后不残留）
     const inp = this.input;
     const p = this.player;
     if (!p.alive) return;
@@ -2949,9 +2954,8 @@ class Game {
         }
       }
 
-      this._updateShellcam(dt);   // 右上角弹药跟拍小窗（须在 cullDead 前：弹死当帧建 X 光并保住 victim）
-      const removed = this.em.cullDead(null);   // 回放用克隆车(渲染层1)，真车正常销毁
-      // 跟拍回调：玩家主炮弹丸生成时开窗（须在 cullDead 前？否——此处只注册一次）
+      this._updateShellcam(dt);   // 击杀回放小窗（克隆车在渲染层1，与真车销毁互不影响）
+      const removed = this.em.cullDead(null);
       this._handleDeaths(removed);
       this.enemies = this.enemies.filter((e) => e.alive);
       this.allies = this.allies.filter((a) => a.alive);
@@ -3032,7 +3036,7 @@ class Game {
   // 回放相机只看层1+层0(场景)，主相机不开层1 → 玩家视角永远看不到任何"幽灵"。
   // 弹道用弹丸出生快照(launchPos/launchVel)按同一物理公式(v=v0+g·t)慢放，完美复现真实轨迹含下坠。
   _startKillReplay(tank, hitPoint, killed, verdict, proj) {
-    if (this._shellcam) return;   // 回放中不重入
+    if (this._shellcam) this._endShellcam();   // 连杀：新击杀替换当前回放，总播最新一发
     const sc = {
       t: 0, cam: new THREE.PerspectiveCamera(55, 1.6, 0.5, 3000),
       killed, verdict,
@@ -3487,6 +3491,7 @@ class Game {
 
   _end(win) {
     this.state = 'over';
+    this._endShellcam();   // 结束比赛：关掉回放小窗，别冻在结算界面旁
     // 一局结束：释放指针锁让光标出现（点"再来一局/返回菜单"），并藏掉准星。
     // 程序化退出无 ESC 冷却，也顺带消除下一局开局"要点两次才锁上"的问题。
     if (document.pointerLockElement) document.exitPointerLock();
