@@ -2070,9 +2070,11 @@ const MAPS = [
 ];
 
 // 创建地面 + 障碍物 + 边界，返回 { group, obstacles, half }。mapId 决定地形主题。
-function createTerrain(scene, mode, mapId) {
+function createTerrain(scene, mode, mapId, worldwar = false) {
   const group = new THREE.Group();
   const obstacles = [];
+  // 世界大战：飞机同场——大楼高度砍半(最高26m→12m)，给空战留净空；纯陆战不受影响
+  const BH = worldwar ? 0.45 : 1;
 
   const half = (mode === 'plane' ? CONFIG.plane.worldSize : CONFIG.tank.worldSize);
   const theme = MAPS.find((m) => m.id === mapId) || MAPS[1];
@@ -2126,7 +2128,7 @@ function createTerrain(scene, mode, mapId) {
   const obstacleCount = Math.round(baseCount * (theme.density || 1));
   const buildPal = theme.build || 0x80766a;
   const addBuilding = (x, z, pal, big) => {
-    const w = randRange(big ? 11 : 7, big ? 22 : 16), h = randRange(big ? 9 : 6, big ? 26 : 18), d = randRange(big ? 11 : 7, big ? 22 : 16);
+    const w = randRange(big ? 11 : 7, big ? 22 : 16), h = randRange(big ? 9 : 6, big ? 26 : 18) * BH, d = randRange(big ? 11 : 7, big ? 22 : 16);
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: pal, roughness: 0.9 }));
     m.position.set(x, h / 2 + terrainHeight(x, z), z);
     m.castShadow = true; m.receiveShadow = true;
@@ -2142,7 +2144,7 @@ function createTerrain(scene, mode, mapId) {
       for (let bx = -spread; bx < spread; bx += cell + street) {
         for (let bz = -spread; bz < spread; bz += cell + street) {
           if (Math.hypot(bx, bz) < 75) continue;
-          const w = randRange(20, 32), h = randRange(8, 14), d = randRange(18, 30);
+          const w = randRange(20, 32), h = randRange(8, 14) * BH, d = randRange(18, 30);
           const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: buildPal, roughness: 0.85, metalness: 0.2 }));
           m.position.set(bx + randRange(-6, 6), h / 2 + terrainHeight(bx, bz), bz + randRange(-6, 6));
           m.castShadow = true; m.receiveShadow = true; group.add(m);
@@ -2156,7 +2158,7 @@ function createTerrain(scene, mode, mapId) {
       for (let bx = -spread; bx < spread; bx += cell + street) {
         for (let bz = -spread; bz < spread; bz += cell + street) {
           if (Math.hypot(bx, bz) < 78) continue;   // 中央战场/占领点留空
-          const ph = randRange(11, 26);
+          const ph = randRange(11, 26) * BH;
           const place = (ox, oz) => {
             const w = randRange(10, 18), h = ph + randRange(-3, 3), d = randRange(10, 18);
             const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: buildPal, roughness: 0.9 }));
@@ -2195,7 +2197,7 @@ function createTerrain(scene, mode, mapId) {
     const type = pickType();
     let mesh, radius;
     if (type === 'building') {
-      const w = randRange(8, 18), h = randRange(7, 22), d = randRange(8, 18);
+      const w = randRange(8, 18), h = randRange(7, 22) * BH, d = randRange(8, 18);
       mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: buildPal, roughness: 0.9 }));
       mesh.position.set(x, h / 2 + terrainHeight(x, z), z); radius = Math.max(w, d) / 2;
     } else if (type === 'rock') {
@@ -2474,7 +2476,7 @@ class Game {
   // —— 比赛初始化 ——
   _initMatch(mode) {
     applyDifficulty(this.difficulty); // 按难度重算 CONFIG
-    this.terrain = createTerrain(this.scene, this.worldwar ? 'tank' : mode, this.mapId);   // 世界大战永远用坦克地形（不管玩家选飞机还是坦克）
+    this.terrain = createTerrain(this.scene, this.worldwar ? 'tank' : mode, this.mapId, this.worldwar);   // 世界大战永远用坦克地形（不管玩家选飞机还是坦克）
     if (this.em && this.terrain && this.terrain.obstacles) this.em.obstacles = this.terrain.obstacles;   // 障碍物注入 em，供炮弹碰撞检测
     const R = CONFIG.rules;
     this.kills = 0;
