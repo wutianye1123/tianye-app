@@ -3056,6 +3056,7 @@ class Game {
       group: new THREE.Group(),
       upY: new THREE.Vector3(0, 1, 0),
     };
+    sc.tank = tank;   // 受害车引用（update 里算自适应取景用）
     if (!sc.p0 || !sc.v0) return;
     // 真实飞行时长：8ms 细步长扫描整条抛物线，取离弹着点最近的时刻（数值稳定）
     {
@@ -3123,7 +3124,7 @@ class Game {
       // 取景基准：按受害车半径自适应（radius 3.0×scale：小车2.3m~大车4.2m）
       // 需要整车进 48°FOV/1.6 宽高比小窗：垂直半角24°，水平约 ~37°(tan≈0.75)。
       // 距离 = 半径/0.42 + 高度补偿，再加 1.4 倍安全余量 → 任何角度整车都在框内。
-      sc.frameR = Math.max(2.5, (tank.radius || 3));
+      sc.frameR = Math.max(2.5, (sc.tank.radius || 3));
       sc.frameDist = Math.max(8, sc.frameR / 0.42 * 1.35);
     }
     // 每阶段只产出"期望位置 dPos + 期望视线 dLook"，统一指数平滑（帧率无关）→ 相机永不跳变
