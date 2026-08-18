@@ -2926,8 +2926,10 @@ class Game {
       const hits = this.em.checkCollisions(targets);
       for (const h of hits) {
         if (h.owner === this.player) {
-          // 击杀回放：玩家炮弹命中敌【坦克】即触发右上角慢动作回放（重演出膛→飞行→穿入→内部爆炸）
-          if (h.target && typeof h.target.forwardVector !== 'function') {
+          // 击杀回放：仅【主炮弹】(穿甲榴弹/硬芯/榴弹)命中敌坦克触发——
+          // 机枪弹/航炮弹这类速射弹(10发/s)每发都替换重建回放，小窗会抽搐，不触发。
+          if (h.target && typeof h.target.forwardVector !== 'function'
+              && h.proj && h.proj.size >= 0.4) {
             this._startKillReplay(h.target, h.hitPoint, h.killed, h.verdict, h.proj);
           }
           // 命中反馈按判定结果分级：击毁(红)/致命(橙)/击穿(金)/未击穿(灰蓝)/跳弹(白闪)
