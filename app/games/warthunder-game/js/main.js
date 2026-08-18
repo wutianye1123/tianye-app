@@ -941,7 +941,7 @@ class EntityManager {
           const hitPoint = t.position.clone().addScaledVector(_hp.normalize(), (t.radius || 3) + (p.radius || 0.4) * 0.5);
           p.alive = false;
           this.addEffect(new Explosion(hitPoint, t.radius ? t.radius * 0.6 : 1, 0xffa040));
-          hits.push({ owner: p.owner, target: t, proj: p, killed: wasAlive && !t.alive, crit: t.lastCrit, verdict: verdict === 'splash' ? 'nopen' : verdict, hitPoint });
+          hits.push({ owner: p.owner, target: t, proj: p, killed: wasAlive && !t.alive, crit: t.lastCrit, verdict, hitPoint });
           break;
         }
       }
@@ -3001,14 +3001,14 @@ class Game {
           // 未击杀的命中不播：真车还活着，克隆车叠在原地就是"幽灵坦克"，且频繁命中会抽搐。
           if (h.target && typeof h.target.forwardVector !== 'function'
               && h.proj && h.killed) {
-            this._startKillReplay(h.target, h.hitPoint, h.killed, h.verdict, h.proj);
+            this._startKillReplay(h.target, h.hitPoint, h.killed, h.verdict, h.proj, h.proj && h.proj.shellDef ? h.proj.shellDef.id : null);
           }
           // 命中反馈按判定结果分级：击毁(红)/致命(橙)/击穿(金)/未击穿(灰蓝)/跳弹(白闪)
           if (h.verdict === 'bounce') {
             this.hud.flashHit('bounce'); this.sfx.bounce();
             this.hud.addFeed('⤺ 跳弹', 'death');   // 明确文字提示：装甲弹开
           }
-          else if (h.verdict === 'nopen' && !h.killed) {
+          else if ((h.verdict === 'nopen' || h.verdict === 'splash') && !h.killed) {
             this.hud.flashHit('nopen'); this.sfx.nopen();
             this.hud.addFeed('✋ 未击穿', 'death');
           }
@@ -3114,7 +3114,7 @@ class Game {
   // 命中敌坦克瞬间才显示。全部回放对象(重演弹丸/克隆车/内部模块/内部爆炸)放【渲染层1】，
   // 回放相机只看层1+层0(场景)，主相机不开层1 → 玩家视角永远看不到任何"幽灵"。
   // 弹道用弹丸出生快照(launchPos/launchVel)按同一物理公式(v=v0+g·t)慢放，完美复现真实轨迹含下坠。
-  _startKillReplay(tank, hitPoint, killed, verdict, proj) {
+  _startKillReplay(tank, hitPoint, killed, verdict, proj, shellId) {
     if (this._shellcam) this._endShellcam();   // 连杀：新击杀替换当前回放，总播最新一发
     const sc = {
       t: 0, cam: new THREE.PerspectiveCamera(48, 1.6, 0.5, 3000),
@@ -3128,6 +3128,7 @@ class Game {
       upY: new THREE.Vector3(0, 1, 0),
     };
     sc.tank = tank;   // 受害车引用（update 里算自适应取景用）
+    sc.shellId = shellId || 'ap';   // 弹种：榴弹(he)回放=触装甲即炸,不穿入
     if (!sc.p0 || !sc.v0) return;
     // 真实飞行时长：8ms 细步长扫描整条抛物线，取离弹着点最近的时刻（数值稳定）
     {
@@ -3227,7 +3228,8 @@ class Game {
       const dir = sc.dirEnd;
       const tIn = sc.t - sc.replayFly;
       const mg = sc.group.children[1];
-      const isPen = sc.verdict !== 'bounce' && sc.verdict !== 'nopen';
+      const isPen = sc.verdict !== 'bounce' && sc.verdict !== 'nopen' && sc.verdict !== 'splash'
+        && !(sc.shellId === 'he' && (sc.verdict === 'bounce' || sc.verdict === 'nopen' || sc.verdict === 'splash' || !sc.killed));
       if (mg) mg.visible = isPen;
       // 特写机位（跳弹/未击穿略远一点）
       const dist = sc.frameDist * (isPen ? 1 : 1.1);
@@ -3262,6 +3264,29 @@ class Game {
         sc.bullet.material.transparent = true;
         sc.bullet.material.opacity = 1 - p * 0.9;
         dLook.copy(sc.bullet.position);   // 视线跟着弹开的弹走
+      } else if (sc.shellId === 'he' || sc.verdict === 'splash') {
+        // —— 榴弹(HE)：触装甲即炸（压发引信,不嵌不挤）——接触点当帧大爆+爆风橙圈扩散
+        const p = Math.min(1, tIn / sc.replayIn);
+        sc.bullet.position.copy(sc.hit).addScaledVector(dir, 0.15);   // 弹头刚触甲
+        sc.bullet.quaternion.setFromUnitVectors(sc.upY, dir);
+        if (!sc._heBoom && p > 0.12) {   // 触及即炸(短暂引信延迟)
+          sc._heBoom = true;
+          this._spawnReplayBoom(sc, sc.hit.clone(), sc.killed ? 1.6 : 1.2);   // HE 爆更大
+          if (this.sfx && !sc.killed) this.sfx.explosion(sc.hit);
+          sc.bullet.visible = false;   // 弹体汽化在爆炸里
+          // 爆风圈(和主画面 SplashRing 同款,层1版)
+          const ring = new THREE.Mesh(new THREE.RingGeometry(0.7, 1, 24), new THREE.MeshBasicMaterial({ color: 0xff9040, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }));
+          ring.position.copy(sc.hit); ring.position.y += 0.3; ring.rotation.x = -Math.PI / 2;
+          ring.layers.set(1); sc.group.add(ring); sc.heRing = ring;
+        }
+        if (sc.heRing) { const q = Math.min(1, (tIn - sc.replayIn * 0.12) / (sc.replayBoom + 0.3)); sc.heRing.scale.setScalar(1 + q * 7); sc.heRing.material.opacity = Math.max(0, 0.85 * (1 - q)); }
+        // 相机:车侧看触炸
+        const target = _kcTmp.set(
+          sc.vpos.x + Math.sin(sc.a0 + 1.0) * 9, sc.vpos.y + 3.5, sc.vpos.z + Math.cos(sc.a0 + 1.0) * 9);
+        if (!sc._camLerp) sc._camLerp = 0;
+        sc._camLerp = Math.min(1, sc._camLerp + dt * 1.8);
+        sc.cam.position.lerp(target, sc._camLerp);
+        dLook.copy(sc.hit);
       } else {
         const p = Math.min(1, tIn / Math.min(0.4, sc.replayIn));
         if (!sc._stallSfx) { sc._stallSfx = true; if (this.sfx) this.sfx.nopen(); }
