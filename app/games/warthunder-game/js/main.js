@@ -2930,10 +2930,10 @@ class Game {
       const hits = this.em.checkCollisions(targets);
       for (const h of hits) {
         if (h.owner === this.player) {
-          // 击杀回放：仅【主炮弹】(穿甲榴弹/硬芯/榴弹)命中敌坦克触发——
-          // 机枪弹/航炮弹这类速射弹(10发/s)每发都替换重建回放，小窗会抽搐，不触发。
+          // 击杀回放触发：主炮弹(radius≥0.4)命中敌坦克就播；速射弹(机枪/航炮)只在【击杀】那一发播
+          // ——普通命中不播(10发/s每发重建回放会抽搐)，但机枪磨死坦克也要有死亡回放。
           if (h.target && typeof h.target.forwardVector !== 'function'
-              && h.proj && (h.proj.radius ?? 0) >= 0.4) {   // 弹丸尺寸存在 radius 字段(原误用 size=undefined 把所有回放拦死)
+              && h.proj && (h.killed || (h.proj.radius ?? 0) >= 0.4)) {
             this._startKillReplay(h.target, h.hitPoint, h.killed, h.verdict, h.proj);
           }
           // 命中反馈按判定结果分级：击毁(红)/致命(橙)/击穿(金)/未击穿(灰蓝)/跳弹(白闪)
