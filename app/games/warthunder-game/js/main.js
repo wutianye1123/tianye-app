@@ -3120,6 +3120,11 @@ class Game {
       sc.dirEnd = vEnd.normalize();
       sc.vpos = sc.hit.clone().addScaledVector(sc.dirEnd, -2.5);
       sc.a0 = Math.atan2(sc.hit.x - sc.vpos.x, sc.hit.z - sc.vpos.z);
+      // 取景基准：按受害车半径自适应（radius 3.0×scale：小车2.3m~大车4.2m）
+      // 需要整车进 48°FOV/1.6 宽高比小窗：垂直半角24°，水平约 ~37°(tan≈0.75)。
+      // 距离 = 半径/0.42 + 高度补偿，再加 1.4 倍安全余量 → 任何角度整车都在框内。
+      sc.frameR = Math.max(2.5, (tank.radius || 3));
+      sc.frameDist = Math.max(8, sc.frameR / 0.42 * 1.35);
     }
     // 每阶段只产出"期望位置 dPos + 期望视线 dLook"，统一指数平滑（帧率无关）→ 相机永不跳变
     const dPos = _kcTmp, dLook = _scLook;
@@ -3153,8 +3158,8 @@ class Game {
       const isPen = sc.verdict !== 'bounce' && sc.verdict !== 'nopen';
       if (mg) mg.visible = isPen;
       // 特写机位（跳弹/未击穿略远一点）
-      const dist = isPen ? 9 : 10;
-      dPos.set(sc.vpos.x + Math.sin(sc.a0 + 1.0) * dist, sc.vpos.y + 3.5, sc.vpos.z + Math.cos(sc.a0 + 1.0) * dist);
+      const dist = sc.frameDist * (isPen ? 1 : 1.1);
+      dPos.set(sc.vpos.x + Math.sin(sc.a0 + 1.0) * dist, sc.vpos.y + sc.frameR * 1.1, sc.vpos.z + Math.cos(sc.a0 + 1.0) * dist);
       if (isPen) {
         const IN_STALL = 0.12, IN_DIST = 3.5;
         let p;
@@ -3214,9 +3219,9 @@ class Game {
       }
       if (sc.jet) { sc.jet.scale.y = 1 + p * 1.5; sc.jet.material.opacity = Math.max(0, 0.95 * (1 - p)); }
       const ang = sc.a0 + 1.0 + p * 0.45;
-      const d = 9 + p * 8;
-      dPos.set(sc.vpos.x + Math.sin(ang) * d, sc.vpos.y + 4 + p * 3, sc.vpos.z + Math.cos(ang) * d);
-      dLook.copy(sc.vpos); dLook.y += 1.5;
+      const d = sc.frameDist + p * (sc.frameDist * 0.9);
+      dPos.set(sc.vpos.x + Math.sin(ang) * d, sc.vpos.y + sc.frameR * 1.3 + p * 3, sc.vpos.z + Math.cos(ang) * d);
+      dLook.copy(sc.vpos); dLook.y += sc.frameR * 0.5;
     }
     // 统一指数平滑（~0.15s 收敛）：位置和视线都连续，阶段切换不跳不晃
     const kp = 1 - Math.exp(-7 * dt);
