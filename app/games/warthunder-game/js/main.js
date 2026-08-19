@@ -1039,7 +1039,10 @@ class EntityManager {
         if (t.position.distanceToSquared(p.mesh.position) <= r * r) {
           const wasAlive = t.alive;
           t._lastAttacker = p.owner; // 记录击杀归属
-          const verdict = t.onHit(p.damage, p);   // p 传入供装甲判定（穿深/弹种/发射者/发射者方位）
+          // 弹着点=车体表面(沿弹丸→车心方向贴回球面):部位判定+回放共用
+          const _hp = p.mesh.position.clone().sub(t.position);
+          const hitPoint = t.position.clone().addScaledVector(_hp.normalize(), (t.radius || 3) + (p.radius || 0.4) * 0.5);
+          const verdict = t.onHit(p.damage, p, hitPoint);   // p/hitPoint 供装甲判定+部位判定
           // 榴弹未击穿→范围爆炸：命中者吃贴甲溅射,再波及附近所有敌方坦克(距离衰减)
           if (verdict === 'splash') {
             t.takeDamage(p.damage * 0.25);   // 命中者：贴甲爆 25%（原溅射逻辑）
@@ -1051,11 +1054,7 @@ class EntityManager {
               if (d2 < SR) { ot._lastAttacker = p.owner; ot.onHit(p.damage * 0.5 * (1 - d2 / SR), p); }
             }
           }
-          // X 光回放用：弹着点=车体表面（球体判定在离车面~3m 就命中，弹丸中心不贴车；
-          // 沿弹丸→车心方向把命中点贴回球面，回放弹道终点和爆炸才落在装甲上而不是半空中）
-          const _hp = p.mesh.position.clone().sub(t.position);
-          const _hr = Math.max(0.001, _hp.length());
-          const hitPoint = t.position.clone().addScaledVector(_hp.normalize(), (t.radius || 3) + (p.radius || 0.4) * 0.5);
+          // (hitPoint 已在 onHit 前算好,回放与部位判定共用)
           p.alive = false;
           this.addEffect(new Explosion(hitPoint, t.radius ? t.radius * 0.6 : 1, 0xffa040));
           hits.push({ owner: p.owner, target: t, proj: p, killed: wasAlive && !t.alive, crit: t.lastCrit, verdict, hitPoint });
@@ -1460,7 +1459,7 @@ class Tank {
   // 战争雷霆式命中：穿深判定 → 跳弹/未击穿/击穿；击穿后弹药殉爆/起火/模块损坏。
   // projectile 参数由 EntityManager.checkCollisions 传入（含 pen 穿深与弹种定义）。
   // 返回 'bounce' | 'nopen' | 'pen'，供击杀反馈区分（跳弹叮/未击穿闷响）。
-  onHit(damage, projectile) {
+  onHit(damage, projectile, hitPoint = null) {
     if (!this.alive) return 'pen';
     // —— 装甲判定（仅带穿深的炮弹走；机枪弹/炸弹冲击波直接进伤害）——
     let mult = 1;
@@ -1497,25 +1496,66 @@ class Tank {
         mult = 1 + Math.min(0.3, (projectile.pen / eff - 1) * 0.3);
       }
     }
+    // —— 部位判定（战雷式"打哪儿伤哪儿"）：弹着点转车体局部坐标（车头=+z），
+    // 判定框与击杀回放里显示的内部模块严格一致——弹药架就在那，打中就炸。
+    if (hitPoint) {
+      const h = this.heading;
+      const dx = hitPoint.x - this.group.position.x;
+      const dz = hitPoint.z - this.group.position.z;
+      const lx = dx * Math.cos(h) - dz * Math.sin(h);   // 局部右(+x)
+      const lz = dx * Math.sin(h) + dz * Math.cos(h);   // 局部前(+z)
+      const ly = hitPoint.y - this.group.position.y;
+      const sc = this.radius / 3;      // 车型缩放(与回放模块一致)
+      const T = 0.7 * sc;              // 判定容差(球面投影有误差)
+      // 弹药架(车体中部炮塔下)：70% 殉爆秒杀，否则弹药起火
+      if (Math.abs(lz - 0.2 * sc) < (1.2 * sc + T) && Math.abs(lx) < (0.8 * sc + T) && ly < 2.4 * sc) {
+        if (Math.random() < 0.7) { this.lastCrit = '弹药殉爆'; this.takeDamage(this.health); return 'pen'; }
+        this.takeDamage(damage * mult); this.burning = true; this.lastCrit = '弹药起火';
+        return 'pen';
+      }
+      // 炮塔(高处)：炮手阵亡(塔里的人)/炮管卡死 各半
+      if (ly > 2.4 * sc) {
+        this.takeDamage(damage * mult);
+        if (Math.random() < 0.5) { this.crew.gunner = 5; this.lastCrit = '炮手阵亡'; }
+        else { this.modules.barrel = 5; this.lastCrit = '炮管卡死'; }
+        return 'pen';
+      }
+      // 履带(侧面下盘)
+      if (Math.abs(lx) > 1.4 * sc && ly < 1.3 * sc) {
+        this.takeDamage(damage * mult); this.modules.track = 6; this.lastCrit = '履带断裂';
+        return 'pen';
+      }
+      // 发动机舱(车尾)：发动机损坏，40% 起火
+      if (lz < -1.3 * sc) {
+        this.takeDamage(damage * mult); this.modules.engine = 7;
+        if (Math.random() < 0.4) { this.burning = true; this.lastCrit = '发动机起火'; }
+        else this.lastCrit = '发动机受损';
+        return 'pen';
+      }
+      // 乘员舱(车体前部)：必伤一名乘员
+      if (lz > 0.5 * sc) {
+        this.takeDamage(damage * mult);
+        const pick = ['gunner', 'driver', 'loader'][Math.floor(Math.random() * 3)];
+        this.crew[pick] = 5;
+        this.lastCrit = { gunner: '炮手阵亡', driver: '驾驶员阵亡', loader: '装填手阵亡' }[pick];
+        return 'pen';
+      }
+      // 油箱(侧后)：60% 起火
+      if (Math.abs(lx) > 0.7 * sc) {
+        this.takeDamage(damage * mult);
+        if (Math.random() < 0.6) { this.burning = true; this.lastCrit = '油箱起火'; }
+        else this.lastCrit = null;
+        return 'pen';
+      }
+    }
+    // 兜底：普通击穿（保留全局小概率殉爆/起火的随机性）
     const r = Math.random();
     const c = CONFIG.rules.crit;
     if (r < c.tankInstant) { this.lastCrit = '弹药殉爆'; this.takeDamage(this.health); }
     else {
       this.takeDamage(damage * mult);
       if (r < c.tankFire) { this.burning = true; this.lastCrit = '起火'; }
-      else {
-        // 模块损伤：履带/炮管/发动机，命中即损坏、若干秒后自动修复
-        const m = Math.random();
-        if (m < 0.22) { this.modules.track = 6; this.lastCrit = '履带断裂'; }
-        else if (m < 0.36) { this.modules.barrel = 5; this.lastCrit = '炮管卡死'; }
-        else if (m < 0.46) { this.modules.engine = 7; this.lastCrit = '发动机受损'; }
-        else if (m < 0.81) {   // 乘员伤亡 35%（战雷式：击穿后效打人）
-          const pick = ['gunner', 'driver', 'loader'][Math.floor(Math.random() * 3)];
-          this.crew[pick] = 5;
-          this.lastCrit = { gunner: '炮手阵亡', driver: '驾驶员阵亡', loader: '装填手阵亡' }[pick];
-        }
-        else this.lastCrit = null;
-      }
+      else this.lastCrit = null;
     }
     return 'pen';
   }
@@ -3328,10 +3368,10 @@ class Game {
       m.add(new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 1 })));
       m.position.set(x, y, z); modGroup.add(m); return m;
     };
-    mk(0, 1.0, -1.8, 1.6, 1.0, 1.6, 0x7dffb0);     // 乘员舱（绿）
-    mk(0, 1.2, 0.9, 1.6, 1.0, 1.2, 0xffe066);      // 弹药架（黄）
-    mk(0, 1.1, 2.6, 1.8, 1.0, 1.4, 0xffa96b);      // 发动机（橙）
-    mk(-1.0, 0.9, 0.2, 0.5, 0.7, 1.0, 0xff7d7d);   // 油箱（红）
+    mk(0, 1.0, 1.8, 1.6, 1.0, 1.6, 0x7dffb0);      // 乘员舱（绿·前部——与部位判定一致）
+    mk(0, 1.2, 0.2, 1.6, 1.0, 1.4, 0xffe066);      // 弹药架（黄·中部炮塔下,打中70%殉爆）
+    mk(0, 1.1, -2.6, 1.8, 1.0, 1.4, 0xffa96b);     // 发动机（橙·尾部）
+    mk(-1.0, 0.9, -0.5, 0.5, 0.7, 1.0, 0xff7d7d);  // 油箱（红·侧后）
     modGroup.visible = false;
     // —— 重演弹丸：胶囊弹体（沿速度方向），不再发光金球 ——
     sc.bullet = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 1.0, 4, 8), new THREE.MeshBasicMaterial({ color: 0xffe9b0 }));
