@@ -2153,7 +2153,9 @@ class TankAI {
       const flee = desiredHeading + Math.PI;
       let hd = flee - tank.heading; hd = Math.atan2(Math.sin(hd), Math.cos(hd));
       tank.drive(-0.9, clamp(hd * 2, -1, 1), dt);
-      tank.aimTurretAt(target.position, dt);
+      const _aimPt = target.position.clone();
+      if (typeof target.forwardVector !== 'function') _aimPt.y += 1.2;   // 瞄车体高度(部位判定命中模块更多)
+      tank.aimTurretAt(_aimPt, dt);
       if (!smokeBlind && tank.canFire() && dist < 130 && Math.random() < 0.25) tank.tryFire(em);   // 撤退时开火更保守（原 0.5 比正常 enemyFireChance 0.4 还高，反直觉）
       return;
     }
@@ -2200,7 +2202,9 @@ class TankAI {
     }
 
     tank.drive(throttle, turn, dt);
-    tank.aimTurretAt(target.position, dt);
+    const _aimPt = target.position.clone();
+    if (typeof target.forwardVector !== 'function') _aimPt.y += 1.2;   // 瞄车体高度(部位判定命中模块更多)
+    tank.aimTurretAt(_aimPt, dt);
 
     // 瞄准差不多了且在射程内则开火（敌方更不准）
     // —— 弹种策略（战雷式）：对坦克目标每 2s 评估一次——目标朝向我的那面装甲等效估个值，
@@ -2757,7 +2761,7 @@ class Game {
 
   _setupHint() {
     if (this.mode === 'tank') {
-      this.hud.setHint('<b>点击画面锁定鼠标</b>（炮塔可无限转，Esc 暂停）· <b>WASD</b> 车体 · <b>左键</b>主炮 · <b>1/2/3</b>切弹种 · <b>空格</b>机枪 · <b>Shift</b>瞄准镜 · <b>R</b>修车 · <b>F</b>灭火 · <b>G</b>烟雾弹');
+      this.hud.setHint('<b>点击画面锁定鼠标</b>（炮塔可无限转，Esc 暂停）· <b>WASD</b> 车体 · <b>左键</b>主炮 · <b>1/2/3</b>切弹种 · <b>空格</b>机枪 · <b>Shift</b>瞄准镜 · <b>R</b>修车 · <b>F</b>灭火 · <b>G</b>烟雾弹 · <b>V</b>标记集火');
     } else {
       this.hud.setHint('<b>点击画面锁定鼠标</b>（指哪飞哪，自动改平，Esc 暂停）· <b>W/S</b>油门 · <b>Shift</b>加力 · <b>左键</b>开火 · <b>右键/X</b>导弹(喷气机) · <b>F</b>灭火');
     }
@@ -2805,6 +2809,34 @@ class Game {
     this.hud.addFeed('💨 烟雾弹已释放 · 剩余 ' + this._smokeAmmo, 'info');
   }
 
+  // 侦察标记（V 键）：准星所指敌人 → 全队 AI 集火 10s（战雷侦察机制）
+  _markTarget() {
+    const dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    let best = null, bestDot = 0.9;   // 要求准星基本对准(>25°锥内)
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      const to = e.position.clone().sub(this.camera.position);
+      const d = to.length();
+      if (d > 450) continue;
+      const dot = to.normalize().dot(dir);
+      if (dot > bestDot) { bestDot = dot; best = e; }
+    }
+    if (!best) { this.hud.addFeed('未对准任何敌人', 'info'); return; }
+    this._markedTarget = best;
+    this._markedT = 10;
+    if (!this._markCone) {   // 头顶标记:红色下箭头(倒锥),挂场景层0
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(0.9, 1.8, 4), new THREE.MeshBasicMaterial({ color: 0xff3020 }));
+      cone.rotation.x = Math.PI;   // 尖朝下
+      this._markCone = cone;
+      this.scene.add(cone);
+    }
+    this._markCone.visible = true;
+    const label = typeof best.forwardVector === 'function' ? '敌机' : '敌方坦克';
+    this.hud.addFeed('🎯 已标记 ' + label + ' —— 队友集火！(10s)', 'kill');
+    this.sfx.ui();
+  }
+
   _entityLabel() { return this.mode === 'tank' ? '坦克' : '飞机'; }
 
   // 按键“按下边沿”检测（按住只触发一次），避免连发。
@@ -2825,6 +2857,8 @@ class Game {
   // —— 比赛初始化 ——
   _initMatch(mode) {
     this.stats = { hits: 0, pen: 0, bounce: 0, nopen: 0, ammoKills: 0, fired: 0 };   // 结算统计(发射数在 _updateHUD 前从 em.pShells 汇总)
+    this.sp = 500;              // SP 出生点（世界大战经济）：击杀攒、重生扣
+    this._streak = 0; this._streakT = 0;   // 连杀窗口(8s内连杀累计)
     applyDifficulty(this.difficulty); // 按难度重算 CONFIG
     this.terrain = createTerrain(this.scene, this.worldwar ? 'tank' : mode, this.mapId);   // 世界大战永远用坦克地形（不管玩家选飞机还是坦克）
     if (this.em && this.terrain && this.terrain.obstacles) this.em.obstacles = this.terrain.obstacles;   // 障碍物注入 em，供炮弹碰撞检测
@@ -2978,12 +3012,17 @@ class Game {
     }
   }
 
-  _nearest(pos, list) {
-    let best = null, bestD = Infinity;
+  // AI 目标选择（战雷式优先级）：被标记目标 > 可收割残血(35%以下且120m内) > 最近。
+  // 敌我两侧 AI 共用;玩家 V 标记时全队集火。
+  _nearest(pos, list, marked) {
+    if (marked && marked.alive && list.includes(marked)) return marked;
+    let best = null, bestScore = Infinity;
     for (const c of list) {
       if (!c || !c.alive) continue;
       const d = pos.distanceToSquared(c.position);
-      if (d < bestD) { bestD = d; best = c; }
+      let score = d;
+      if (c.health && c.maxHealth && c.health / c.maxHealth < 0.35 && d < 120 * 120) score = d * 0.25;   // 残血优先收割
+      if (score < bestScore) { bestScore = score; best = c; }
     }
     return best;
   }
@@ -3034,6 +3073,7 @@ class Game {
     if (inp.isDown('Space')) t.tryFireMG(this.em);
     if (this._consumePress(inp, 'KeyF')) this._extinguish(t);
     if (this._consumePress(inp, 'KeyG')) this._launchSmoke();
+    if (this._consumePress(inp, 'KeyV')) this._markTarget();   // 侦察标记:队友AI集火
     if (this._smokeCd > 0) this._smokeCd -= dt;
     // 弹种切换（1/2/3）：偏好存 this._shellPref，跨重生/换车保留
     for (let i = 0; i < SHELLS.length; i++) {
@@ -3087,6 +3127,7 @@ class Game {
     if ((inp.rightMouseDown || inp.isDown('KeyX')) && p.missiles > 0) {
       if (p.tryFireMissile(this.em, this.enemies)) { this.hud.addFeed(`🚀 导弹 ${p.missiles}/${p.maxMissiles}`, 'info'); this.sfx.missile(p.position); }
     }
+    if (this._consumePress(inp, 'KeyV')) this._markTarget();   // 侦察标记(飞机也能标)
     if (this._consumePress(inp, 'KeyB') && p.bombs > 0) {
       if (p.tryDropBomb(this.em)) { this.hud.addFeed(`💣 炸弹 ${p.bombs}/${p.maxBombs}`, 'info'); }
     }
@@ -3225,6 +3266,19 @@ class Game {
     }
     this.sfx.resume();
     this._updateTouchButtons();
+    // 侦察标记维护:倒计时+头顶箭头跟随目标(浮动),过期/目标死→撤
+    if (this._markedT > 0) {
+      this._markedT -= dt;
+      const mt = this._markedTarget;
+      if (!mt || !mt.alive || this._markedT <= 0) {
+        this._markedT = 0; this._markedTarget = null;
+        if (this._markCone) this._markCone.visible = false;
+      } else if (this._markCone) {
+        this._markCone.position.set(mt.position.x, mt.position.y + (mt.radius || 3) + 3 + Math.sin(performance.now() * 0.004) * 0.4, mt.position.z);
+      }
+    }
+    // 连杀窗口倒计时(8s 内连续击杀累计;窗口过则清零)
+    if (this._streakT > 0) { this._streakT -= dt; if (this._streakT <= 0) this._streak = 0; }
     // 远处战场氛围炮声:战斗中随机 4~9s 一声闷响
     if (this.state === 'playing' && this.enemies && this.enemies.length) {
       this._ambT = (this._ambT ?? randRange(3, 6)) - dt;
@@ -3278,7 +3332,7 @@ class Game {
       }
       for (const a of this.allies) {
         if (!a.ai) continue;
-        let t = this._nearest(a.position, redAlive);
+        let t = this._nearest(a.position, redAlive, this._markedTarget);   // 标记目标全队集火
         if (zoneT && (!t || a.position.distanceTo(t.position) > 75)) t = zoneT;
         a.ai.update(dt, { target: t, entityManager: this.em, obstacles, smokes: this.em.smokes });
       }
@@ -3772,6 +3826,7 @@ class Game {
   _hidePauseOverlay() {
     if (this._pauseEl) { this._pauseEl.remove(); this._pauseEl = null; }
     if (this._tbWrap) { this._tbWrap.remove(); this._tbWrap = null; }
+    if (this._markCone) { this._markCone.geometry.dispose(); this._markCone.material.dispose(); this.scene.remove(this._markCone); this._markCone = null; }
   }
 
   _handleDeaths(removed) {
@@ -3794,7 +3849,20 @@ class Game {
         this.kills += 1;
         if (this.endless && this.kills % 10 === 0) this._spawnBoss(); // 每 10 击杀出一只精英
         const atk = r._lastAttacker;
-        const who = atk === playerRef ? '你击毁 ' : (atk && atk.team === 'blue' ? '友方击毁 ' : '击毁 ');
+        // SP 奖励(世界大战) + 玩家连杀播报
+        const isPlayerKill = (atk === playerRef);
+        if (this.worldwar) { this.sp = Math.min(9999, this.sp + (isPlayerKill ? 300 : 120)); if (isPlayerKill) this.hud.addFeed('+' + 300 + 'SP', 'info'); }
+        if (isPlayerKill) {
+          this._streak = (this._streakT > 0) ? this._streak + 1 : 1;
+          this._streakT = 8;
+          if (this._streak >= 2) {
+            const words = { 2: '双杀！', 3: '三杀！', 4: '四杀！' };
+            const w = words[this._streak] || '⚔️ 大杀特杀！';
+            this.hud.setCenterMessage(w + ' ×' + this._streak);
+            if (this.sfx) this.sfx._blip(500 + this._streak * 140, 700 + this._streak * 160, 0.16, 0.3, 'triangle');   // 音调随连杀递升
+          }
+        }
+        const who = isPlayerKill ? '你击毁 ' : (atk && atk.team === 'blue' ? '友方击毁 ' : '击毁 ');
         // 玩家击杀即时奖励提示：金额=外部结算公式的逐杀值（无尽 150/50，普通 120/40），只提前显示、结算不变
         const bonus = atk === playerRef ? ` +${this.endless ? 150 : 120}💰+${this.endless ? 50 : 40}🔬` : '';
         this.hud.addFeed(`${who}敌方${label}${tag}${bonus}`, 'kill');
@@ -3829,28 +3897,40 @@ class Game {
     }
   }
 
+  // SP 出生成本：坦克 150+rank×50、飞机 250+rank×50、轰炸机(B-21) 600（战雷街机式）
+  _spawnCost(mode, typeId) {
+    if (mode === 'tank') { const t = tankTypeById(typeId); return 150 + t.rank * 50; }
+    const p = planeTypeById(typeId);
+    if (p.bombs) return 600;   // 轰炸机
+    return 250 + p.rank * 50;
+  }
   // 世界大战载具选择面板：列出已拥有的坦克+飞机，点击选一辆重生
   _showWWPanel() {
     if (this._wwPanel) this._wwPanel.remove();
     if (this.input) this.input.canvas.style.cursor = 'auto';
     const panel = document.createElement('div');
     panel.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.9);border:2px solid rgba(100,180,100,.4);border-radius:12px;padding:20px 24px;z-index:100;max-width:80vw;max-height:80vh;overflow-y:auto;font-family:sans-serif;color:#eee';
-    let html = '<div style="text-align:center;font-size:18px;margin-bottom:14px">选择载具（剩余 ' + Math.max(0, this.playerLives) + ' 命）</div>';
+    let html = '<div style="text-align:center;font-size:18px;margin-bottom:4px">选择载具（剩余 ' + Math.max(0, this.playerLives) + ' 命）</div>';
+    html += '<div style="text-align:center;font-size:15px;color:#ffd86b;margin-bottom:12px">⚡ SP ' + this.sp + ' ——击杀+300 / 队友击杀+120，重生按载具扣费</div>';
     html += '<div style="display:flex;gap:20px">';
     // 坦克
     html += '<div><div style="font-size:14px;color:#8f8;margin-bottom:8px">🛡 坦克</div>';
     for (const id of this.ownedTanks) {
       const t = tankTypeById(id);
+      const cost = this._spawnCost('tank', id);
+      const afford = this.sp >= cost;
       const sel = (this.mode === 'tank' && this.tankType === id) ? 'border:2px solid #6f6' : 'border:1px solid #555';
-      html += `<div data-mode="tank" data-id="${id}" style="margin:4px 0;padding:8px 14px;background:rgba(40,60,40,.6);border-radius:6px;cursor:pointer;${sel}">${t.icon} ${t.name}</div>`;
+      html += `<div data-mode="tank" data-id="${id}" data-cost="${cost}" style="margin:4px 0;padding:8px 14px;background:rgba(40,60,40,${afford ? '.6' : '.25'});border-radius:6px;cursor:${afford ? 'pointer' : 'not-allowed'};${sel}${afford ? '' : ';opacity:.45'}">${t.icon} ${t.name} <span style="color:#ffd86b;float:right">${cost}SP</span></div>`;
     }
     html += '</div>';
     // 飞机
     html += '<div><div style="font-size:14px;color:#8af;margin-bottom:8px">✈ 飞机</div>';
     for (const id of this.ownedPlanes) {
       const p = planeTypeById(id);
+      const cost = this._spawnCost('plane', id);
+      const afford = this.sp >= cost;
       const sel = (this.mode === 'plane' && this.planeType === id) ? 'border:2px solid #6f6' : 'border:1px solid #555';
-      html += `<div data-mode="plane" data-id="${id}" style="margin:4px 0;padding:8px 14px;background:rgba(40,50,70,.6);border-radius:6px;cursor:pointer;${sel}">${p.icon} ${p.name}</div>`;
+      html += `<div data-mode="plane" data-id="${id}" data-cost="${cost}" style="margin:4px 0;padding:8px 14px;background:rgba(40,50,70,${afford ? '.6' : '.25'});border-radius:6px;cursor:${afford ? 'pointer' : 'not-allowed'};${sel}${afford ? '' : ';opacity:.45'}">${p.icon} ${p.name} <span style="color:#ffd86b;float:right">${cost}SP</span></div>`;
     }
     html += '</div></div>';
     panel.innerHTML = html;
@@ -3863,6 +3943,9 @@ class Game {
       el.onmouseleave = () => { el.style.background = idleBg; };
       el.ontouchstart = () => { el.style.background = hoverBg; };   // 触屏无 hover 态：按下即时高亮给反馈
       el.onclick = () => {
+        const cost = parseInt(el.dataset.cost, 10) || 0;
+        if (this.sp < cost) { this.hud.addFeed('⚡ SP 不足（需 ' + cost + '，当前 ' + this.sp + '）——击杀敌车攒 SP', 'death'); return; }
+        this.sp -= cost;
         this.mode = el.dataset.mode;
         if (this.mode === 'tank') this.tankType = el.dataset.id;
         else this.planeType = el.dataset.id;
