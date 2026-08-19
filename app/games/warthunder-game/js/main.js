@@ -871,6 +871,7 @@ class TurretFly {
 class Wreck {
   constructor(tank, em) {
     this.mesh = tank.group;
+    this.tank = tank;   // 回放联动:tank._replaying 期间隐藏(见 update)
     this.mesh.traverse((c) => { if (c.material && c.material.color) c.material.color.multiplyScalar(0.22); });   // 焦黑
     this.pos = tank.position;
     this.life = 8; this.alive = true; this.em = em; this.smokeT = 0;
@@ -878,6 +879,9 @@ class Wreck {
   update(dt) {
     this.life -= dt;
     if (this.life <= 0) { this.alive = false; return; }
+    // 击杀回放期间隐藏:黑色残骸(不透明)正好叠在回放的半透明克隆车上,把透视全挡住
+    // ("整个车都是黑的"就是它)。回放结束自动回来继续烧。
+    this.mesh.visible = !(this.tank && this.tank._replaying);
     this.smokeT -= dt;
     if (this.smokeT <= 0) {   // 持续黑烟
       this.em.addEffect(new Smoke(this.pos.clone().add(new THREE.Vector3(randRange(-1.5, 1.5), 2, randRange(-1.5, 1.5))), 0x1a1815, randRange(1.2, 2.2), 2.2, 1.2));
@@ -3289,6 +3293,7 @@ class Game {
       upY: new THREE.Vector3(0, 1, 0),
     };
     sc.tank = tank;   // 受害车引用（update 里算自适应取景用）
+    tank._replaying = true;   // 通知 Wreck 残骸隐藏,别挡克隆车透视
     sc.shellId = shellId || 'ap';   // 弹种：榴弹(he)回放=触装甲即炸,不穿入
     if (!sc.p0 || !sc.v0) return;
     // 真实飞行时长：8ms 细步长扫描整条抛物线，取离弹着点最近的时刻（数值稳定）
@@ -3503,6 +3508,7 @@ class Game {
   _endShellcam() {
     const sc = this._shellcam;
     if (!sc) return;
+    if (sc.tank) sc.tank._replaying = false;   // 残骸恢复显示继续烧
     // ⚠️ 克隆车 clone(true) 与真车【共享 geometry】——绝不能 dispose，否则把（可能还活着的）
     // 真车 GPU 资源也毁掉，主视角出现渲染异常的幽灵。只释放我们自建的资源：
     // 模块/弹体/枪口闪光/火球/火柱；克隆车只移出场景，geometry 留给真车（或随真车销毁）。
