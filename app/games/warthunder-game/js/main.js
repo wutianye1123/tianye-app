@@ -891,14 +891,15 @@ class Wreck {
   dispose() { this.mesh.traverse((c) => { if (c.geometry) c.geometry.dispose(); if (c.material) { Array.isArray(c.material) ? c.material.forEach((m) => m.dispose()) : c.material.dispose(); } }); }
 }
 
-// 烟雾弹烟幕：大团半透明灰白球，1s 膨胀成型、持续 12s、末 2s 淡出。
-// 同步登记到 em.smokes（AI 视线判定用），结束自动注销。
-class SmokeScreen {
+// 烟雾弹（拖行式）：发射后烟源挂在坦克上，随车移动持续在身后生成烟团，
+// 拖出一条 12s 的烟带掩护机动（战雷移动烟幕打法）。烟团注册 em.smokes 供 AI 视线判定。
+const _puffGeo = new THREE.SphereGeometry(3.0, 10, 10);   // 共享几何(数十团烟不重复分配)
+class SmokePuff {
   constructor(position, em) {
-    this.mesh = new THREE.Mesh(new THREE.SphereGeometry(3.4, 12, 12), new THREE.MeshBasicMaterial({ color: 0xcfd4d8, transparent: true, opacity: 0, depthWrite: false }));
-    this.mesh.position.copy(position); this.mesh.position.y += 1.6;
+    this.mesh = new THREE.Mesh(_puffGeo, new THREE.MeshBasicMaterial({ color: 0xcfd4d8, transparent: true, opacity: 0.9, depthWrite: false }));
+    this.mesh.position.copy(position); this.mesh.position.y += 1.5;
     this.life = 12; this.maxLife = 12; this.alive = true;
-    this.smokeRec = { pos: this.mesh.position, r: 4.2 };   // AI 判定记录
+    this.smokeRec = { pos: this.mesh.position, r: 3.8 };
     if (em) { em.smokes.push(this.smokeRec); this._em = em; }
   }
   update(dt) {
@@ -909,12 +910,36 @@ class SmokeScreen {
       return;
     }
     const t = 1 - this.life / this.maxLife;
-    const grow = Math.min(1, t * 12);              // 前 ~0.08 快速成型(数值取大让淡入够快)
-    this.mesh.scale.setScalar(0.3 + grow * 0.7 + t * 0.25);
-    const fade = this.life < 2 ? this.life / 2 : 1;
-    this.mesh.material.opacity = 0.85 * grow * fade;
+    this.mesh.scale.setScalar(0.75 + t * 0.5);           // 缓慢膨胀
+    this.mesh.material.opacity = 0.9 * (this.life < 2 ? this.life / 2 : 1);   // 末 2s 淡出
   }
-  dispose() { this.mesh.geometry.dispose(); this.mesh.material.dispose(); }
+  dispose() { this.mesh.material.dispose(); }   // 几何共享不释放
+}
+class SmokeTrail {
+  constructor(tank, em) {
+    this.tank = tank; this.em = em;
+    this.life = 12; this.alive = true;   // 拖烟总时长
+    this.spawnT = 0;
+    this.mesh = null;   // 特效接口需要(烟团是独立子特效)
+  }
+  update(dt) {
+    this.life -= dt;
+    if (this.life <= 0 || !this.tank || !this.tank.alive) { this.alive = false; return; }
+    this.spawnT -= dt;
+    if (this.spawnT <= 0) {   // 每 0.3s 在车尾两侧生成一团(车速15m/s→间距~4.5m,连成烟带)
+      const h = this.tank.heading;
+      const back = new THREE.Vector3(-Math.sin(h), 0, -Math.cos(h));
+      const right = new THREE.Vector3(Math.cos(h), 0, -Math.sin(h));
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const p = this.tank.position.clone()
+        .addScaledVector(back, 4)
+        .addScaledVector(right, side * randRange(0.5, 2.5));   // 左右交错,烟带更宽
+      p.y = terrainHeight(p.x, p.z);
+      this.em.addEffect(new SmokePuff(p, this.em));
+      this.spawnT = 0.3;
+    }
+  }
+  dispose() {}
 }
 
 // ===== js/core/EntityManager.js =====
@@ -2098,9 +2123,12 @@ class PlaneAI {
   }
 
   update(dt, ctx) {
-    const { target, entityManager: em } = ctx;
+    const { target, entityManager: em, smokes = [] } = ctx;
     const plane = this.plane;
     if (!plane.alive) return;
+    // 烟幕判定：目标或自己在烟里 → 不开火（与 TankAI 一致,飞机不能无视烟）
+    const inSmoke = (p) => smokes.some((s) => p.distanceToSquared(s.pos) < s.r * s.r);
+    const smokeBlind = target && (inSmoke(target.position) || inSmoke(plane.position));
     if (!target || !target.alive) {
       plane.throttle = 0.8;   // 保持速度（原不设油门→低速重力下沉，残局敌机自己摔死）
       plane.aimToward(new THREE.Vector3(0, 0.02, 1).normalize(), dt); // 近似平飞微抬，不再下俯
@@ -2138,7 +2166,7 @@ class PlaneAI {
     const isEnemy = plane.team === 'red';
     const dotThresh = isEnemy ? 0.996 : 0.99;
     const fireChance = isEnemy ? CONFIG.plane.enemyFireChance : 0.9;
-    if (dist < 280 && fwd.dot(aimDir) > dotThresh && Math.random() < fireChance) {
+    if (!smokeBlind && dist < 280 && fwd.dot(aimDir) > dotThresh && Math.random() < fireChance) {
       plane.tryFire(em);
     }
   }
@@ -2641,13 +2669,8 @@ class Game {
     if (this._smokeAmmo <= 0) { this.hud.addFeed('💨 烟雾弹已用完', 'info'); return; }
     if (this._smokeCd > 0) return;
     this._smokeAmmo--; this._smokeCd = 2;
-    const h = t.heading;
-    const right = new THREE.Vector3(Math.cos(h), 0, -Math.sin(h));   // 车体右侧
-    for (let i = -2; i <= 2; i++) {   // 车侧横排 5 团(左右各8m),略偏后
-      const p = t.position.clone().addScaledVector(right, i * 4).addScaledVector(new THREE.Vector3(Math.sin(h), 0, Math.cos(h)), -3);
-      p.y = terrainHeight(p.x, p.z) + 1;
-      this.em.addEffect(new SmokeScreen(p, this.em));
-    }
+    // 拖行烟幕:烟源挂车,开动时身后拖出一条烟带(原地放也会在车周堆烟)
+    this.em.addEffect(new SmokeTrail(t, this.em));
     this.hud.addFeed('💨 烟雾弹已释放 · 剩余 ' + this._smokeAmmo, 'info');
   }
 
