@@ -5,6 +5,8 @@ import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTe
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
 const _kcTmp = new THREE.Vector3();   // X 光回放临时量（免每帧 new）
 const _scLook = new THREE.Vector3();   // 回放相机平滑视线
+const _projFwd = new THREE.Vector3(0, 0, 1);   // 曳光定向基准
+const _projTmp = new THREE.Vector3();
 const _scSide = new THREE.Vector3();   // 回放弹道侧向
 const _tankM = new THREE.Matrix4(), _tankY = new THREE.Vector3(0, 1, 0);
 const _tankQ = new THREE.Quaternion(), _tankWQ = new THREE.Quaternion();
@@ -589,7 +591,25 @@ class HUD {
     };
 
     if (allies) for (const a of allies) dot(a, '#66aaff', 2.4);   // 友方（蓝）
-    if (enemies) for (const e of enemies) dot(e, '#ff5555', 3);   // 敌方（红）
+    // 敌方：带朝向的三角箭头（预判走位）；无朝向数据时退化为圆点
+    if (enemies) for (const e of enemies) {
+      const { px, py } = project(e);
+      if (px < 6 || px > w - 6 || py < 6 || py > h - 6) continue;
+      ctx.fillStyle = '#ff5555';
+      if (e.h != null) {
+        // 敌人朝向世界向量投到玩家局部系,再转屏幕角(与 project 同基:屏幕右=世界-rgt)
+        const fx = Math.sin(e.h), fz = Math.cos(e.h);
+        const fwdC = fx * hs + fz * hc;
+        const rgtC = fx * hc - fz * hs;
+        const sx = -rgtC, sy = -fwdC;
+        const ang = Math.atan2(sx, -sy);
+        ctx.save(); ctx.translate(px, py); ctx.rotate(ang);
+        ctx.beginPath(); ctx.moveTo(0, -5); ctx.lineTo(3.6, 4); ctx.lineTo(-3.6, 4); ctx.closePath(); ctx.fill();
+        ctx.restore();
+      } else {
+        ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fill();
+      }
+    }
 
     // 玩家三角（绿色，朝上）
     ctx.fillStyle = '#66ff88';
@@ -669,6 +689,7 @@ class Projectile {
     this.mesh = new THREE.Mesh(projGeo(size), projMat(color));
     this.mesh.position.copy(position);
     this.radius = size;
+    if (size >= 0.4) { this.stretch = true; this.mesh.scale.z = 4; }   // 主炮曳光:拉长沿弹道定向(机枪/航炮弹不拉)
     this.velocity = direction.clone().normalize().multiplyScalar(speed);
     this.launchPos = position.clone();   // 击杀回放：出膛点快照（按真实弹道慢放重演）
     this.launchVel = this.velocity.clone();
@@ -692,6 +713,10 @@ class Projectile {
     }
     if (this.gravity) this.velocity.y -= this.gravity * dt;
     this.mesh.position.addScaledVector(this.velocity, dt);
+    if (this.stretch) {   // 曳光定向:弹体长轴对齐速度方向(每帧一次,主炮弹少,开销可忽略)
+      _projTmp.copy(this.velocity).normalize();
+      this.mesh.quaternion.setFromUnitVectors(_projFwd, _projTmp);
+    }
     this.life -= dt;
     if (this.life <= 0) this.alive = false;
     if (this.mesh.position.y < terrainHeight(this.mesh.position.x, this.mesh.position.z) + 0.1) this.alive = false; // 落地（贴地形）
@@ -1057,7 +1082,7 @@ class EntityManager {
           // (hitPoint 已在 onHit 前算好,回放与部位判定共用)
           p.alive = false;
           this.addEffect(new Explosion(hitPoint, t.radius ? t.radius * 0.6 : 1, 0xffa040));
-          hits.push({ owner: p.owner, target: t, proj: p, killed: wasAlive && !t.alive, crit: t.lastCrit, verdict, hitPoint });
+          hits.push({ owner: p.owner, target: t, proj: p, killed: wasAlive && !t.alive, crit: t.lastCrit, verdict, hitPoint, penInfo: t.lastPenInfo });
           break;
         }
       }
@@ -1392,6 +1417,9 @@ class Tank {
 
   update(dt) {
     if (this.reloadTimer > 0) this.reloadTimer -= dt / (this.crew && this.crew.loader > 0 ? 2.5 : 1);   // 装填手阵亡装填×2.5慢
+    // 装填完毕"叮"（玩家车专属;AI 车也响会吵）
+    if (this._wasReloading && this.reloadTimer <= 0 && this.alive && this.side === 'player' && this.em && this.em.sfx) this.em.sfx.loaded();
+    this._wasReloading = this.reloadTimer > 0;
     if (this.mgTimer > 0) this.mgTimer -= dt;
     if (this.crew) for (const k in this.crew) if (this.crew[k] > 0) this.crew[k] = Math.max(0, this.crew[k] - dt);   // 乘员替补恢复
     if (this.burning && this.alive) {
@@ -1417,6 +1445,13 @@ class Tank {
     _tankWQ.setFromAxisAngle(_tankY, this.heading + this.turretYaw);
     this.turret.quaternion.copy(_tankQ.copy(this.group.quaternion).invert()).multiply(_tankWQ);
     this.barrelPivot.rotation.x = this.barrelPitch;
+    // 炮塔液压声：炮塔在转(角速度>0.15rad/s)时每 0.35s 一声短嗡（玩家车专属）
+    if (this.side === 'player' && this.em && this.em.sfx) {
+      this._turretSndT = (this._turretSndT || 0) - dt;
+      const turrSpd = Math.abs(this.turretYaw - (this._lastTurrYaw ?? this.turretYaw)) / Math.max(dt, 1e-4);
+      if (turrSpd > 0.15 && this._turretSndT <= 0) { this.em.sfx.turretSnd(); this._turretSndT = 0.35; }
+      this._lastTurrYaw = this.turretYaw;
+    }
     const frac = Math.max(0, this.health / this.maxHealth);
     this.healthFg.scale.x = frac;
     this.healthFg.position.x = -(1 - frac) * 1.5;
@@ -1489,6 +1524,7 @@ class Tank {
         if (projectile.pen < eff) {
           // 未击穿：榴弹改走「范围爆炸」(见 checkCollisions 的 needSplash 分支,波及附近敌坦克)，
           // 这里不再单点扣 25%——范围伤害里命中者自己按中心满衰减拿。
+          this.lastPenInfo = '穿深' + Math.round(projectile.pen) + ' < 等效' + Math.round(eff);   // 玩家看得懂为什么打不穿
           this.lastCrit = null;
           return (sh.noBounce ? 'splash' : 'nopen');
         }
@@ -2138,6 +2174,22 @@ class TankAI {
     tank.aimTurretAt(target.position, dt);
 
     // 瞄准差不多了且在射程内则开火（敌方更不准）
+    // —— 弹种策略（战雷式）：对坦克目标每 2s 评估一次——目标朝向我的那面装甲等效估个值，
+    // 穿甲榴弹打不动就切硬芯穿甲弹；切了打得动就换回（后效更大）。
+    this._shellCheckT = (this._shellCheckT || 0) - dt;
+    if (this._shellCheckT <= 0) {
+      this._shellCheckT = 2;
+      if (target.armor && tank.pen) {
+        const dx = tank.position.x - target.position.x, dz = tank.position.z - target.position.z;
+        const rel = Math.atan2(dx, dz) - target.heading;
+        const a = Math.abs(Math.atan2(Math.sin(rel), Math.cos(rel)));
+        const plate = a < Math.PI / 3 ? target.armor[0] : (a < 2 * Math.PI / 3 ? target.armor[1] : target.armor[2]);
+        const eff = plate * 1.15;   // 略保守(算点入射角)
+        const cur = shellById(tank.shellKind);
+        if (cur.id === 'ap' && tank.pen < eff) tank.shellKind = 'apcr';
+        else if (cur.id === 'apcr' && tank.pen * 1.45 > eff * 1.1) tank.shellKind = 'ap';
+      }
+    }
     const worldHeading = tank.heading + tank.turretYaw;
     let aimDiff = desiredHeading - worldHeading;
     aimDiff = Math.atan2(Math.sin(aimDiff), Math.cos(aimDiff));
@@ -2548,6 +2600,9 @@ class Sfx {
   // 跳弹：金属"叮"（高频快衰减）。未击穿：闷"咚"（中低频短促）。
   bounce() { this._blip(2400, 1200, 0.09, 0.3, 'square'); }
   nopen() { this._blip(160, 110, 0.1, 0.35, 'sine'); }
+  // 装填完毕：上行双"叮"（战雷肌肉记忆）。炮塔旋转：低频液压短嗡（音量小）。
+  loaded() { this._blip(880, 880, 0.06, 0.22, 'sine'); setTimeout(() => this._blip(1320, 1320, 0.09, 0.22, 'sine'), 70); }
+  turretSnd() { this._blip(140, 110, 0.16, 0.10, 'sawtooth'); }
   ui() { this._blip(520, 520, 0.05, 0.18, 'square'); }
   startEngine() {
     this._ensure(); if (!this.ctx || this.engine) return;
@@ -3215,7 +3270,7 @@ class Game {
           }
           else if ((h.verdict === 'nopen' || h.verdict === 'splash') && !h.killed) {
             this.hud.flashHit('nopen'); this.sfx.nopen();
-            this.hud.addFeed('✋ 未击穿', 'death');
+            this.hud.addFeed('✋ 未击穿（' + (h.penInfo || '—') + '）', 'death');
           }
           else {
             this.hud.flashHit(h.killed ? 'kill' : (h.crit ? 'crit' : 'hit'));
@@ -3819,7 +3874,10 @@ class Game {
       this.hud.drawMinimap({
         playerPos: this.player.position,
         playerHeading: heading,
-        enemies: this.enemies.filter((e) => e.alive).map((e) => e.position),
+        enemies: this.enemies.filter((e) => e.alive).map((e) => {
+          const h = e.heading ?? (typeof e.forwardVector === 'function' ? Math.atan2(e.forwardVector().x, e.forwardVector().z) : null);   // 飞机用航向
+          return { x: e.position.x, y: e.position.y, z: e.position.z, h };
+        }),   // 带朝向:画箭头
         allies: this.allies.filter((a) => a.alive).map((a) => a.position),
         range: this.mode === 'tank' ? 300 : 340,
       });
