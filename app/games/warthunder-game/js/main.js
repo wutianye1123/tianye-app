@@ -354,6 +354,7 @@ class HUD {
         <div class="result-card">
           <h2 id="result-title"></h2>
           <p id="result-sub"></p>
+          <div id="result-stats" style="display:none;margin:8px 0 14px;padding:10px 14px;background:rgba(0,0,0,.35);border-radius:8px;text-align:left;font:12px/1.9 sans-serif;color:#cdd;"></div>
           <button id="btn-again">再来一局</button>
           <button id="btn-menu">返回主菜单</button>
         </div>
@@ -622,10 +623,23 @@ class HUD {
   }
 
   // 显示胜负面板，按钮回调每次重绑。
-  showResult({ win, kills, onAgain, onMenu, endless = false }) {
+  showResult({ win, kills, onAgain, onMenu, endless = false, stats = null }) {
     this.resultTitle.textContent = win ? '胜利！' : (endless ? '本局阵亡' : '失败');
     this.resultTitle.style.color = win ? '#7CFC00' : (endless ? '#ffd86b' : '#ff5555');
     this.resultSub.textContent = endless ? `坚持击毁 ${kills} 个目标` : `本局击毁 ${kills} 个目标`;
+    // 战雷式结算统计:命中率/判定分布/殉爆数/弹种使用——装甲系统的学习效果可量化
+    const stEl = this.container.querySelector('#result-stats');
+    if (stEl) {
+      if (stats && stats.fired > 0) {
+        const acc = Math.round(stats.hits / stats.fired * 100);
+        const sh = stats.shells || {};
+        stEl.innerHTML =
+          `命中率 ${acc}%（${stats.hits}/${stats.fired}）<br>` +
+          `<span style="color:#ffe9a0">击穿 ${stats.pen}</span> · <span style="color:#fff">跳弹 ${stats.bounce}</span> · <span style="color:#7a9ab8">未击穿 ${stats.nopen}</span><br>` +
+          `殉爆击杀 ${stats.ammoKills} · 弹种 穿甲榴弹${sh.ap || 0}/硬芯${sh.apcr || 0}/榴弹${sh.he || 0}`;
+        stEl.style.display = 'block';
+      } else stEl.style.display = 'none';
+    }
     this.result.classList.remove('hidden');
 
     const again = this.container.querySelector('#btn-again');
@@ -1472,6 +1486,8 @@ class Tank {
       pen: this.pen * sh.penMul, shellDef: sh,
     }));
     em.addEffect(new MuzzleFlash(muzzleWorld));
+    // 结算统计:玩家主炮发射按弹种计数(经 em 挂钩,Game 读取)
+    if (this.side === 'player') { em.pShells = em.pShells || { ap: 0, apcr: 0, he: 0 }; em.pShells[sh.id] = (em.pShells[sh.id] || 0) + 1; }
     this.reloadTimer = this.reloadTime;
     return true;
   }
@@ -1560,12 +1576,12 @@ class Tank {
         const TOL = 0.3 * sc;
         const inBox = (px, py, pz, cx, cy, cz, hx, hy, hz) =>
           Math.abs(px - cx * sc) < hx * sc + TOL && Math.abs(py - cy * sc) < hy * sc + TOL && Math.abs(pz - cz * sc) < hz * sc + TOL;
-        let mod = null;
+        let mod = null, crewPz = 0;
         for (let s = 0.8; s <= 5 && !mod; s += 0.5) {
           const [px, py, pz] = toL(hitPoint.x + dvx * s * sc, hitPoint.y + dvy * s * sc, hitPoint.z + dvz * s * sc);
           if (inBox(px, py, pz, 0, 1.2, 0.2, 0.8, 0.5, 0.7)) mod = 'ammo';         // 弹药架(黄·中部)
           else if (inBox(px, py, pz, 0, 1.1, -2.6, 0.9, 0.5, 0.7)) mod = 'engine';   // 发动机(橙·尾)
-          else if (inBox(px, py, pz, 0, 1.0, 1.8, 0.8, 0.5, 0.8)) mod = 'crew';     // 乘员舱(绿·前)
+          else if (inBox(px, py, pz, 0, 1.0, 1.8, 0.8, 0.5, 0.8)) { mod = 'crew'; crewPz = pz; }   // 乘员舱(绿·前)
           else if (inBox(px, py, pz, -1.0, 0.9, -0.5, 0.3, 0.4, 0.5)) mod = 'fuel'; // 油箱(红·侧后)
         }
         if (mod === 'ammo') {   // 弹道扫过弹药架:70% 殉爆!
@@ -1581,7 +1597,8 @@ class Tank {
         }
         if (mod === 'crew') {
           this.takeDamage(damage * mult);
-          const pick = ['gunner', 'driver', 'loader'][Math.floor(Math.random() * 3)];
+          // 按位置细化:弹道靠最前(驾驶位)→驾驶员;其余车体→炮手/装填手
+          const pick = crewPz > 2.2 * sc ? 'driver' : (Math.random() < 0.5 ? 'gunner' : 'loader');
           this.crew[pick] = 5;
           this.lastCrit = { gunner: '炮手阵亡', driver: '驾驶员阵亡', loader: '装填手阵亡' }[pick];
           return 'pen';
@@ -2169,13 +2186,14 @@ class TankAI {
       const d = new THREE.Vector3().subVectors(ob.position, tank.position);
       d.y = 0;
       const dd = d.length();
-      if (dd < 14) {
+      if (dd < 22) {   // 探测 14→22m:提前拐弯,不再顶到墙前才急转(巷战蹭墙的根因)
         const dotFwd = d.dot(fwd);
         if (dotFwd > 0) {
           const sideDist = d.dot(right);
-          if (Math.abs(sideDist) < (ob.radius || 3) + 3) {
-            turn += sideDist >= 0 ? -1 : 1;
-            throttle *= 0.4;
+          if (Math.abs(sideDist) < (ob.radius || 3) + 3.5) {
+            const urgency = (22 - dd) / 22;   // 越近越急:远时轻推提前变线,近时满舵+减速
+            turn += (sideDist >= 0 ? -1 : 1) * (0.35 + urgency * 0.65);
+            throttle *= 1 - urgency * 0.6;
           }
         }
       }
@@ -2614,6 +2632,8 @@ class Sfx {
   // 装填完毕：上行双"叮"（战雷肌肉记忆）。炮塔旋转：低频液压短嗡（音量小）。
   loaded() { this._blip(880, 880, 0.06, 0.22, 'sine'); setTimeout(() => this._blip(1320, 1320, 0.09, 0.22, 'sine'), 70); }
   turretSnd() { this._blip(140, 110, 0.16, 0.10, 'sawtooth'); }
+  // 远处战场炮声:超低频闷响,音量小——氛围用(随机间隔由 Game 触发)
+  distant() { this._oneshot(1.4, 'lowpass', 150, 0.05, null, 60); }
   ui() { this._blip(520, 520, 0.05, 0.18, 'square'); }
   startEngine() {
     this._ensure(); if (!this.ctx || this.engine) return;
@@ -2804,6 +2824,7 @@ class Game {
 
   // —— 比赛初始化 ——
   _initMatch(mode) {
+    this.stats = { hits: 0, pen: 0, bounce: 0, nopen: 0, ammoKills: 0, fired: 0 };   // 结算统计(发射数在 _updateHUD 前从 em.pShells 汇总)
     applyDifficulty(this.difficulty); // 按难度重算 CONFIG
     this.terrain = createTerrain(this.scene, this.worldwar ? 'tank' : mode, this.mapId);   // 世界大战永远用坦克地形（不管玩家选飞机还是坦克）
     if (this.em && this.terrain && this.terrain.obstacles) this.em.obstacles = this.terrain.obstacles;   // 障碍物注入 em，供炮弹碰撞检测
@@ -3204,6 +3225,11 @@ class Game {
     }
     this.sfx.resume();
     this._updateTouchButtons();
+    // 远处战场氛围炮声:战斗中随机 4~9s 一声闷响
+    if (this.state === 'playing' && this.enemies && this.enemies.length) {
+      this._ambT = (this._ambT ?? randRange(3, 6)) - dt;
+      if (this._ambT <= 0) { this.sfx.distant(); this._ambT = randRange(4, 9); }
+    }
     const pl = this.player;
     if (pl && pl.alive) {
       if (!this.sfx.engine) this.sfx.startEngine();
@@ -3264,6 +3290,12 @@ class Game {
       const hits = this.em.checkCollisions(targets);
       for (const h of hits) {
         if (h.owner === this.player) {
+          // 结算统计:命中分类(跳弹/未击穿/溅射/击穿)与殉爆数
+          this.stats.hits++;
+          if (h.verdict === 'bounce') this.stats.bounce++;
+          else if (h.verdict === 'nopen' || h.verdict === 'splash') this.stats.nopen++;
+          else this.stats.pen++;
+          if (h.killed && h.crit === '弹药殉爆') this.stats.ammoKills++;
           // 击杀回放触发：【仅击杀】敌坦克那一发播(主炮/机枪/航炮都一样)——
           // 未击杀的命中不播：真车还活着，克隆车叠在原地就是"幽灵坦克"，且频繁命中会抽搐。
           if (h.target && typeof h.target.forwardVector !== 'function'
@@ -3273,7 +3305,7 @@ class Game {
               const tur = h.target.popTurret(this.scene);
               if (tur) this.em.addEffect(new TurretFly(tur, this.em));
             }
-            this._startKillReplay(h.target, h.hitPoint, h.killed, h.verdict, h.proj, h.proj && h.proj.shellDef ? h.proj.shellDef.id : null);
+            this._startKillReplay(h.target, h.hitPoint, h.killed, h.verdict, h.proj, h.proj && h.proj.shellDef ? h.proj.shellDef.id : null, h.crit);
           }
           // 命中反馈按判定结果分级：击毁(红)/致命(橙)/击穿(金)/未击穿(灰蓝)/跳弹(白闪)
           if (h.verdict === 'bounce') {
@@ -3386,7 +3418,7 @@ class Game {
   // 命中敌坦克瞬间才显示。全部回放对象(重演弹丸/克隆车/内部模块/内部爆炸)放【渲染层1】，
   // 回放相机只看层1+层0(场景)，主相机不开层1 → 玩家视角永远看不到任何"幽灵"。
   // 弹道用弹丸出生快照(launchPos/launchVel)按同一物理公式(v=v0+g·t)慢放，完美复现真实轨迹含下坠。
-  _startKillReplay(tank, hitPoint, killed, verdict, proj, shellId) {
+  _startKillReplay(tank, hitPoint, killed, verdict, proj, shellId, crit) {
     if (this._shellcam) this._endShellcam();   // 连杀：新击杀替换当前回放，总播最新一发
     const sc = {
       t: 0, cam: new THREE.PerspectiveCamera(48, 1.6, 0.5, 3000),
@@ -3438,6 +3470,10 @@ class Game {
     mk(0, 1.2, 0.2, 1.6, 1.0, 1.4, 0xffe066);      // 弹药架（黄·中部炮塔下,打中70%殉爆）
     mk(0, 1.1, -2.6, 1.8, 1.0, 1.4, 0xffa96b);     // 发动机（橙·尾部）
     mk(-1.0, 0.9, -0.5, 0.5, 0.7, 1.0, 0xff7d7d);  // 油箱（红·侧后）
+    // 受击模块闪红:死因映射到对应模块,透视期间红脉冲(战雷X光"看到哪被打坏")
+    const critMod = { '弹药殉爆': 1, '弹药起火': 1, '发动机起火': 2, '发动机受损': 2, '油箱起火': 3, '炮手阵亡': 0, '驾驶员阵亡': 0, '装填手阵亡': 0, '炮管卡死': 0 }[crit] ?? -1;
+    sc.hitModIdx = critMod;
+    sc.mods = modGroup.children.slice();   // [乘员舱,弹药架,发动机,油箱]
     modGroup.visible = false;
     // —— 重演弹丸：胶囊弹体（沿速度方向），不再发光金球 ——
     sc.bullet = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 1.0, 4, 8), new THREE.MeshBasicMaterial({ color: 0xffe9b0 }));
@@ -3503,6 +3539,22 @@ class Game {
       const isPen = sc.verdict !== 'bounce' && sc.verdict !== 'nopen' && sc.verdict !== 'splash'
         && !(sc.shellId === 'he' && (sc.verdict === 'bounce' || sc.verdict === 'nopen' || sc.verdict === 'splash' || !sc.killed));
       if (mg) mg.visible = isPen;
+      // 受击模块闪红:透视开启后,被打坏的模块红脉冲(其他模块保持原色)——
+      // 玩家在回放里直接"看到"是哪个模块炸了,部位判定的可视化教学
+      if (isPen && sc.mods && sc.hitModIdx >= 0 && sc.mods[sc.hitModIdx]) {
+        const m = sc.mods[sc.hitModIdx];
+        m.userData.origColor = m.userData.origColor || m.material.color.getHex();
+        m.material.color.setHex(0xff2818);
+        m.children[0].material.color.setHex(0xff5040);   // 边线也红
+        m.userData.flash = true;
+      }
+      if (sc.mods) {   // 红脉冲:scale 呼吸
+        for (const m of sc.mods) {
+          if (!m.userData.flash) continue;
+          const pulse = 1 + Math.sin(sc.t * 14) * 0.12;
+          m.scale.setScalar(pulse);
+        }
+      }
       // 特写机位（跳弹/未击穿略远一点）
       const dist = sc.frameDist * (isPen ? 1 : 1.1);
       dPos.set(sc.vpos.x + Math.sin(sc.a0 + 1.0) * dist, sc.vpos.y + sc.frameR * 1.1, sc.vpos.z + Math.cos(sc.a0 + 1.0) * dist);
@@ -3953,10 +4005,14 @@ class Game {
     this.hud.positionLead(0, 0, false);   // 结束时清提前量瞄准环，防卡屏残留
     if (this._bombX) this._bombX.style.display = 'none';
     this.hud.setCenterMessage('');
+    // 弹种发射数汇总 → 结算统计面板
+    const sh = (this.em && this.em.pShells) || { ap: 0, apcr: 0, he: 0 };
+    const st = this.stats; st.fired = sh.ap + sh.apcr + sh.he;
     this.hud.showResult({
       win,
       kills: this.kills,
       endless: this.endless,
+      stats: { ...st, shells: sh },
       onAgain: () => this.restart(this.mode),
       onMenu: () => { if (this.onExit) this.onExit(); },
     });
