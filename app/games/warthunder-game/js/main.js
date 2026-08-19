@@ -896,17 +896,16 @@ class TurretFly {
 class Wreck {
   constructor(tank, em) {
     this.mesh = tank.group;
-    this.tank = tank;   // 回放联动:tank._replaying 期间隐藏(见 update)
     this.mesh.traverse((c) => { if (c.material && c.material.color) c.material.color.multiplyScalar(0.22); });   // 焦黑
+    this.mesh.traverse((c) => { c.layers && c.layers.set(2); });   // 层2(见 update 注释)
     this.pos = tank.position;
     this.life = 8; this.alive = true; this.em = em; this.smokeT = 0;
   }
   update(dt) {
     this.life -= dt;
     if (this.life <= 0) { this.alive = false; return; }
-    // 击杀回放期间隐藏:黑色残骸(不透明)正好叠在回放的半透明克隆车上,把透视全挡住
-    // ("整个车都是黑的"就是它)。回放结束自动回来继续烧。
-    this.mesh.visible = !(this.tank && this.tank._replaying);
+    // 残骸放渲染层2:主相机开了层2(主画面立即可见),回放相机不开(小窗不显示——
+    // 黑残骸会叠在半透明克隆车上挡透视)。比"回放期间隐藏"好:主画面不再延迟突现。
     this.smokeT -= dt;
     if (this.smokeT <= 0) {   // 持续黑烟
       this.em.addEffect(new Smoke(this.pos.clone().add(new THREE.Vector3(randRange(-1.5, 1.5), 2, randRange(-1.5, 1.5))), 0x1a1815, randRange(1.2, 2.2), 2.2, 1.2));
@@ -1532,58 +1531,70 @@ class Tank {
         mult = 1 + Math.min(0.3, (projectile.pen / eff - 1) * 0.3);
       }
     }
-    // —— 部位判定（战雷式"打哪儿伤哪儿"）：弹着点转车体局部坐标（车头=+z），
-    // 判定框与击杀回放里显示的内部模块严格一致——弹药架就在那，打中就炸。
+    // —— 部位判定（战雷式"弹道扫过哪个模块哪个炸"）：弹着点是碰撞球面点(半径~3m),
+    // 和车体框几乎永远对不上(旧单点判定的bug,打十几发都不殉爆的根因)。正确做法:
+    // 穿甲弹沿弹道方向在车体内穿行,采样这条线段与各内部模块(位置=回放X光模块)求交。
     if (hitPoint) {
       const h = this.heading;
-      const dx = hitPoint.x - this.group.position.x;
-      const dz = hitPoint.z - this.group.position.z;
-      const lx = dx * Math.cos(h) - dz * Math.sin(h);   // 局部右(+x)
-      const lz = dx * Math.sin(h) + dz * Math.cos(h);   // 局部前(+z)
-      const ly = hitPoint.y - this.group.position.y;
-      const sc = this.radius / 3;      // 车型缩放(与回放模块一致)
-      const T = 0.7 * sc;              // 判定容差(球面投影有误差)
-      // 弹药架(车体中部炮塔下)：70% 殉爆秒杀，否则弹药起火
-      if (Math.abs(lz - 0.2 * sc) < (1.2 * sc + T) && Math.abs(lx) < (0.8 * sc + T) && ly < 2.4 * sc) {
-        if (Math.random() < 0.7) { this.lastCrit = '弹药殉爆'; this.takeDamage(this.health); return 'pen'; }
-        this.takeDamage(damage * mult); this.burning = true; this.lastCrit = '弹药起火';
-        return 'pen';
-      }
-      // 炮塔(高处)：炮手阵亡(塔里的人)/炮管卡死 各半
-      if (ly > 2.4 * sc) {
+      const toL = (wx, wy, wz) => {
+        const dx = wx - this.group.position.x, dz = wz - this.group.position.z;
+        return [dx * Math.cos(h) - dz * Math.sin(h), wy - this.group.position.y, dx * Math.sin(h) + dz * Math.cos(h)];
+      };
+      const sc = this.radius / 3;
+      const [lx0, ly0, lz0] = toL(hitPoint.x, hitPoint.y, hitPoint.z);
+      // 表面部位:炮塔(高处)/履带(侧面下盘)——单点判定即可
+      if (ly0 > 2.4 * sc) {
         this.takeDamage(damage * mult);
         if (Math.random() < 0.5) { this.crew.gunner = 5; this.lastCrit = '炮手阵亡'; }
         else { this.modules.barrel = 5; this.lastCrit = '炮管卡死'; }
         return 'pen';
       }
-      // 履带(侧面下盘)
-      if (Math.abs(lx) > 1.4 * sc && ly < 1.3 * sc) {
+      if (Math.abs(lx0) > 1.4 * sc && ly0 < 1.3 * sc) {
         this.takeDamage(damage * mult); this.modules.track = 6; this.lastCrit = '履带断裂';
         return 'pen';
       }
-      // 发动机舱(车尾)：发动机损坏，40% 起火
-      if (lz < -1.3 * sc) {
-        this.takeDamage(damage * mult); this.modules.engine = 7;
-        if (Math.random() < 0.4) { this.burning = true; this.lastCrit = '发动机起火'; }
-        else this.lastCrit = '发动机受损';
-        return 'pen';
-      }
-      // 乘员舱(车体前部)：必伤一名乘员
-      if (lz > 0.5 * sc) {
-        this.takeDamage(damage * mult);
-        const pick = ['gunner', 'driver', 'loader'][Math.floor(Math.random() * 3)];
-        this.crew[pick] = 5;
-        this.lastCrit = { gunner: '炮手阵亡', driver: '驾驶员阵亡', loader: '装填手阵亡' }[pick];
-        return 'pen';
-      }
-      // 油箱(侧后)：60% 起火
-      if (Math.abs(lx) > 0.7 * sc) {
-        this.takeDamage(damage * mult);
-        if (Math.random() < 0.6) { this.burning = true; this.lastCrit = '油箱起火'; }
-        else this.lastCrit = null;
-        return 'pen';
+      // 内部模块:弹道线段采样(命中点→沿弹速方向穿入 5·sc,步长 0.5·sc)
+      const vl = projectile.velocity.length();
+      if (vl > 1) {
+        const dvx = projectile.velocity.x / vl, dvy = projectile.velocity.y / vl, dvz = projectile.velocity.z / vl;
+        const TOL = 0.3 * sc;
+        const inBox = (px, py, pz, cx, cy, cz, hx, hy, hz) =>
+          Math.abs(px - cx * sc) < hx * sc + TOL && Math.abs(py - cy * sc) < hy * sc + TOL && Math.abs(pz - cz * sc) < hz * sc + TOL;
+        let mod = null;
+        for (let s = 0.8; s <= 5 && !mod; s += 0.5) {
+          const [px, py, pz] = toL(hitPoint.x + dvx * s * sc, hitPoint.y + dvy * s * sc, hitPoint.z + dvz * s * sc);
+          if (inBox(px, py, pz, 0, 1.2, 0.2, 0.8, 0.5, 0.7)) mod = 'ammo';         // 弹药架(黄·中部)
+          else if (inBox(px, py, pz, 0, 1.1, -2.6, 0.9, 0.5, 0.7)) mod = 'engine';   // 发动机(橙·尾)
+          else if (inBox(px, py, pz, 0, 1.0, 1.8, 0.8, 0.5, 0.8)) mod = 'crew';     // 乘员舱(绿·前)
+          else if (inBox(px, py, pz, -1.0, 0.9, -0.5, 0.3, 0.4, 0.5)) mod = 'fuel'; // 油箱(红·侧后)
+        }
+        if (mod === 'ammo') {   // 弹道扫过弹药架:70% 殉爆!
+          if (Math.random() < 0.7) { this.lastCrit = '弹药殉爆'; this.takeDamage(this.health); return 'pen'; }
+          this.takeDamage(damage * mult); this.burning = true; this.lastCrit = '弹药起火';
+          return 'pen';
+        }
+        if (mod === 'engine') {
+          this.takeDamage(damage * mult); this.modules.engine = 7;
+          if (Math.random() < 0.4) { this.burning = true; this.lastCrit = '发动机起火'; }
+          else this.lastCrit = '发动机受损';
+          return 'pen';
+        }
+        if (mod === 'crew') {
+          this.takeDamage(damage * mult);
+          const pick = ['gunner', 'driver', 'loader'][Math.floor(Math.random() * 3)];
+          this.crew[pick] = 5;
+          this.lastCrit = { gunner: '炮手阵亡', driver: '驾驶员阵亡', loader: '装填手阵亡' }[pick];
+          return 'pen';
+        }
+        if (mod === 'fuel') {
+          this.takeDamage(damage * mult);
+          if (Math.random() < 0.6) { this.burning = true; this.lastCrit = '油箱起火'; }
+          else this.lastCrit = null;
+          return 'pen';
+        }
       }
     }
+
     // 兜底：普通击穿（保留全局小概率殉爆/起火的随机性）
     const r = Math.random();
     const c = CONFIG.rules.crit;
@@ -2651,6 +2662,7 @@ class Game {
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.5, 3000);
+    this.camera.layers.enable(2);   // 层2=燃烧残骸(回放相机不开,避免黑残骸挡克隆车透视)
 
     setupEnvironment(this.scene, mode);
 
@@ -3388,7 +3400,6 @@ class Game {
       upY: new THREE.Vector3(0, 1, 0),
     };
     sc.tank = tank;   // 受害车引用（update 里算自适应取景用）
-    tank._replaying = true;   // 通知 Wreck 残骸隐藏,别挡克隆车透视
     sc.shellId = shellId || 'ap';   // 弹种：榴弹(he)回放=触装甲即炸,不穿入
     if (!sc.p0 || !sc.v0) return;
     // 真实飞行时长：8ms 细步长扫描整条抛物线，取离弹着点最近的时刻（数值稳定）
@@ -3603,7 +3614,6 @@ class Game {
   _endShellcam() {
     const sc = this._shellcam;
     if (!sc) return;
-    if (sc.tank) sc.tank._replaying = false;   // 残骸恢复显示继续烧
     // ⚠️ 克隆车 clone(true) 与真车【共享 geometry】——绝不能 dispose，否则把（可能还活着的）
     // 真车 GPU 资源也毁掉，主视角出现渲染异常的幽灵。只释放我们自建的资源：
     // 模块/弹体/枪口闪光/火球/火柱；克隆车只移出场景，geometry 留给真车（或随真车销毁）。
