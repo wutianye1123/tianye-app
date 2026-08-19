@@ -407,16 +407,24 @@ class HUD {
   }
 
   // 模块损伤提示（坦克）：{ track, barrel, engine } 剩余秒数。
-  setModules(mods) {
+  setModules(mods, crew = null) {
     if (!this.modulesEl) this.modulesEl = this.container.querySelector('#modules');
     if (!this.modulesEl) return;
     if (!mods) { this.modulesEl.innerHTML = ''; return; }
     const col = (v) => v > 0 ? '#f44' : '#4f4';
+    const ccol = (v) => v > 0 ? '#fa0' : '#4f4';   // 乘员伤亡用橙色（可恢复，区别于红色损坏）
     const label = (v) => v > 0 ? `${Math.ceil(v)}s` : 'OK';
-    this.modulesEl.innerHTML =
+    let html =
       `<span style="color:${col(mods.track)}">🛞履带 ${label(mods.track)}</span> ` +
       `<span style="color:${col(mods.barrel)};margin-left:8px">🎯炮管 ${label(mods.barrel)}</span> ` +
       `<span style="color:${col(mods.engine)};margin-left:8px">⚙️发动机 ${label(mods.engine)}</span>`;
+    if (crew) {   // 乘员条：炮手/驾驶员/装填手（阵亡倒计时，替补自动恢复）
+      html += `<br>` +
+        `<span style="color:${ccol(crew.gunner)}">👤炮手 ${label(crew.gunner)}</span> ` +
+        `<span style="color:${ccol(crew.driver)};margin-left:8px">👤驾驶员 ${label(crew.driver)}</span> ` +
+        `<span style="color:${ccol(crew.loader)};margin-left:8px">👤装填手 ${label(crew.loader)}</span>`;
+    }
+    this.modulesEl.innerHTML = html;
   }
 
   // 命中反馈：在准星处闪一个标记。hit=击穿(金)，crit=致命(橙)，kill=击毁(红)，
@@ -830,6 +838,85 @@ class SplashRing {
   dispose() { this.mesh.material.dispose(); }   // 几何共享,只释放材质
 }
 
+// 殉爆炮塔飞出：炮塔脱离车体（调用前已 scene.attach 保持世界变换），抛物线+旋转，
+// 落地砸出火光后趴地到寿命结束，随残骸一起消失。
+class TurretFly {
+  constructor(turret, em) {
+    this.mesh = turret;
+    this.vel = new THREE.Vector3(randRange(-4, 4), 14 + randRange(0, 5), randRange(-4, 4));
+    this.spin = new THREE.Vector3(randRange(-5, 5), randRange(-7, 7), randRange(-5, 5));
+    this.life = 6; this.alive = true; this.landed = false; this.em = em;
+  }
+  update(dt) {
+    this.life -= dt;
+    if (this.life <= 0) { this.alive = false; return; }
+    if (!this.landed) {
+      this.vel.y -= 22 * dt;   // 重力
+      this.mesh.position.addScaledVector(this.vel, dt);
+      this.mesh.rotation.x += this.spin.x * dt;
+      this.mesh.rotation.y += this.spin.y * dt;
+      this.mesh.rotation.z += this.spin.z * dt;
+      const g = terrainHeight(this.mesh.position.x, this.mesh.position.z) + 0.6;
+      if (this.mesh.position.y <= g) {
+        this.landed = true;
+        this.mesh.position.y = g;
+        this.em.addEffect(new Explosion(this.mesh.position.clone(), 2.2, 0xff8030));   // 落地砸火光
+      }
+    }
+  }
+  dispose() { this.mesh.traverse((c) => { if (c.geometry) c.geometry.dispose(); if (c.material) { Array.isArray(c.material) ? c.material.forEach((m) => m.dispose()) : c.material.dispose(); } }); }
+}
+
+// 燃烧残骸：死车不再当场销毁——车体压黑留场、持续冒黑烟 8s、末 1.5s 淡出再销毁（资源移交本特效）。
+class Wreck {
+  constructor(tank, em) {
+    this.mesh = tank.group;
+    this.mesh.traverse((c) => { if (c.material && c.material.color) c.material.color.multiplyScalar(0.22); });   // 焦黑
+    this.pos = tank.position;
+    this.life = 8; this.alive = true; this.em = em; this.smokeT = 0;
+  }
+  update(dt) {
+    this.life -= dt;
+    if (this.life <= 0) { this.alive = false; return; }
+    this.smokeT -= dt;
+    if (this.smokeT <= 0) {   // 持续黑烟
+      this.em.addEffect(new Smoke(this.pos.clone().add(new THREE.Vector3(randRange(-1.5, 1.5), 2, randRange(-1.5, 1.5))), 0x1a1815, randRange(1.2, 2.2), 2.2, 1.2));
+      this.smokeT = 0.22;
+    }
+    if (this.life < 1.5) {   // 末段淡出
+      const o = Math.max(0, this.life / 1.5);
+      this.mesh.traverse((c) => { if (c.material) { c.material.transparent = true; c.material.opacity = o; } });
+    }
+  }
+  dispose() { this.mesh.traverse((c) => { if (c.geometry) c.geometry.dispose(); if (c.material) { Array.isArray(c.material) ? c.material.forEach((m) => m.dispose()) : c.material.dispose(); } }); }
+}
+
+// 烟雾弹烟幕：大团半透明灰白球，1s 膨胀成型、持续 12s、末 2s 淡出。
+// 同步登记到 em.smokes（AI 视线判定用），结束自动注销。
+class SmokeScreen {
+  constructor(position, em) {
+    this.mesh = new THREE.Mesh(new THREE.SphereGeometry(3.4, 12, 12), new THREE.MeshBasicMaterial({ color: 0xcfd4d8, transparent: true, opacity: 0, depthWrite: false }));
+    this.mesh.position.copy(position); this.mesh.position.y += 1.6;
+    this.life = 12; this.maxLife = 12; this.alive = true;
+    this.smokeRec = { pos: this.mesh.position, r: 4.2 };   // AI 判定记录
+    if (em) { em.smokes.push(this.smokeRec); this._em = em; }
+  }
+  update(dt) {
+    this.life -= dt;
+    if (this.life <= 0) {
+      this.alive = false;
+      if (this._em) { const i = this._em.smokes.indexOf(this.smokeRec); if (i >= 0) this._em.smokes.splice(i, 1); }
+      return;
+    }
+    const t = 1 - this.life / this.maxLife;
+    const grow = Math.min(1, t * 12);              // 前 ~0.08 快速成型(数值取大让淡入够快)
+    this.mesh.scale.setScalar(0.3 + grow * 0.7 + t * 0.25);
+    const fade = this.life < 2 ? this.life / 2 : 1;
+    this.mesh.material.opacity = 0.85 * grow * fade;
+  }
+  dispose() { this.mesh.geometry.dispose(); this.mesh.material.dispose(); }
+}
+
 // ===== js/core/EntityManager.js =====
 
 
@@ -842,6 +929,7 @@ class EntityManager {
     this.projectiles = [];
     this.effects = [];
     this.obstacles = [];   // 障碍物列表（Game 从 terrain 注入，供炮弹碰撞检测）
+    this.smokes = [];      // 活跃烟幕记录 [{pos, r}]（AI 视线判定;SmokeScreen 自维护增删）
   }
 
   addTank(t) { this.tanks.push(t); this.scene.add(t.group); t.em = this; }
@@ -957,7 +1045,11 @@ class EntityManager {
     this.tanks = this.tanks.filter((t) => {
       if (!t.alive) {
         if (t === hold) return true;   // 保留：X 光回放正在展示这辆车
-        _dispose(t.group); this.scene.remove(t.group); removed.push(t); return false;
+        removed.push(t);   // 计分/击杀 feed 仍即时
+        // #2 燃烧残骸：车体不当场销毁——压黑+冒烟 8s 再由 Wreck 淡出销毁（资源移交）。
+        // 附带好处：回放克隆车与真车共享 geometry，真车延迟销毁后回放期间永远安全。
+        this.addEffect(new Wreck(t, this));
+        return false;
       }
       return true;
     });
@@ -973,7 +1065,7 @@ class EntityManager {
     for (const t of this.tanks) this.scene.remove(t.group);
     for (const p of this.planes) this.scene.remove(p.group);
     for (const p of this.projectiles) this.scene.remove(p.mesh);
-    this.tanks = []; this.planes = []; this.projectiles = []; this.effects = [];
+    this.tanks = []; this.planes = []; this.projectiles = []; this.effects = []; this.smokes = [];
   }
 }
 
@@ -1031,6 +1123,7 @@ class Tank {
     this.extCooldown = 0;
     this._lastAttacker = null;
     this.modules = { track: 0, barrel: 0, engine: 0 }; // 模块损伤：>0 表示损坏剩余秒数
+    this.crew = { gunner: 0, driver: 0, loader: 0 };   // 乘员：>0 = 阵亡剩余秒(炮手停塔/驾驶员趴窝/装填手装填×2.5)
 
     // 按队伍 + 型号的性能参数（敌方更弱更慢更不准）
     this.maxSpeed = (isEnemy ? CONFIG.tank.enemySpeed : CONFIG.tank.speed) * tt.speed;
@@ -1208,6 +1301,7 @@ class Tank {
   get position() { return this.group.position; }
 
   drive(throttle, turn, dt) {
+    if (this.crew && this.crew.driver > 0) throttle = 0;   // 驾驶员阵亡：趴窝(转向仍可)
     this.lastThrottle = throttle;
     this._lastTurn = turn;
     this.heading += turn * this.turnSpeed * dt;
@@ -1232,6 +1326,7 @@ class Tank {
   // worldPoint：世界锁定瞄准点。炮塔偏航恒速 slew 向它、对齐即停；
   // 炮管俯仰直接瞄向该点（自动压炮打近/低处目标，范围更大）。rotation.x 正值=炮口下压。
   aimTurretAt(worldPoint, dt, elevInput = 0) {
+    if (this.crew && this.crew.gunner > 0) return;   // 炮手阵亡：炮塔停转(等替补)
     const dx = worldPoint.x - this.group.position.x;
     const dz = worldPoint.z - this.group.position.z;
     const horiz = Math.sqrt(dx * dx + dz * dz) || 0.0001;
@@ -1268,8 +1363,9 @@ class Tank {
   }
 
   update(dt) {
-    if (this.reloadTimer > 0) this.reloadTimer -= dt;
+    if (this.reloadTimer > 0) this.reloadTimer -= dt / (this.crew && this.crew.loader > 0 ? 2.5 : 1);   // 装填手阵亡装填×2.5慢
     if (this.mgTimer > 0) this.mgTimer -= dt;
+    if (this.crew) for (const k in this.crew) if (this.crew[k] > 0) this.crew[k] = Math.max(0, this.crew[k] - dt);   // 乘员替补恢复
     if (this.burning && this.alive) {
       this.health -= CONFIG.rules.crit.burnDps * dt;
       if (this.health <= 0) { this.health = 0; this.alive = false; }
@@ -1384,6 +1480,11 @@ class Tank {
         if (m < 0.22) { this.modules.track = 6; this.lastCrit = '履带断裂'; }
         else if (m < 0.36) { this.modules.barrel = 5; this.lastCrit = '炮管卡死'; }
         else if (m < 0.46) { this.modules.engine = 7; this.lastCrit = '发动机受损'; }
+        else if (m < 0.81) {   // 乘员伤亡 35%（战雷式：击穿后效打人）
+          const pick = ['gunner', 'driver', 'loader'][Math.floor(Math.random() * 3)];
+          this.crew[pick] = 5;
+          this.lastCrit = { gunner: '炮手阵亡', driver: '驾驶员阵亡', loader: '装填手阵亡' }[pick];
+        }
         else this.lastCrit = null;
       }
     }
@@ -1393,6 +1494,14 @@ class Tank {
   takeDamage(d) {
     this.health -= d;
     if (this.health <= 0) { this.health = 0; this.alive = false; }
+  }
+
+  // 殉爆炮塔飞出：把炮塔从车体脱离（scene.attach 保世界变换），返回炮塔供 TurretFly 管理。
+  popTurret(scene) {
+    if (!this.turret || this._turretPopped) return null;
+    this._turretPopped = true;
+    scene.attach(this.turret);
+    return this.turret;
   }
 
   // 灭火：起火时使用，8 秒冷却。返回 true=已灭火，false=未起火，null=冷却中。
@@ -1889,8 +1998,11 @@ class TankAI {
   }
 
   update(dt, ctx) {
-    const { target, entityManager: em, obstacles = [] } = ctx;
+    const { target, entityManager: em, obstacles = [], smokes = [] } = ctx;
     const tank = this.tank;
+    // 烟幕判定：目标或自己在烟里 → 不开火（看不清,别浪费炮弹;战雷烟幕核心作用）
+    const inSmoke = (p) => smokes.some((s) => p.distanceToSquared(s.pos) < s.r * s.r);
+    const smokeBlind = target && !target.isZone && (inSmoke(target.position) || inSmoke(tank.position));
     if (!tank.alive || !target || !target.alive) {
       tank.drive(0, 0, dt);
       return;
@@ -1909,7 +2021,7 @@ class TankAI {
       let hd = flee - tank.heading; hd = Math.atan2(Math.sin(hd), Math.cos(hd));
       tank.drive(-0.9, clamp(hd * 2, -1, 1), dt);
       tank.aimTurretAt(target.position, dt);
-      if (tank.canFire() && dist < 130 && Math.random() < 0.25) tank.tryFire(em);   // 撤退时开火更保守（原 0.5 比正常 enemyFireChance 0.4 还高，反直觉）
+      if (!smokeBlind && tank.canFire() && dist < 130 && Math.random() < 0.25) tank.tryFire(em);   // 撤退时开火更保守（原 0.5 比正常 enemyFireChance 0.4 还高，反直觉）
       return;
     }
 
@@ -1964,7 +2076,7 @@ class TankAI {
     const aimThresh = isEnemy ? 0.06 : 0.10;
     const fireChance = isEnemy ? CONFIG.tank.enemyFireChance : 0.85;
     const isAirTarget = typeof target.forwardVector === 'function';   // 目标是飞机
-    if (!target.isZone && tank.canFire() && dist < 160 && Math.abs(aimDiff) < aimThresh && Math.random() < fireChance) {
+    if (!smokeBlind && !target.isZone && tank.canFire() && dist < 160 && Math.abs(aimDiff) < aimThresh && Math.random() < fireChance) {
       tank.tryFire(em);
     }
     // 打飞机时额外用机枪（密集火力追着飞机打）；敌方不用（太超模）
@@ -2486,7 +2598,7 @@ class Game {
 
   _setupHint() {
     if (this.mode === 'tank') {
-      this.hud.setHint('<b>点击画面锁定鼠标</b>（炮塔可无限转，Esc 暂停）· <b>WASD</b> 车体 · <b>左键</b>主炮 · <b>1/2/3</b>切弹种 · <b>空格</b>机枪 · <b>Shift</b>瞄准镜 · <b>R</b>修车 · <b>F</b>灭火');
+      this.hud.setHint('<b>点击画面锁定鼠标</b>（炮塔可无限转，Esc 暂停）· <b>WASD</b> 车体 · <b>左键</b>主炮 · <b>1/2/3</b>切弹种 · <b>空格</b>机枪 · <b>Shift</b>瞄准镜 · <b>R</b>修车 · <b>F</b>灭火 · <b>G</b>烟雾弹');
     } else {
       this.hud.setHint('<b>点击画面锁定鼠标</b>（指哪飞哪，自动改平，Esc 暂停）· <b>W/S</b>油门 · <b>Shift</b>加力 · <b>左键</b>开火 · <b>右键/X</b>导弹(喷气机) · <b>F</b>灭火');
     }
@@ -2518,6 +2630,25 @@ class Game {
     this._tbBomb.style.display = isPlane ? '' : 'none';
     this._tbNuke.style.display = (isPlane && this.player.maxBombs > 0 && this.player.bombs >= 3) ? '' : 'none';
     this._tbJ.style.display = (this.worldwar && this.player && this.player.alive) ? '' : 'none';
+  }
+
+  // 烟雾弹：G 键,一局 3 发,车侧拉一排烟幕 12s(AI 视线被遮不开火)
+  _launchSmoke() {
+    const t = this.player;
+    if (!t || !t.alive || this.mode !== 'tank') return;
+    this._smokeAmmo = this._smokeAmmo ?? 3;
+    this._smokeCd = this._smokeCd ?? 0;
+    if (this._smokeAmmo <= 0) { this.hud.addFeed('💨 烟雾弹已用完', 'info'); return; }
+    if (this._smokeCd > 0) return;
+    this._smokeAmmo--; this._smokeCd = 2;
+    const h = t.heading;
+    const right = new THREE.Vector3(Math.cos(h), 0, -Math.sin(h));   // 车体右侧
+    for (let i = -2; i <= 2; i++) {   // 车侧横排 5 团(左右各8m),略偏后
+      const p = t.position.clone().addScaledVector(right, i * 4).addScaledVector(new THREE.Vector3(Math.sin(h), 0, Math.cos(h)), -3);
+      p.y = terrainHeight(p.x, p.z) + 1;
+      this.em.addEffect(new SmokeScreen(p, this.em));
+    }
+    this.hud.addFeed('💨 烟雾弹已释放 · 剩余 ' + this._smokeAmmo, 'info');
   }
 
   _entityLabel() { return this.mode === 'tank' ? '坦克' : '飞机'; }
@@ -2747,6 +2878,8 @@ class Game {
     if (inp.mouseDown) t.tryFire(this.em);
     if (inp.isDown('Space')) t.tryFireMG(this.em);
     if (this._consumePress(inp, 'KeyF')) this._extinguish(t);
+    if (this._consumePress(inp, 'KeyG')) this._launchSmoke();
+    if (this._smokeCd > 0) this._smokeCd -= dt;
     // 弹种切换（1/2/3）：偏好存 this._shellPref，跨重生/换车保留
     for (let i = 0; i < SHELLS.length; i++) {
       if (this._consumePress(inp, 'Digit' + (i + 1))) {
@@ -2981,13 +3114,13 @@ class Game {
         if (!e.ai) continue;
         let t = this._nearest(e.position, blueAlive);
         if (zoneT && (!t || e.position.distanceTo(t.position) > 75)) t = zoneT;   // 没附近敌人就抢点
-        e.ai.update(dt, { target: t, entityManager: this.em, obstacles });
+        e.ai.update(dt, { target: t, entityManager: this.em, obstacles, smokes: this.em.smokes });
       }
       for (const a of this.allies) {
         if (!a.ai) continue;
         let t = this._nearest(a.position, redAlive);
         if (zoneT && (!t || a.position.distanceTo(t.position) > 75)) t = zoneT;
-        a.ai.update(dt, { target: t, entityManager: this.em, obstacles });
+        a.ai.update(dt, { target: t, entityManager: this.em, obstacles, smokes: this.em.smokes });
       }
 
       this.em.update(dt);
@@ -3001,6 +3134,11 @@ class Game {
           // 未击杀的命中不播：真车还活着，克隆车叠在原地就是"幽灵坦克"，且频繁命中会抽搐。
           if (h.target && typeof h.target.forwardVector !== 'function'
               && h.proj && h.killed) {
+            // 殉爆名场面：炮塔整个抛飞（须在 cullDead 移车前 pop,炮塔才还在车体上）
+            if (h.crit === '弹药殉爆' && h.target.popTurret) {
+              const tur = h.target.popTurret(this.scene);
+              if (tur) this.em.addEffect(new TurretFly(tur, this.em));
+            }
             this._startKillReplay(h.target, h.hitPoint, h.killed, h.verdict, h.proj, h.proj && h.proj.shellDef ? h.proj.shellDef.id : null);
           }
           // 命中反馈按判定结果分级：击毁(红)/致命(橙)/击穿(金)/未击穿(灰蓝)/跳弹(白闪)
@@ -3617,7 +3755,7 @@ class Game {
         range: this.mode === 'tank' ? 300 : 340,
       });
       // 模块损伤提示（坦克）/ 提前量瞄准具（飞机）
-      this.hud.setModules(this.mode === 'tank' ? this.player.modules : null);
+      this.hud.setModules(this.mode === 'tank' ? this.player.modules : null, this.mode === 'tank' && this.player.crew ? this.player.crew : null);
       // 按载具实体类型判（worldwar 下 this.mode 可能与玩家实际载具不同步；坦克实体永远不显示 lead 提前量环）
       if (!this.worldwar && typeof this.player.forwardVector === 'function') this._updateLeadReticle(); else this.hud.positionLead(0, 0, false);   // worldwar 混战不显示 lead 提前量环（玩家反馈不需要）；纯飞机模式才显示
     } else {
