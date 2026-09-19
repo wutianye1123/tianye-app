@@ -4011,6 +4011,10 @@ class PlaneAI {
   // 核弹（B-21 类）：先模拟核弹落点，落点 50m 内聚着 ≥4 辆敌方坦克（一大群）才扔——单坦克/散兵不配蘑菇云。
   _maybeBomb(plane, target, em, dt) {
     if (!plane.maxBombs || plane.bombs <= 0 || !target) return;
+    // 投弹冷却 7~11s：投一颗歇一会儿——炸弹是节奏性大招，冷却期间机炮照常扫射，
+    // 否则带弹飞机全程只扔炸弹，机炮一次都不响。
+    this._bombCd = (this._bombCd || 0) - dt;
+    if (this._bombCd > 0) return;
     this._bombT = (this._bombT || 0) - dt;
     if (this._bombT > 0) return;
     this._bombT = 0.2;   // 落点模拟每 0.2s 一次
@@ -4025,14 +4029,14 @@ class PlaneAI {
           if (Math.hypot(t.position.x - npos.x, t.position.z - npos.z) < 50) cluster++;
         }
         const miss = Math.hypot(npos.x - target.position.x, npos.z - target.position.z);
-        if (cluster >= 4 && miss < 25) { plane.tryDropNuke(em); return; }
+        if (cluster >= 4 && miss < 25) { plane.tryDropNuke(em); this._bombCd = 20; return; }
       }
     }
     // 普通炸弹：落点贴目标才投
     const pos = this._simBombFall(plane, false);
     if (!pos) return;
     const miss = Math.hypot(pos.x - target.position.x, pos.z - target.position.z);
-    if (miss < 14) plane.tryDropBomb(em);
+    if (miss < 14) { plane.tryDropBomb(em); this._bombCd = 7 + Math.random() * 4; }
   }
 
   // 模拟一颗炸弹从当前姿态投下的落点（与 tryDropBomb/tryDropNuke 同物理公式）；落不到地返回 null
@@ -4055,7 +4059,7 @@ class PlaneAI {
   _tryFireGround(plane, target, aimDir, em, smokeBlind, obstacles, dist) {
     const fwd = plane.forwardVector();
     const isEnemy = plane.team === 'red';
-    const dotThresh = isEnemy ? 0.996 : 0.99;
+    const dotThresh = isEnemy ? 0.99 : 0.985;   // 开火锥角放宽：俯冲窗口短，0.996 太严导致带弹飞机机炮几乎不响
     const fireChance = isEnemy ? CONFIG.plane.enemyFireChance : 0.9;
     if (!smokeBlind && dist < 280 && fwd.dot(aimDir) > dotThresh && Math.random() < fireChance
         && !losBlocked(plane.position, target.position, obstacles)) {
