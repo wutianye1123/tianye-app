@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTexture, camoTexture, makeTrackTexture, makeNoiseTexture, terrainHeight, setTerrainScale } from './lib.js';
+import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTexture, camoTexture, makeTrackTexture, makeNoiseTexture, makeShadowTexture, makeGrassTexture, terrainHeight, setTerrainScale } from './lib.js';
 
 // 坦克贴地姿态用的临时对象（避免每帧分配）
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
@@ -169,6 +169,12 @@ function tankShellSpeed(kind) { return CONFIG.tank.shellSpeed * (shellById(kind)
 function shellById(id) { return SHELLS.find((s) => s.id === id) || SHELLS[0]; }
 
 function tankTypeById(id) { return TANK_TYPES.find((t) => t.id === id) || TANK_TYPES[0]; }
+
+// 国家归属（坦克/飞机共用，按国旗 icon）：德/美/中/俄 → 各自迷彩色板
+function nationOf(type) {
+  const t = TANK_TYPES.find((x) => x.id === type) || PLANE_TYPES.find((x) => x.id === type) || {};
+  return t.icon === '🇩🇪' ? 'ger' : (t.icon === '🇺🇸' ? 'usa' : (t.icon === '🇨🇳' ? 'chn' : 'rus'));
+}
 
 // 共享噪声凹凸纹理缓存：漆面一份(3,3)、地面一份(64,64)。每车各克隆一份会浪费纹理内存+绑定切换
 const _bumpCache = {};
@@ -1215,6 +1221,135 @@ class SplashRing {
   dispose() { this.mesh.material.dispose(); }   // 几何共享,只释放材质
 }
 
+// ===== 后处理管线：Bloom 泛光 + 色彩分级 + 暗角（战雷式成片质感）=====
+// 手写三 pass 全屏管线：阈值提亮→双向高斯模糊(半分辨率)→合成(泛光叠加/降饱和提对比/四角压暗/sRGB)。
+// 零外部依赖；主循环不再直接 renderer.render 到屏幕，全部经此管线。
+class PostFX {
+  constructor(renderer) {
+    this.renderer = renderer;
+    const pr = renderer.getPixelRatio();
+    const w = Math.max(2, Math.floor(innerWidth * pr)), h = Math.max(2, Math.floor(innerHeight * pr));
+    const mkRT = (tw, th) => new THREE.WebGLRenderTarget(tw, th, { type: THREE.HalfFloatType });
+    this.rtScene = mkRT(w, h);
+    this.rtA = mkRT(Math.max(2, w >> 1), Math.max(2, h >> 1));
+    this.rtB = mkRT(Math.max(2, w >> 1), Math.max(2, h >> 1));
+    this.quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
+    this.quad.frustumCulled = false;
+    this.quadScene = new THREE.Scene();
+    this.quadScene.add(this.quad);
+    const vs = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
+    this.matBright = new THREE.ShaderMaterial({
+      uniforms: { tDiffuse: { value: null } }, vertexShader: vs,
+      fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+        void main(){ vec3 c = texture2D(tDiffuse, vUv).rgb;
+          float l = dot(c, vec3(0.2126,0.7152,0.0722));
+          gl_FragColor = vec4(c * smoothstep(0.62, 0.92, l), 1.0); }`   // 只留高亮（炮口焰/爆炸/曳光/天空）
+    });
+    this.matBlur = new THREE.ShaderMaterial({
+      uniforms: { tDiffuse: { value: null }, dir: { value: new THREE.Vector2(1, 0) }, texel: { value: new THREE.Vector2(1, 1) } },
+      vertexShader: vs,
+      fragmentShader: `uniform sampler2D tDiffuse; uniform vec2 dir; uniform vec2 texel; varying vec2 vUv;
+        void main(){ vec3 s = texture2D(tDiffuse, vUv).rgb * 0.227;
+          vec2 o1 = dir * texel * 1.3846, o2 = dir * texel * 3.2308;
+          s += (texture2D(tDiffuse, vUv + o1).rgb + texture2D(tDiffuse, vUv - o1).rgb) * 0.3162;
+          s += (texture2D(tDiffuse, vUv + o2).rgb + texture2D(tDiffuse, vUv - o2).rgb) * 0.0702;
+          gl_FragColor = vec4(s, 1.0); }`   // 5 tap 线性采样高斯
+    });
+    this.matComp = new THREE.ShaderMaterial({
+      uniforms: { tDiffuse: { value: null }, tBloom: { value: null }, strength: { value: 0.85 } },
+      vertexShader: vs,
+      fragmentShader: `uniform sampler2D tDiffuse; uniform sampler2D tBloom; uniform float strength; varying vec2 vUv;
+        void main(){
+          vec3 c = texture2D(tDiffuse, vUv).rgb + texture2D(tBloom, vUv).rgb * strength;
+          // 色彩分级：轻降饱和 + 提对比 + 微冷调（电影感）
+          float l = dot(c, vec3(0.2126,0.7152,0.0722));
+          c = mix(vec3(l), c, 0.92);
+          c = clamp((c - 0.5) * 1.06 + 0.5 + vec3(0.0, 0.004, 0.012), 0.0, 4.0);
+          // 暗角：四角压暗
+          vec2 d = vUv - 0.5;
+          c *= 1.0 - dot(d, d) * 0.55;
+          gl_FragColor = vec4(pow(max(c, vec3(0.0)), vec3(0.4545)), 1.0);   // linear→sRGB
+        }`
+    });
+  }
+  resize(w, h) {
+    const pr = this.renderer.getPixelRatio();
+    const W = Math.max(2, Math.floor(w * pr)), H = Math.max(2, Math.floor(h * pr));
+    this.rtScene.setSize(W, H);
+    this.rtA.setSize(Math.max(2, W >> 1), Math.max(2, H >> 1));
+    this.rtB.setSize(Math.max(2, W >> 1), Math.max(2, H >> 1));
+  }
+  render(scene, camera) {
+    const r = this.renderer;
+    r.setRenderTarget(this.rtScene); r.render(scene, camera);
+    const q = (mat, rt) => { this.quad.material = mat; r.setRenderTarget(rt); r.render(this.quadScene, this.quadCam); };
+    this.matBright.uniforms.tDiffuse.value = this.rtScene.texture;
+    q(this.matBright, this.rtA);
+    this.matBlur.uniforms.texel.value.set(1 / this.rtA.width, 1 / this.rtA.height);
+    this.matBlur.uniforms.tDiffuse.value = this.rtA.texture; this.matBlur.uniforms.dir.value.set(1, 0); q(this.matBlur, this.rtB);
+    this.matBlur.uniforms.tDiffuse.value = this.rtB.texture; this.matBlur.uniforms.dir.value.set(0, 1); q(this.matBlur, this.rtA);
+    this.matComp.uniforms.tDiffuse.value = this.rtScene.texture;
+    this.matComp.uniforms.tBloom.value = this.rtA.texture;
+    q(this.matComp, null);
+  }
+  dispose() {
+    this.rtScene.dispose(); this.rtA.dispose(); this.rtB.dispose();
+    this.quad.geometry.dispose();
+    this.matBright.dispose(); this.matBlur.dispose(); this.matComp.dispose();
+  }
+}
+
+// ===== 近景草海：InstancedMesh 草叶十字面片 =====
+// 相机周围 110m 半径撒草，玩家移出 8m 才整批重排（战雷式近地草覆盖，密度随地图主题）。
+class GrassField {
+  constructor(scene, theme) {
+    const geo = new THREE.BufferGeometry();
+    const P = [], UV = [], IDX = [];
+    const quad = (rot) => {
+      const c = Math.cos(rot), s = Math.sin(rot);
+      const b = P.length / 3, w = 0.55, h = 1.15;
+      P.push(-w * c, 0, -w * s, w * c, 0, w * s, w * c, h, w * s, -w * c, h, -w * s);
+      UV.push(0, 0, 1, 0, 1, 1, 0, 1);
+      IDX.push(b, b + 1, b + 2, b, b + 2, b + 3);
+    };
+    quad(0); quad(Math.PI / 2);
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(UV, 2));
+    geo.setIndex(IDX);
+    geo.computeVertexNormals();
+    this.count = Math.round(1400 * (theme.density || 1));
+    this.mat = new THREE.MeshBasicMaterial({ map: makeGrassTexture(), alphaTest: 0.42, side: THREE.DoubleSide });
+    this.mesh = new THREE.InstancedMesh(geo, this.mat, this.count);
+    this.mesh.frustumCulled = false;
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    scene.add(this.mesh);
+    this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion();
+    this._e = new THREE.Euler(); this._s = new THREE.Vector3(); this._p = new THREE.Vector3();
+    this._lx = 1e9; this._lz = 1e9;
+    this.update(0, 0);   // 初始铺一批
+  }
+  update(cx, cz) {
+    const dx = cx - this._lx, dz = cz - this._lz;
+    if (dx * dx + dz * dz < 64) return;   // 8m 内不重排
+    this._lx = cx; this._lz = cz;
+    const R = 110;
+    for (let i = 0; i < this.count; i++) {
+      const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * R;
+      const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+      this._p.set(x, terrainHeight(x, z) - 0.05, z);
+      this._e.set((Math.random() - 0.5) * 0.25, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.25);
+      this._q.setFromEuler(this._e);
+      const sc = 0.7 + Math.random() * 0.9;
+      this._s.set(sc, sc * (0.8 + Math.random() * 0.6), sc);
+      this._m.compose(this._p, this._q, this._s);
+      this.mesh.setMatrixAt(i, this._m);
+    }
+    this.mesh.instanceMatrix.needsUpdate = true;
+  }
+  dispose() { this.mesh.geometry.dispose(); this.mat.dispose(); this.mesh.removeFromParent(); }
+}
+
 // 殉爆炮塔飞出：炮塔脱离车体（调用前已 scene.attach 保持世界变换），抛物线+旋转，
 // 落地砸出火光后趴地到寿命结束，随残骸一起消失。
 class TurretFly {
@@ -1605,7 +1740,8 @@ class Tank {
   _build() {
     const g = GEOM[this.type] || GEOM.medium;
     const [hw, hh, hl] = g.hull;
-    const bodyMat = new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.55, metalness: 0.35, map: camoTexture(), bumpMap: sharedBump(3, 3), bumpScale: 0.06 });
+    this.hullWid = hw; this.hullLen = hl;   // 扬尘等特效的定位基准
+    const bodyMat = new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.55, metalness: 0.35, map: camoTexture(nationOf(this.type)), bumpMap: sharedBump(3, 3), bumpScale: 0.06 });
     const darkMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.9 });
     const metalMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.4, metalness: 0.65 });
 
@@ -1874,6 +2010,15 @@ class Tank {
     this.group.add(this.turret);
     this.healthBar = this._makeHealthBar();
     this.group.add(this.healthBar);
+    // 接地暗影：车底柔和黑斑（假 AO），贴地不翘边、随车体移动
+    const blob = new THREE.Mesh(
+      new THREE.PlaneGeometry(hw * 1.7, hl * 1.28),
+      new THREE.MeshBasicMaterial({ map: makeShadowTexture(), transparent: true, depthWrite: false, opacity: 0.9 })
+    );
+    blob.rotation.x = -Math.PI / 2;
+    blob.position.y = 0.06;
+    blob.renderOrder = 1;
+    this.group.add(blob);
   }
 
   // 按型号构建不同样式的炮塔。
@@ -2044,6 +2189,19 @@ class Tank {
     // 履带差速滚动：左履带=油门-转向、右履带=油门+转向
     if (this.trackMatL) this.trackMatL.map.offset.y += ((this.lastThrottle || 0) * 1.5 - (this._lastTurn || 0) * 1.2) * dt;
     if (this.trackMatR) this.trackMatR.map.offset.y += ((this.lastThrottle || 0) * 1.5 + (this._lastTurn || 0) * 1.2) * dt;
+    // 行驶扬尘：车尾两履带口卷出土黄烟（战雷式战场氛围）；限流防粒子爆炸
+    if (this.alive && this.em && Math.abs(this.lastThrottle || 0) > 0.25) {
+      this.dustT = (this.dustT || 0) - dt;
+      if (this.dustT <= 0) {
+        const sh0 = Math.sin(this.heading), ch0 = Math.cos(this.heading);
+        const bx = this.position.x - sh0 * this.hullLen * 0.52, bz = this.position.z - ch0 * this.hullLen * 0.52;
+        for (const sx of [-1, 1]) {
+          const p = new THREE.Vector3(bx + ch0 * sx * this.hullWid * 0.42, 0.4, bz - sh0 * sx * this.hullWid * 0.42);
+          this.em.addEffect(new Smoke(p, 0x9a8465, randRange(0.5, 0.9), randRange(1.0, 1.6), 0.8));
+        }
+        this.dustT = 0.16;
+      }
+    }
     // 炮塔反旋转：抵消车体贴坡倾斜，让炮塔在世界系保持水平、按 heading+turretYaw 朝向（瞄准不受地形影响）
     _tankWQ.setFromAxisAngle(_tankY, this.heading + this.turretYaw);
     this.turret.quaternion.copy(_tankQ.copy(this.group.quaternion).invert()).multiply(_tankWQ);
@@ -2076,6 +2234,14 @@ class Tank {
       pen: this.pen * sh.penMul, shellDef: sh,
     }));
     em.addEffect(new MuzzleFlash(muzzleWorld));
+    // 炮口硝烟：沿炮管向侧后喷散的灰白烟（口径越大团数越多）
+    const nSmk = 2 + Math.round(clamp(this.pen / 120, 0, 3));
+    for (let i = 0; i < nSmk; i++) {
+      em.addEffect(new Smoke(
+        muzzleWorld.clone().addScaledVector(dir, -0.8 - i * 0.5).add(new THREE.Vector3(randRange(-0.5, 0.5), randRange(0, 0.8), randRange(-0.5, 0.5))),
+        0xb8b0a4, randRange(0.45, 0.8), randRange(0.5, 0.9), 1.1
+      ));
+    }
     // 开炮后坐：给悬挂一个速度冲量（小车晃得狠、每发略有随机），弹簧回稳见 drive()
     this.recoilVel += 6.0 * clamp(55 / (this.maxHealth || 55), 0.45, 1.1) * randRange(0.85, 1.15);
     // 结算统计:玩家主炮发射按弹种计数(经 em 挂钩,Game 读取)
@@ -2351,7 +2517,7 @@ class Plane {
 
   _build() {
     const g = PGEOM[this.type] || PGEOM.fighter;
-    const mat = new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.5, metalness: 0.4, map: camoTexture(), bumpMap: sharedBump(3, 3), bumpScale: 0.05 });
+    const mat = new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.5, metalness: 0.4, map: camoTexture(nationOf(this.type)), bumpMap: sharedBump(3, 3), bumpScale: 0.05 });
     this.bodyMat = mat; // 损伤可视化：起火时把机身材质焦化
     const darkMat = new THREE.MeshStandardMaterial({ color: 0x232323, roughness: 0.7, metalness: 0.3 });
     const glassMat = new THREE.MeshStandardMaterial({ color: 0xb8e0f0, roughness: 0.1, metalness: 0.6, transparent: true, opacity: 0.65 });
@@ -2485,6 +2651,17 @@ class Plane {
     this.muzzleL = new THREE.Object3D(); this.muzzleL.position.set(-g.wing * 0.4, 0, halfL * 0.2);
     this.muzzleR = new THREE.Object3D(); this.muzzleR.position.set( g.wing * 0.4, 0, halfL * 0.2);
     this.group.add(this.muzzleL, this.muzzleR);
+
+    // 接地暗影：投在地面的柔和黑斑（高度越高越淡）。挂在独立 wrapper 上（不随机体俯仰滚转），
+    // 首次 update 发现机体已入场景时把 wrapper 挂进同一场景。
+    this.blobWrap = new THREE.Group();
+    this.blob = new THREE.Mesh(
+      new THREE.PlaneGeometry(g.wing * 0.75, fuseL * 0.6),
+      new THREE.MeshBasicMaterial({ map: makeShadowTexture(), transparent: true, depthWrite: false, opacity: 0.9 })
+    );
+    this.blob.rotation.x = -Math.PI / 2;
+    this.blob.renderOrder = 1;
+    this.blobWrap.add(this.blob);
   }
 
   get position() { return this.group.position; }
@@ -2561,6 +2738,17 @@ class Plane {
     this.speed += (target - this.speed) * Math.min(1, 1.5 * dt);
     const forward = this.forwardVector();
     this.group.position.addScaledVector(forward, this.speed * dt);
+    // 接地暗影同步：贴地面、对齐航向、随高度淡出；机体入场景后 wrapper 挂同一场景
+    if (this.blobWrap) {
+      if (!this.blobWrap.parent && this.group.parent) this.group.parent.add(this.blobWrap);
+      if (this.blobWrap.parent) {
+        const gy = terrainHeight(this.group.position.x, this.group.position.z);
+        this.blobWrap.position.set(this.group.position.x, gy + 0.09, this.group.position.z);
+        this.blobWrap.rotation.y = Math.atan2(forward.x, forward.z);
+        this.blob.material.opacity = clamp(0.85 - (this.group.position.y - gy - 25) / 130, 0, 0.85);
+        this.blobWrap.visible = this.alive;
+      }
+    }
     const liftFactor = clamp(this.speed / CONFIG.plane.maxSpeed, 0, 1);
     this.group.position.y -= CONFIG.plane.gravity * dt * (1 - liftFactor) * 0.5;
     const gnd = terrainHeight(this.group.position.x, this.group.position.z) + 2;
@@ -2988,13 +3176,13 @@ function setupEnvironment(scene, mode, renderer) {
   // 环境光（填充阴影）
   scene.add(new THREE.AmbientLight(0xffffff, 0.55));
 
-  // 太阳（方向光），投射阴影
-  const sun = new THREE.DirectionalLight(0xfff2d6, 1.1);
-  sun.position.set(80, 140, 60);
+  // 太阳（方向光），投射阴影。黄金时刻：低角度暖阳+拉长阴影（战雷的成片光感）
+  const sun = new THREE.DirectionalLight(0xffd9a0, 1.3);
+  sun.position.set(140, 58, 90);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);   // 4096 在集成显卡上代价过高；2048 在 120m 视景内 texel≈12cm，肉眼难辨
   sun.shadow.camera.near = 10;
-  sun.shadow.camera.far = 400;
+  sun.shadow.camera.far = 520;          // 低角度长影需要更远的阴影视景
   const s = 120;
   sun.shadow.camera.left = -s;
   sun.shadow.camera.right = s;
@@ -3026,7 +3214,7 @@ function setupEnvironment(scene, mode, renderer) {
       new THREE.SphereGeometry(3, 8, 8),
       new THREE.MeshBasicMaterial({ color: 0xfff6dd })
     );
-    sunBall.position.set(25, 35, 18);
+    sunBall.position.set(30, 13, 20);   // 与低角度太阳方向一致（金属反射高光位匹配）
     envScene.add(sunBall);
     scene.environment = pmrem.fromScene(envScene, 0.06).texture;
     pmrem.dispose();
@@ -3038,11 +3226,11 @@ function setupEnvironment(scene, mode, renderer) {
     blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
   }));
   flare.scale.set(180, 180, 1);
-  flare.position.set(640, 1120, 480);
+  flare.position.set(1300, 540, 838);   // 与低角度太阳方向一致
   scene.add(flare);
 
   // 半球光让天空与地面色调更自然
-  scene.add(new THREE.HemisphereLight(skyColor, 0x55502a, 0.4));
+  scene.add(new THREE.HemisphereLight(skyColor, 0x6b5a40, 0.42));   // 地面反光暖化（黄金时刻）
 }
 
 
@@ -3229,7 +3417,10 @@ function createTerrain(scene, mode, mapId) {
   }
 
   scene.add(group);
-  return { group, obstacles, half };
+  // 近景草海（坦克模式）：相机周围铺草，跟随重排
+  const grass = (mode === 'tank') ? new GrassField(scene, theme) : null;
+
+  return { group, obstacles, half, grass };
 }
 
 
@@ -3452,6 +3643,7 @@ class Game {
     this.raycaster = new THREE.Raycaster();
     this.groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     this._tmpDir = new THREE.Vector3();
+    this.postfx = new PostFX(this.renderer);   // 后处理：Bloom+分级+暗角（主循环经此渲染）
 
     this._onResize = () => this._handleResize();
     window.addEventListener('resize', this._onResize);
@@ -4173,7 +4365,7 @@ class Game {
     try {
     const dt = Math.min(this.clock.getDelta(), 0.05);
     // Esc 暂停/恢复统一走常驻 _onEscKey（锁定时 Esc 由浏览器退锁、_onPLChange 暂停）。
-    if (this.paused) { this.renderer.render(this.scene, this.camera); return; }
+    if (this.paused) { this.postfx.render(this.scene, this.camera); return; }
     if (this.state === 'playing') this.matchT += dt;
     if (this.mode === 'tank' && this.player && this.player.alive) {
       // 十字准星 = 炮膛射线在世界上真实落点的投影（炮口+炮管方向 ray 命中敌车/障碍/地形）。
@@ -4290,6 +4482,7 @@ class Game {
       }
 
       this.em.update(dt);
+      if (this.terrain?.grass) this.terrain.grass.update(this.camera.position.x, this.camera.position.z);
       if (this.mode === 'tank') this._resolveObstacles();
 
       const targets = this.worldwar ? [...this.em.tanks, ...this.em.planes] : (this.mode === 'tank' ? this.em.tanks : this.em.planes);
@@ -4446,7 +4639,7 @@ class Game {
 
     } catch (err) { console.error('⚠ _animate:', err); if (!this._aErr) { this._aErr = true; try { this.hud.addFeed('⚠ ' + (err.message || err), 'info'); } catch (e) {} } }
     // CCIP 炸弹落点标记的计算已合并到上方主 try 内（原此处重复了一份 1500 步模拟，每帧白跑一遍，已删）
-    this.renderer.render(this.scene, this.camera);
+    this.postfx.render(this.scene, this.camera);
     this._renderShellcam();   // 右上角跟拍小窗（scissor 二次渲染，无小窗时零开销）
   };
 
@@ -5140,6 +5333,7 @@ class Game {
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    if (this.postfx) this.postfx.resize(w, h);
   }
 
   dispose() {
@@ -5161,7 +5355,8 @@ class Game {
     this.sfx.stopEngine();
     this._clearCapture();
     this.em.clear();
-    if (this.terrain) this.scene.remove(this.terrain.group);
+    if (this.terrain) { this.scene.remove(this.terrain.group); if (this.terrain.grass) this.terrain.grass.dispose(); }
+    if (this.postfx) this.postfx.dispose();
     this.renderer.dispose();
   }
 }

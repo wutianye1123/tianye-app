@@ -42,13 +42,21 @@ export function makeCloudTexture() {
   for (let i = 0; i < 7; i++) blob(32 + Math.random() * 64, 48 + Math.random() * 32, 18 + Math.random() * 28, 0.6);
   return new THREE.CanvasTexture(c);
 }
-let _camoTex = null;
-export function camoTexture() {
-  if (_camoTex) return _camoTex;
+let _camoTex = {};
+// 国家迷彩色板：德三色(黄底棕绿块)/俄绿/美橄榄/中灰绿。纹理缓存按国家分份。
+const CAMO_PALETTES = {
+  rus: { base: '#5a6b4a', blobs: ['#3f4d33', '#6e7d55', '#2f3a26'] },
+  ger: { base: '#967f4f', blobs: ['#6b4a35', '#4a5334', '#7a6a45'] },
+  usa: { base: '#6b6b52', blobs: ['#575740', '#7a7a5e', '#4a4a38'] },
+  chn: { base: '#5f6a60', blobs: ['#4d574e', '#6e7a6e', '#3f4840'] },
+};
+export function camoTexture(nation = 'rus') {
+  if (_camoTex[nation]) return _camoTex[nation];
+  const pal = CAMO_PALETTES[nation] || CAMO_PALETTES.rus;
   const c = document.createElement('canvas'); c.width = c.height = 256;
   const x = c.getContext('2d');
-  // 底色：带极轻噪点的军灰
-  x.fillStyle = '#b7b9b6'; x.fillRect(0, 0, 256, 256);
+  // 底色
+  x.fillStyle = pal.base; x.fillRect(0, 0, 256, 256);
   // 三层迷彩：深色大块 → 中色中块 → 亮色小块，形状用不规则多边形（手绘斑点感）
   const blobPoly = (px, py, r, color, jitter) => {
     x.fillStyle = color; x.beginPath();
@@ -59,9 +67,9 @@ export function camoTexture() {
     }
     x.closePath(); x.fill();
   };
-  for (let i = 0; i < 10; i++) blobPoly(Math.random() * 256, Math.random() * 256, 26 + Math.random() * 34, '#5f6a5c', 0.7);
-  for (let i = 0; i < 14; i++) blobPoly(Math.random() * 256, Math.random() * 256, 12 + Math.random() * 20, '#7d8779', 0.6);
-  for (let i = 0; i < 12; i++) blobPoly(Math.random() * 256, Math.random() * 256, 6 + Math.random() * 10, '#99a294', 0.5);
+  for (let i = 0; i < 10; i++) blobPoly(Math.random() * 256, Math.random() * 256, 26 + Math.random() * 34, pal.blobs[0], 0.7);
+  for (let i = 0; i < 14; i++) blobPoly(Math.random() * 256, Math.random() * 256, 12 + Math.random() * 20, pal.blobs[1], 0.6);
+  for (let i = 0; i < 12; i++) blobPoly(Math.random() * 256, Math.random() * 256, 6 + Math.random() * 10, pal.blobs[2], 0.5);
   // 漆面颗粒噪点（远景看不出脏、近景有磨砂质感）
   const img = x.getImageData(0, 0, 256, 256), d = img.data;
   for (let i = 0; i < d.length; i += 4) {
@@ -75,11 +83,12 @@ export function camoTexture() {
     const sx = Math.random() * 256;
     x.beginPath(); x.moveTo(sx, Math.random() * 256); x.lineTo(sx + randRange(-6, 6), Math.random() * 256); x.stroke();
   }
-  _camoTex = new THREE.CanvasTexture(c);
-  _camoTex.wrapS = _camoTex.wrapT = THREE.RepeatWrapping;
-  _camoTex.repeat.set(2, 2);
-  _camoTex.anisotropy = 4;
-  return _camoTex;
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 2);
+  tex.anisotropy = 4;
+  _camoTex[nation] = tex;
+  return tex;
 }
 // 共享噪声凹凸纹理：漆面/地面的细颗粒（bumpMap），让平涂表面有微观起伏
 let _noiseTex = null;
@@ -109,6 +118,47 @@ export function makeTrackTexture() {
   return t;
 }
 
+// 履带纹理（省略——见上方 makeTrackTexture）
+
+// 接地暗影贴图：径向渐变柔和黑斑（车底假 AO，让载具"压在地上"）
+let _shadowTex = null;
+export function makeShadowTexture() {
+  if (_shadowTex) return _shadowTex;
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 8, 64, 64, 62);
+  g.addColorStop(0, 'rgba(0,0,0,0.5)');
+  g.addColorStop(0.6, 'rgba(0,0,0,0.28)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  _shadowTex = new THREE.CanvasTexture(c);
+  return _shadowTex;
+}
+
+// 草叶贴图：透明底上几根尖叶（alphaTest 用，近景草海）
+let _grassTex = null;
+export function makeGrassTexture() {
+  if (_grassTex) return _grassTex;
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d');
+  x.lineCap = 'round';
+  for (let i = 0; i < 7; i++) {
+    const bx = 6 + i * 8 + randRange(-2, 2);
+    const tipX = bx + randRange(-10, 10);
+    const h = 34 + Math.random() * 26;
+    const g = x.createLinearGradient(0, 64, 0, 64 - h);
+    g.addColorStop(0, '#2f4a20');
+    g.addColorStop(1, '#6a8f3c');
+    x.strokeStyle = g;
+    x.lineWidth = 3.4;
+    x.beginPath();
+    x.moveTo(bx, 64);
+    x.quadraticCurveTo(bx + (tipX - bx) * 0.3, 64 - h * 0.6, tipX, 64 - h);
+    x.stroke();
+  }
+  _grassTex = new THREE.CanvasTexture(c);
+  return _grassTex;
+}
 // 地形高度场（分层正弦，起伏丘陵）。terrainScale 按地图调整起伏强度（全局，所有调用方一致）。
 let terrainScale = 1;
 export function setTerrainScale(s) { terrainScale = s; }
