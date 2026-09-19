@@ -4355,7 +4355,7 @@ class Game {
       const modsBroken = t.modules && (t.modules.track > 0 || t.modules.barrel > 0 || t.modules.engine > 0);
       const safe = !target || t.position.distanceTo(target.position) > 70;   // 最近威胁 70m 外=脱战
       if ((t.health < t.maxHealth * 0.55 || modsBroken) && safe) {
-        t.drive(0, 0, dt);               // R：安全时停车抢修（血+履带/炮管/发动机）
+        // 边走边修：不停车（TankAI 的机动继续），只回血修模块
         if (t.health < t.maxHealth) t.health = Math.min(t.maxHealth, t.health + 15 * dt);
         if (t.modules) for (const k of ['track', 'barrel', 'engine']) {
           if (t.modules[k] > 0) t.modules[k] = Math.max(0, t.modules[k] - dt * 6);
@@ -4430,7 +4430,7 @@ class Game {
     const modsBroken = t.modules && (t.modules.track > 0 || t.modules.barrel > 0 || t.modules.engine > 0);
     this._repairing = inp.isDown('KeyR') && (t.health < t.maxHealth || modsBroken);
     if (this._repairing) {
-      t.drive(0, 0, dt);   // 修车时不能移动（覆盖上面的 drive）
+      // 边走边修：不影响移动/瞄准/开火（drive 已由 WASD 输入驱动，此处只回血修模块）
       if (t.health < t.maxHealth) t.health = Math.min(t.maxHealth, t.health + 15 * dt);
       if (t.modules) {
         // 按住 R = 主动抢修 6/s（被动自修 0.5/s 的两倍以上；发动机 7s 伤 1 秒出头修好）
