@@ -5524,7 +5524,19 @@ class Game {
       this._checkEnd(dt);
     }
 
-    } catch (err) { console.error('⚠ _animate:', err); if (!this._aErr) { this._aErr = true; try { this.hud.addFeed('⚠ ' + (err.message || err), 'info'); } catch (e) {} } }
+    } catch (err) {
+      // 逐帧异常会让逻辑中断（画面还在但载具"卡住"）——错误必须醒目可见：每个新错误都上屏+2s 限流，
+      // 玩家卡住时屏幕有具体报错信息，可据此定位（F12 Console 也有完整堆栈）。
+      console.error('⚠ _animate:', err);
+      try {
+        const msg = String(err.message || err);
+        const now = performance.now();
+        if (msg !== this._lastErrMsg || now - (this._lastErrT || 0) > 2000) {
+          this._lastErrMsg = msg; this._lastErrT = now;
+          this.hud.addFeed('⚠ ' + msg, 'death');
+        }
+      } catch (e) {}
+    }
     // CCIP 炸弹落点标记的计算已合并到上方主 try 内（原此处重复了一份 1500 步模拟，每帧白跑一遍，已删）
     this.postfx.render(this.scene, this.camera);
     this._renderShellcam();   // 右上角跟拍小窗（scissor 二次渲染，无小窗时零开销）
