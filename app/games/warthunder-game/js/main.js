@@ -6,6 +6,7 @@ const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight =
 const _tmpV3 = new THREE.Vector3();   // 通用临时向量（受击方向计算等，避免每帧分配）
 const _sfxDir = new THREE.Vector3();  // 音效声像：相机朝向临时向量
 const _aimNdc2 = new THREE.Vector2(); // 直升机准星：鼠标 NDC → 世界射线（raycaster 用）
+const _heliAimV = new THREE.Vector3(); // 直升机 AI 十字方向临时向量
 const _kcTmp = new THREE.Vector3();   // X 光回放临时量（免每帧 new）
 const _scLook = new THREE.Vector3();   // 回放相机平滑视线
 const _projFwd = new THREE.Vector3(0, 0, 1);   // 曳光定向基准
@@ -4992,7 +4993,10 @@ class Game {
       if (p.isHeli) this._heliPilotTick(p, target, dt);
       else this._pilotAI.update(dt, { target, entityManager: this.em, smokes: this.em.smokes });
       // 十字跟机头/准星方向（AI 打哪十字在哪）
-      const fv = p.isHeli ? (p._aimDir || p.forwardVector()) : p.forwardVector();
+      // 十字=弹道方向（带提前量的瞄准点方向）：机头由 AI 朝目标本体，十字表示炮往哪打——两者各司其职
+      let fv;
+      if (p.isHeli && p._aimPoint) fv = _heliAimV.copy(p._aimPoint).sub(p.position).normalize();
+      else fv = p.isHeli ? (p._aimDir || p.forwardVector()) : p.forwardVector();
       const pp = _tmpV3.copy(p.position).addScaledVector(fv, 80).project(this.camera);
       this._planeAimNDC = { x: pp.x, y: pp.y };
       // AI 副驾驶：起火自动灭火 + 边飞边修（血量<95% 持续回血，R 键同款速率）
