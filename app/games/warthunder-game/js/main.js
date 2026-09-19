@@ -4752,18 +4752,45 @@ class Game {
     const spd = target.speed != null ? target.speed : ((target.lastThrottle || 0) * (target.maxSpeed || 10));
     const aim = target.position.clone().addScaledVector(tv, spd * lead);
     p.setAimDir(aim.sub(p.position).normalize());
-    // 高度带 terrain+38~58；距离保持 60~110m（远追近退）；偏航朝目标侧 60°（盘旋不直冲）
+    // —— 被锁定规避：有追踪导弹咬我 / 260m 内敌坦克炮口正对我 → 1.2s 急转+陡升/俯冲闪避 ——
+    let locked = false;
+    for (const pr of this.em.projectiles) {
+      if (pr.alive && pr.homing && pr.target === p) { locked = true; break; }
+    }
+    if (!locked) {
+      for (const e of this.enemies) {
+        if (!e.alive || e.turretYaw === undefined || e.position.distanceTo(p.position) > 260) continue;
+        const wy = e.heading + e.turretYaw;
+        const dxa = p.position.x - e.position.x, dza = p.position.z - e.position.z;
+        let da = Math.atan2(dxa, dza) - wy;
+        da = Math.atan2(Math.sin(da), Math.cos(da));
+        if (Math.abs(da) < 0.12) { locked = true; break; }   // 炮口指着我
+      }
+    }
+    if (locked) { this._evadeT = 1.2; if (this._evadeT <= 1.2 + dt) { this._evadeDir = Math.random() < 0.5 ? 1 : -1; this._evadeVert = Math.random() < 0.5 ? 1 : -1; } }
+    if ((this._evadeT || 0) > 0) {
+      this._evadeT -= dt;
+      p.setYawInput(this._evadeDir);
+      p.setPitchInput(0.55 * this._evadeDir);   // 急转带前冲侧滑
+      p.setClimb(this._evadeVert);              // 陡升/俯冲二选一
+      return;   // 规避优先，暂停开火专心躲
+    }
+    // 机头正对目标（迎敌观感）：偏航直接对准，距离用前后倾控制
     p.setClimb(clamp((gy + 48 - p.position.y) * 0.08, -1, 1));
     p.setPitchInput(flatDist > 110 ? 0.75 : (flatDist < 60 ? -0.55 : 0.06));
-    const desiredYaw = Math.atan2(to.x, to.z) + 1.0;
+    const desiredYaw = Math.atan2(to.x, to.z);
     let dy = desiredYaw - p.heading;
     dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-    p.setYawInput(clamp(dy * 1.6, -1, 1));
-    // 开火：机炮常开（260m 内，视线被楼/山挡住不打——隔楼泼炮纯浪费），火箭 180m 内按节奏齐射
+    p.setYawInput(clamp(dy * 1.8, -1, 1));
+    // 开火：机炮常开（260m 内，视线被楼/山挡住不打——隔楼泼炮纯浪费），火箭/导弹积极使用
     const obs = this.terrain ? this.terrain.obstacles : [];
     if (flatDist < 260 && p.canFire() && !losBlocked(p.position, target.position, obs)) p.tryFire(this.em);
-    if (flatDist < 180 && p.missiles > 0 && Math.random() < dt * 0.5) p.tryFireMissile(this.em, this.enemies);
-    if (p.type === 'ah64' && flatDist < 160 && Math.random() < dt * 2.5) p.tryFireRockets(this.em, true);   // AI：逐发泼火箭（5发一巢自动装填）
+    if (p.type === 'ah64') {
+      if (flatDist < 200 && p.missiles > 0 && Math.random() < dt * 0.7) p.tryFireMissile(this.em, this.enemies);   // 地狱火
+      if (flatDist < 150 && Math.random() < dt * 3) p.tryFireRockets(this.em, true);   // 火箭泼射（5发一巢自动装填）
+    } else if (flatDist < 180 && p.missiles > 0 && Math.random() < dt * 0.8) {
+      p.tryFireMissile(this.em, this.enemies);   // Mi-24/直-10：火箭巢（导弹位）
+    }
   }
   _stopPilot() {
     const s = this._pilotSaved;
