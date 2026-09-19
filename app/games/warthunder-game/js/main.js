@@ -4795,16 +4795,17 @@ class Game {
       p.setYawInput(this._evadeDir);
       p.setPitchInput(0.35 * this._evadeDir);   // 急转带前冲侧滑（幅度收敛防贴地）
       p.setClimb(this._evadeVert);
-      return;   // 规避优先，暂停开火专心躲
+    } else {
+      // 机头正对目标（迎敌观感）：偏航直接对准，距离用前后倾控制
+      p.setClimb(clamp((gy + 48 - p.position.y) * 0.08, -1, 1));
+      p.setPitchInput(flatDist > 110 ? 0.75 : (flatDist < 60 ? -0.55 : 0.06));
+      const desiredYaw = Math.atan2(to.x, to.z);
+      let dy = desiredYaw - p.heading;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      p.setYawInput(clamp(dy * 1.8, -1, 1));
     }
-    // 机头正对目标（迎敌观感）：偏航直接对准，距离用前后倾控制
-    p.setClimb(clamp((gy + 48 - p.position.y) * 0.08, -1, 1));
-    p.setPitchInput(flatDist > 110 ? 0.75 : (flatDist < 60 ? -0.55 : 0.06));
-    const desiredYaw = Math.atan2(to.x, to.z);
-    let dy = desiredYaw - p.heading;
-    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-    p.setYawInput(clamp(dy * 1.8, -1, 1));
-    // 开火：机炮常开（260m 内，视线被楼/山挡住不打——隔楼泼炮纯浪费），火箭/导弹积极使用
+    // 开火（规避中也打：瞄准点每帧已更新，边躲边咬）：
+    // 机炮常开（260m 内，视线被楼/山挡住不打——隔楼泼炮纯浪费），火箭/导弹积极使用
     const obs = this.terrain ? this.terrain.obstacles : [];
     if (flatDist < 260 && p.canFire() && !losBlocked(p.position, target.position, obs)) p.tryFire(this.em);
     if (p.type === 'ah64') {
