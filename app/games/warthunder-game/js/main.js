@@ -2249,7 +2249,8 @@ class Tank {
           const sh0 = Math.sin(this.heading), ch0 = Math.cos(this.heading);
           const bx = this.position.x - sh0 * this.hullLen * 0.52, bz = this.position.z - ch0 * this.hullLen * 0.52;
           for (const sx of [-1, 1]) {
-            const p = new THREE.Vector3(bx + ch0 * sx * this.hullWid * 0.42, 0.4, bz - sh0 * sx * this.hullWid * 0.42);
+            const px = bx + ch0 * sx * this.hullWid * 0.42, pz = bz - sh0 * sx * this.hullWid * 0.42;
+            const p = new THREE.Vector3(px, terrainHeight(px, pz) + 0.3, pz);   // 贴地形高度：坡上扬尘不会悬空/埋地
             this.em.addEffect(new Smoke(p, 0x9a8465, randRange(0.5, 0.9), randRange(1.0, 1.6), 0.8));
           }
           this.dustT = 0.22;
