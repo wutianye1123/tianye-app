@@ -9,6 +9,7 @@ const _projFwd = new THREE.Vector3(0, 0, 1);   // 曳光定向基准
 const _projTmp = new THREE.Vector3();
 const _scSide = new THREE.Vector3();   // 回放弹道侧向
 const _tankM = new THREE.Matrix4(), _tankY = new THREE.Vector3(0, 1, 0);
+const _recoilQ = new THREE.Quaternion(), _recoilAxis = new THREE.Vector3(1, 0, 0);   // 开炮后坐俯仰（局部 X 轴）
 const _tankQ = new THREE.Quaternion(), _tankWQ = new THREE.Quaternion();
 
 
@@ -77,6 +78,12 @@ const CONFIG = {
       planeInstant: 0.04,   // 飞行员阵亡
       planeFire: 0.16,
       burnDps: 6,
+    },
+    conquest: {
+      tickets: 500,         // 征服模式双方初始票数
+      killCost: 50,         // 每损失一辆载具扣己方票
+      bleed2: 2.0,          // 对方占 2 点时己方票流失/秒（500 票约 4 分钟耗尽）
+      bleed3: 5.0,          // 对方占全部 3 点时己方票流失/秒（100 秒耗尽）
     },
   },
 };
@@ -156,6 +163,30 @@ function shellById(id) { return SHELLS.find((s) => s.id === id) || SHELLS[0]; }
 function tankTypeById(id) { return TANK_TYPES.find((t) => t.id === id) || TANK_TYPES[0]; }
 function randomTankType() { return TANK_TYPES[Math.floor(Math.random() * TANK_TYPES.length)]; }
 
+// AI 车组代号池（战绩板/击杀日志用）：打乱后按序取，不重名
+const AI_NAMES = [
+  '夜枭', '铁拳', '雪豹', '孤狼', '雷神', '断刃', '苍鹰', '游隼', '磐石', '疾风',
+  '猛虎', '幽灵', '北极星', '野牛', '银翼', '屠夫', '毒蛇', '堡垒', '彗星', '复仇者',
+  '暗影', '公牛', '风暴', '猎户',
+];
+
+// 征服模式据点头顶字母牌（A/B/C）：Canvas 贴图 Sprite，永远面向相机，颜色随归属染色。
+function zoneLetterSprite(letter) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.font = 'bold 92px sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = 14; ctx.strokeStyle = 'rgba(0,0,0,.85)';
+  ctx.strokeText(letter, 64, 70);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(letter, 64, 70);
+  const tex = new THREE.CanvasTexture(c);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+  sp.scale.set(14, 14, 1);
+  return sp;
+}
+
 // —— 飞机型号 ——（hp 血量、speed 速度、agi 机动、dmg 火力；均为相对倍率）
 const PLANE_TYPES = [
   // Rank 1（初始）
@@ -199,7 +230,7 @@ class Input {
 
     this._onKeyDown = (e) => {
       this.keys.add(e.code);
-      if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyC', 'KeyF'].includes(e.code)) {
+      if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyC', 'KeyF', 'Tab', 'KeyM'].includes(e.code)) {
         e.preventDefault();
       }
     };
@@ -217,6 +248,8 @@ class Input {
       this.mvX += e.movementX || 0; this.mvY += e.movementY || 0; // 指针锁定时 movementX/Y 持续给增量
     };
     this._onContext = (e) => e.preventDefault();
+    this.wheelNotches = 0;   // 滚轮格数（瞄准镜里=装订射距）
+    this._onWheel = (e) => { this.wheelNotches += Math.sign(e.deltaY); };
 
     window.addEventListener('keydown', this._onKeyDown);
     window.addEventListener('keyup', this._onKeyUp);
@@ -224,6 +257,7 @@ class Input {
     window.addEventListener('mouseup', this._onMouseUp);
     window.addEventListener('mousemove', this._onMouseMove);
     this.canvas.addEventListener('contextmenu', this._onContext);
+    window.addEventListener('wheel', this._onWheel, { passive: true });
 
     // 触屏：左半屏虚拟摇杆(驾驶 WASD)，右半屏拖动=瞄准、按住=开火
     this._touches = {};
@@ -292,6 +326,12 @@ class Input {
     return { x, y };
   }
 
+  // 取走滚轮格数（上=负 下=正），供瞄准镜装订射距。
+  consumeWheel() {
+    const n = this.wheelNotches; this.wheelNotches = 0;
+    return n;
+  }
+
   // 标准化设备坐标 [-1,1]，y 上为正。
   getNDC() {
     return {
@@ -315,6 +355,7 @@ class Input {
     window.removeEventListener('mouseup', this._onMouseUp);
     window.removeEventListener('mousemove', this._onMouseMove);
     this.canvas.removeEventListener('contextmenu', this._onContext);
+    window.removeEventListener('wheel', this._onWheel);
     if (this._onTouchStart) {
       this.canvas.removeEventListener('touchstart', this._onTouchStart);
       this.canvas.removeEventListener('touchmove', this._onTouchMove);
@@ -409,6 +450,172 @@ class HUD {
     this.leadEl.style.top = `${(-ndcY * 0.5 + 0.5) * window.innerHeight}px`;
   }
 
+  // 只切十字准星显隐（不动 hitmarker）：进瞄准镜时分化替代十字，命中标记仍要闪。
+  setCrosshairVisible(v) {
+    if (this.crosshair) this.crosshair.style.display = v ? '' : 'none';
+  }
+
+  // —— 大地图（按住 M）：全屏战术地图。data 由 Game._bigMapData() 组装，bgCanvas 为地形底图缓存。
+  showBigMap(data) {
+    if (!this._bigMapEl) {
+      const el = document.createElement('div');
+      el.style.cssText = 'position:fixed;inset:0;background:rgba(6,10,6,.82);z-index:50;display:none;align-items:center;justify-content:center;flex-direction:column;gap:8px;';
+      const title = document.createElement('div');
+      title.style.cssText = 'font:bold 15px/1 sans-serif;color:#cfe6cf;text-shadow:0 1px 3px #000;letter-spacing:1px;';
+      const cv = document.createElement('canvas');
+      cv.style.cssText = 'border:1px solid rgba(140,200,140,.4);border-radius:6px;box-shadow:0 0 40px rgba(0,0,0,.6);';
+      el.appendChild(title); el.appendChild(cv);
+      this.container.appendChild(el);
+      this._bigMapEl = el; this._bigMapTitle = title; this._bigMapCv = cv;
+    }
+    this._bigMapEl.style.display = 'flex';
+    const S = Math.min(window.innerWidth, window.innerHeight) * 0.84 | 0;
+    if (this._bigMapCv.width !== S) { this._bigMapCv.width = this._bigMapCv.height = S; }
+    const t1 = data.conquest
+      ? `征服 · 我方 ${Math.ceil(data.blueT)} ── 敌方 ${Math.ceil(data.redT)} 票`
+      : `歼灭 ${data.kills}/${data.enemyTickets} · 命数 ${data.lives}`;
+    this._bigMapTitle.textContent = `🗺 战术地图（松开 M 关闭）　${t1}　⏱ ${Math.floor(data.time / 60)}:${String(Math.floor(data.time % 60)).padStart(2, '0')}`;
+    const ctx = this._bigMapCv.getContext('2d');
+    ctx.clearRect(0, 0, S, S);
+    // 地形底图（起伏明暗+建筑点）
+    if (data.bgCanvas) ctx.drawImage(data.bgCanvas, 0, 0, S, S);
+    else { ctx.fillStyle = '#1c2a1c'; ctx.fillRect(0, 0, S, S); }
+    const half = data.half;
+    const px = (x) => (x / half * 0.5 + 0.5) * S;
+    const pz = (z) => (z / half * 0.5 + 0.5) * S;
+    // 征服三点
+    if (data.zones) for (const z of data.zones) {
+      const cx = px(z.x), cy = pz(z.z), rr = Math.max(10, z.r / half * 0.5 * S);
+      ctx.fillStyle = z.owner === 'blue' ? 'rgba(70,150,70,.35)' : z.owner === 'red' ? 'rgba(190,60,60,.35)' : 'rgba(200,180,80,.25)';
+      ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = z.owner === 'blue' ? '#7ada7a' : z.owner === 'red' ? '#e88a7a' : '#c8b450';
+      ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(z.id, cx, cy + 6);
+    }
+    const dot2 = (x, z, color, r) => { ctx.fillStyle = color; ctx.beginPath(); ctx.arc(px(x), pz(z), r, 0, Math.PI * 2); ctx.fill(); };
+    for (const a of data.allies) dot2(a.x, a.z, '#66aaff', 4);
+    for (const e of data.enemies) dot2(e.x, e.z, '#ff5555', 4.5);
+    // 玩家：绿三角带朝向（地图北=+z 朝下，与出生南北一致）
+    if (data.player) {
+      const cx = px(data.player.x), cy = pz(data.player.z);
+      ctx.save(); ctx.translate(cx, cy); ctx.rotate(Math.atan2(Math.sin(data.player.h), Math.cos(data.player.h)) * -1 + Math.PI);
+      ctx.fillStyle = '#66ff88'; ctx.strokeStyle = '#08300f'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(6.5, 7); ctx.lineTo(-6.5, 7); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+  }
+  hideBigMap() { if (this._bigMapEl) this._bigMapEl.style.display = 'none'; }
+
+  // —— 战绩板（按住 Tab）：双方名单 + 击杀日志。
+  showScoreboard(data) {
+    if (!this._boardEl) {
+      const el = document.createElement('div');
+      el.style.cssText = 'position:fixed;inset:0;background:rgba(6,10,6,.6);z-index:50;display:none;align-items:center;justify-content:center;';
+      const card = document.createElement('div');
+      card.style.cssText = 'width:min(640px,92vw);background:rgba(14,22,16,.94);border:1px solid rgba(140,200,140,.35);border-radius:10px;padding:16px 20px;color:#dde;font-family:sans-serif;box-shadow:0 0 40px rgba(0,0,0,.6);';
+      el.appendChild(card);
+      this.container.appendChild(el);
+      this._boardEl = el; this._boardCard = card;
+    }
+    this._boardEl.style.display = 'flex';
+    const row = (p) => `<div style="display:flex;justify-content:space-between;padding:3px 8px;border-radius:4px;${p.me ? 'background:rgba(90,160,90,.22);font-weight:bold;' : ''}">
+      <span style="color:${p.alive ? (p.team === 'blue' ? '#9fd0ff' : '#ff9d8a') : '#777'}">${p.alive ? '' : '☠ '}${p.name}${p.boss ? ' 【精英】' : ''}</span>
+      <span>击杀 ${p.kills} · ${p.alive ? '战斗中' : '已损失'}</span></div>`;
+    const mm = Math.floor(data.time / 60), ss = String(Math.floor(data.time % 60)).padStart(2, '0');
+    const head = data.conquest
+      ? `征服 · 我方 ${Math.ceil(data.blueT)} ── ${Math.ceil(data.redT)} 敌方票`
+      : `歼灭 ${data.kills}/${data.enemyTickets}`;
+    const log = data.log.slice(-9).map((l) =>
+      `<div style="padding:2px 8px;color:${l.aTeam === 'blue' ? '#9fd0ff' : '#ff9d8a'}">${l.t}　${l.a} <span style="color:#888">▰</span> ${l.v}</div>`).join('');
+    this._boardCard.innerHTML =
+      `<div style="display:flex;justify-content:space-between;margin-bottom:10px;font:bold 15px/1 sans-serif;color:#cfe6cf;">
+         <span>📋 战绩板</span><span style="font-weight:normal;color:#9a9;">${head} · ⏱ ${mm}:${ss}</span></div>` +
+      `<div style="display:flex;gap:12px;">
+         <div style="flex:1;"><div style="color:#7ab;font:bold 12px/2 sans-serif;">我方</div>${data.blue.map(row).join('')}</div>
+         <div style="flex:1;"><div style="color:#d97;font:bold 12px/2 sans-serif;">敌方</div>${data.red.map(row).join('')}</div>
+       </div>` +
+      (log ? `<div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.12);padding-top:6px;font:12px/1.7 sans-serif;">${log}</div>` : '');
+  }
+  hideScoreboard() { if (this._boardEl) this._boardEl.style.display = 'none'; }
+
+  // —— 炮手瞄准镜（战雷式）——
+  // 黑色镜筒遮罩（radial-gradient 挖圆孔）+ 密位分化（Canvas）+ 底部信息行（射距/倍率）。
+  // mag：倍率（用于显示）；fov：当前镜内垂直视场角（度，分化密位刻度换算用）。
+  showScope({ mag = 4, rangeText = '', fov = 26 } = {}) {
+    if (!this._scopeEl) {
+      const el = document.createElement('div');
+      el.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:40;';
+      const cv = document.createElement('canvas');
+      cv.style.cssText = 'position:absolute;inset:0;';
+      el.appendChild(cv);
+      const info = document.createElement('div');
+      info.style.cssText = 'position:absolute;left:50%;transform:translateX(-50%);font:13px/1 sans-serif;color:#cfe6cf;text-shadow:0 1px 3px #000;white-space:nowrap;letter-spacing:.5px;';
+      el.appendChild(info);
+      this.container.appendChild(el);
+      this._scopeEl = el; this._scopeCv = cv; this._scopeInfo = info;
+      this._scopeW = -1; this._scopeH = -1;   // 强制首帧重画分化
+    }
+    const w = window.innerWidth, h = window.innerHeight;
+    this._scopeEl.style.display = 'block';
+    // 镜筒遮罩：中心挖圆孔，孔外近黑
+    const R = Math.min(w, h) * 0.46;
+    this._scopeEl.style.background =
+      `radial-gradient(circle ${R | 0}px at 50% 50%, rgba(0,0,0,0) ${(R - 2) | 0}px, rgba(6,6,6,.97) ${(R + 10) | 0}px)`;
+    this._scopeInfo.style.bottom = `${Math.max(12, h / 2 - R + 26) | 0}px`;
+    this._scopeInfo.textContent = `🎯 ${rangeText}　·　滚轮 装订射距　·　Z 倍率 ${mag}x　·　C 自动测距`;
+    if (w !== this._scopeW || h !== this._scopeH) this._drawReticle(w, h, R, fov);
+  }
+  hideScope() { if (this._scopeEl) this._scopeEl.style.display = 'none'; }
+
+  // 密位分化：中心尖角十字 + 竖向距离阶梯刻度（每 2 密位一格，标注 4/8/12），横向密位短刻。
+  _drawReticle(w, h, R, fovDeg) {
+    this._scopeW = w; this._scopeH = h;
+    const cv = this._scopeCv;
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, w, h);
+    const cx = w / 2, cy = h / 2;
+    const pxPerMil = (h / (fovDeg * Math.PI / 180)) * 0.001;   // 1 密位 ≈ 屏高×(fov 弧度/1000)
+    // 镜筒边框（双层圈，模拟目镜）
+    ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(10,10,10,.9)';
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(90,90,90,.6)';
+    ctx.beginPath(); ctx.arc(cx, cy, R - 4, 0, Math.PI * 2); ctx.stroke();
+    // 分化主体（战雷德式：黑色细线）
+    ctx.strokeStyle = 'rgba(8,8,8,.95)'; ctx.fillStyle = 'rgba(8,8,8,.95)';
+    ctx.lineWidth = 1.6;
+    // 中心尖角 ^
+    ctx.beginPath();
+    ctx.moveTo(cx - 14, cy - 10); ctx.lineTo(cx, cy + 2); ctx.lineTo(cx + 14, cy - 10);
+    ctx.stroke();
+    // 竖轴线（上下各留缺口）
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - 8); ctx.lineTo(cx, cy - 60);
+    ctx.moveTo(cx, cy + 8); ctx.lineTo(cx, cy + Math.min(R * 0.8, 160));
+    ctx.stroke();
+    // 竖向阶梯刻度：每 2 密位一格、每 4 密位加长并标数（距离阶梯，配装订射距读数）
+    ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+    for (let mil = 2; mil <= 14; mil += 2) {
+      const y = cy + mil * pxPerMil;
+      if (y > cy + R - 12) break;
+      const long = mil % 4 === 0;
+      ctx.beginPath(); ctx.moveTo(cx, y); ctx.lineTo(cx + (long ? 12 : 7), y); ctx.stroke();
+      if (long) ctx.fillText(String(mil), cx + 22, y + 3);
+    }
+    // 横线 + 两侧密位短刻
+    ctx.beginPath();
+    ctx.moveTo(cx - Math.min(R * 0.85, 240), cy); ctx.lineTo(cx - 18, cy);
+    ctx.moveTo(cx + 18, cy); ctx.lineTo(cx + Math.min(R * 0.85, 240), cy);
+    ctx.stroke();
+    for (let mil = 4; mil <= 12; mil += 4) {
+      const x = mil * pxPerMil;
+      if (cx + x > cx + R - 12) break;
+      ctx.beginPath(); ctx.moveTo(cx + x, cy); ctx.lineTo(cx + x, cy + 8); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx - x, cy); ctx.lineTo(cx - x, cy + 8); ctx.stroke();
+    }
+  }
+
   // 模块损伤提示（坦克）：{ track, barrel, engine } 剩余秒数。
   setModules(mods, crew = null) {
     if (!this.modulesEl) this.modulesEl = this.container.querySelector('#modules');
@@ -498,6 +705,65 @@ class HUD {
     this.centerMsg.style.display = text ? 'flex' : 'none';
   }
 
+  // —— 征服模式顶栏：A/B/C 三点归属 + 双方票数条 ——
+  // zones: [{id, owner, progress}]；传 null 隐藏。bleeding：正在被扣票的一方（'blue'|'red'|null），高亮提示。
+  setZones(zones, blueT, redT, maxT, bleeding = null) {
+    if (!this._zonesBar) {
+      const bar = document.createElement('div');
+      bar.style.cssText = 'position:absolute;top:10px;left:50%;transform:translateX(-50%);display:none;flex-direction:column;align-items:center;gap:4px;pointer-events:none;z-index:6;';
+      const chips = document.createElement('div');
+      chips.style.cssText = 'display:flex;gap:10px;';
+      this._zoneChips = {};
+      for (const id of ['A', 'B', 'C']) {
+        const ch = document.createElement('div');
+        ch.style.cssText = 'width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:bold 15px/1 sans-serif;color:#fff;text-shadow:0 1px 2px #000;background:rgba(0,0,0,.55);border:2px solid #888;';
+        ch.textContent = id;
+        chips.appendChild(ch);
+        this._zoneChips[id] = ch;
+      }
+      bar.appendChild(chips);
+      const mkTicket = (label, color) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:6px;font:12px/1 sans-serif;color:#eee;text-shadow:0 1px 2px #000;';
+        const lb = document.createElement('span'); lb.textContent = label; lb.style.cssText = 'width:26px;text-align:right;';
+        const bg = document.createElement('div');
+        bg.style.cssText = 'width:150px;height:8px;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25);border-radius:4px;overflow:hidden;';
+        const fg = document.createElement('div');
+        fg.style.cssText = 'height:100%;background:' + color + ';width:100%;transition:width .2s;';
+        bg.appendChild(fg);
+        const num = document.createElement('span'); num.style.cssText = 'width:30px;';
+        row.appendChild(lb); row.appendChild(bg); row.appendChild(num);
+        bar.appendChild(row);
+        return { fg, num };
+      };
+      this._blueTicket = mkTicket('我方', '#5da94a');
+      this._redTicket = mkTicket('敌方', '#c14a4a');
+      this.container.appendChild(bar);
+      this._zonesBar = bar;
+    }
+    if (!zones) { this._zonesBar.style.display = 'none'; return; }
+    this._zonesBar.style.display = 'flex';
+    const ownColor = { blue: '#5da94a', red: '#c14a4a', neutral: '#888' };
+    for (const z of zones) {
+      const ch = this._zoneChips[z.id];
+      if (!ch) continue;
+      ch.style.borderColor = ownColor[z.owner] || '#888';
+      ch.style.background = z.owner === 'blue' ? 'rgba(50,110,50,.75)' : z.owner === 'red' ? 'rgba(140,45,45,.75)' : 'rgba(0,0,0,.55)';
+      // 争夺中（进度在中间态）加一圈亮边提示
+      ch.style.boxShadow = (Math.abs(z.progress) < 100 && z.progress !== 0) ? '0 0 6px 2px rgba(255,220,80,.8)' : 'none';
+    }
+    const pct = (v) => Math.max(0, Math.min(100, (v / maxT) * 100)) + '%';
+    this._blueTicket.fg.style.width = pct(blueT);
+    this._blueTicket.num.textContent = Math.ceil(blueT);
+    this._redTicket.fg.style.width = pct(redT);
+    this._redTicket.num.textContent = Math.ceil(redT);
+    // 正在流失的一方：数字转警示色并加粗（另一边恢复常规）
+    this._blueTicket.num.style.color = bleeding === 'blue' ? '#ff9a8a' : '#eee';
+    this._blueTicket.num.style.fontWeight = bleeding === 'blue' ? 'bold' : 'normal';
+    this._redTicket.num.style.color = bleeding === 'red' ? '#ff9a8a' : '#eee';
+    this._redTicket.num.style.fontWeight = bleeding === 'red' ? 'bold' : 'normal';
+  }
+
   // 占领进度条：progress -100(红满)..+100(蓝满)，传 null 隐藏。
   setCapture(progress) {
     if (!this.captureBar) {
@@ -534,7 +800,9 @@ class HUD {
     this.rlFg.style.width = `${reloadFraction * 100}%`;
     this.scoreEl.textContent = isFinite(tickets)
       ? `击毁 ${kills}/${tickets}　命数 ${lives}`
-      : `无尽 · 击毁 ${kills}　命数 ${lives}`;
+      : tickets === null
+        ? `征服 · 击毁 ${kills}　命数 ${lives}`   // 征胜模式票数在顶栏，这里不显示 X/Y
+        : `无尽 · 击毁 ${kills}　命数 ${lives}`;
   }
 
   // 导弹计数（喷气机用）。max<=0 表示该机型无导弹，隐藏。
@@ -561,7 +829,7 @@ class HUD {
   }
 
   // 小地图：玩家居中、朝上为前进方向；敌人画红点。
-  drawMinimap({ playerPos, playerHeading, enemies, allies, range = 200 } = {}) {
+  drawMinimap({ playerPos, playerHeading, enemies, allies, zones = null, range = 200 } = {}) {
     const ctx = this.miniCtx;
     const w = this.mini.width, h = this.mini.height;
     ctx.clearRect(0, 0, w, h);
@@ -590,6 +858,22 @@ class HUD {
       ctx.arc(px, py, r, 0, Math.PI * 2);
       ctx.fill();
     };
+
+    // 征服模式据点：半透明归属色圆 + 字母（画在实体点下面当底图）
+    if (zones) for (const z of zones) {
+      const { px, py } = project(z);
+      if (px < 2 || px > w - 2 || py < 2 || py > h - 2) continue;
+      const fill = z.owner === 'blue' ? 'rgba(90,170,90,.30)' : z.owner === 'red' ? 'rgba(200,70,70,.30)' : 'rgba(200,180,80,.20)';
+      const stroke = z.owner === 'blue' ? '#7ada7a' : z.owner === 'red' ? '#e88a7a' : '#c8b450';
+      ctx.fillStyle = fill;
+      ctx.beginPath(); ctx.arc(px, py, z.r * scale, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = stroke; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(px, py, z.r * scale, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(z.id, px, py + 3.5);
+    }
 
     if (allies) for (const a of allies) dot(a, '#66aaff', 2.4);   // 友方（蓝）
     // 敌方：带朝向的三角箭头（预判走位）；无朝向数据时退化为圆点
@@ -678,7 +962,7 @@ function projGeo(size) {
 }
 function projMat(color) {
   let m = _projMatCache.get(color);
-  if (!m) { m = new THREE.MeshBasicMaterial({ color }); _projMatCache.set(color, m); }
+  if (!m) { m = new THREE.MeshBasicMaterial({ color, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.95, depthWrite: false }); _projMatCache.set(color, m); }   // 叠加发光=真曳光感
   return m;
 }
 
@@ -703,7 +987,7 @@ class Projectile {
     this.mesh = new THREE.Mesh(projGeo(size), projMat(color));
     this.mesh.position.copy(position);
     this.radius = size;
-    if (size >= 0.4) { this.stretch = true; this.mesh.scale.z = 4; }   // 主炮曳光:拉长沿弹道定向(机枪/航炮弹不拉)
+    if (size >= 0.4) { this.stretch = true; this.mesh.scale.z = 7; }   // 主炮曳光:拉长沿弹道定向(机枪/航炮弹不拉)，7 倍=清晰可见的光条
     this.velocity = direction.clone().normalize().multiplyScalar(speed);
     this.launchPos = position.clone();   // 击杀回放：出膛点快照（按真实弹道慢放重演）
     this.launchVel = this.velocity.clone();
@@ -1189,6 +1473,7 @@ class Tank {
     this.extCooldown = 0;
     this._lastAttacker = null;
     this.modules = { track: 0, barrel: 0, engine: 0 }; // 模块损伤：>0 表示损坏剩余秒数
+    this.recoil = 0; this.recoilVel = 0;   // 后坐弹簧：位置/速度（欠阻尼二阶，击发给速度冲量）
     this.crew = { gunner: 0, driver: 0, loader: 0 };   // 乘员：>0 = 阵亡剩余秒(炮手停塔/驾驶员趴窝/装填手装填×2.5)
 
     // 按队伍 + 型号的性能参数（敌方更弱更慢更不准）
@@ -1387,6 +1672,16 @@ class Tank {
     _tankFwd.addScaledVector(_tankN, -_tankFwd.dot(_tankN)).normalize(); // 投到坡面 = 实际爬坡朝向
     _tankRight.crossVectors(_tankN, _tankFwd).normalize();
     this.group.quaternion.setFromRotationMatrix(_tankM.makeBasis(_tankRight, _tankN, _tankFwd));
+    // 开炮后坐（悬挂弹簧）：欠阻尼二阶系统——击发瞬间猛冲、微微过冲、阻尼回稳（~0.5s）。
+    if (this.recoil !== 0 || this.recoilVel !== 0) {
+      this.recoilVel += (-320 * this.recoil - 18 * this.recoilVel) * dt;
+      this.recoil += this.recoilVel * dt;
+      if (Math.abs(this.recoil) < 0.002 && Math.abs(this.recoilVel) < 0.02) { this.recoil = 0; this.recoilVel = 0; }
+      // 摇晃轴垂直于炮管指向：炮管朝前=车头后仰；炮管朝侧=车体侧倾（真实力矩方向）
+      const by = Math.atan2(Math.sin(this.turretYaw), Math.cos(this.turretYaw));
+      _recoilAxis.set(Math.cos(by), 0, -Math.sin(by));   // = up × 炮管水平方向
+      this.group.quaternion.multiply(_recoilQ.setFromAxisAngle(_recoilAxis, -0.5 * this.recoil));
+    }
   }
 
   // worldPoint：世界锁定瞄准点。炮塔偏航恒速 slew 向它、对齐即停；
@@ -1486,6 +1781,8 @@ class Tank {
       pen: this.pen * sh.penMul, shellDef: sh,
     }));
     em.addEffect(new MuzzleFlash(muzzleWorld));
+    // 开炮后坐：给悬挂一个速度冲量（小车晃得狠、每发略有随机），弹簧回稳见 drive()
+    this.recoilVel += 6.0 * clamp(55 / (this.maxHealth || 55), 0.45, 1.1) * randRange(0.85, 1.15);
     // 结算统计:玩家主炮发射按弹种计数(经 em 挂钩,Game 读取)
     if (this.side === 'player') { em.pShells = em.pShells || { ap: 0, apcr: 0, he: 0 }; em.pShells[sh.id] = (em.pShells[sh.id] || 0) + 1; }
     this.reloadTimer = this.reloadTime;
@@ -2160,17 +2457,29 @@ class TankAI {
       return;
     }
 
-    let turn = clamp(headingDiff * 2, -1, 1);
-    // 距离控制：远了冲，中距停射、近了退、太近倒车+侧移（不再只往前冲）
-    let throttle;
-    if (dist > 55) throttle = 1;            // 远：冲
-    else if (dist > 30) throttle = 0.2;     // 中距：慢慢靠近
-    else if (dist > 15) throttle = -0.2;     // 偏近：微退
-    else throttle = -0.8;                    // 太近：倒车
-    // 侧向移动（增加横向位移，避免直线冲脸）：周期性左右偏转
-    this._strafeTimer = (this._strafeTimer || 0) + dt;
-    if (this._strafeTimer > 2.5 + Math.random() * 2) { this._strafeDir = (this._strafeDir || 1) * -1; this._strafeTimer = 0; }
-    turn += (this._strafeDir || 0) * 0.3;
+    // —— 机动意图 ——
+    // 每车固有环绕方向（左/右），每 4~7s 换边：交战时绕着打（战雷式侧翼机动），不再站桩对射/直线冲脸。
+    this._orbitDir = this._orbitDir || (Math.random() < 0.5 ? 1 : -1);
+    this._orbitTimer = (this._orbitTimer || 0) + dt;
+    if (this._orbitTimer > 4 + Math.random() * 3) { this._orbitDir *= -1; this._orbitTimer = 0; }
+
+    let throttle, turn;
+    if (target.isZone) {
+      // 抢点：冲进点内 ~10m 刹停驻守（进不了圈占领进度永远凑不满）。
+      throttle = dist > 10 ? 1 : 0;
+      turn = clamp(headingDiff * 2, -1, 1);
+    } else {
+      // 交战环带机动：22~46m 内切向绕圈（炮塔独立瞄准，车体绕侧翼）；
+      // 太远斜 30° 接近（不是直线冲脸），太近斜着拉开距离。
+      let moveHeading;
+      if (dist > 46) moveHeading = desiredHeading + this._orbitDir * 0.5;
+      else if (dist < 22) moveHeading = desiredHeading - this._orbitDir * Math.PI * 0.35;
+      else moveHeading = desiredHeading + this._orbitDir * Math.PI / 2;   // 切向：环绕目标
+      let mh = moveHeading - tank.heading;
+      mh = Math.atan2(Math.sin(mh), Math.cos(mh));
+      turn = clamp(mh * 2.2, -1, 1);
+      throttle = dist > 46 ? 1 : (dist < 22 ? 0.7 : 0.85);   // 环带内保持车速，绕起来
+    }
 
     // 边界回拉：接近地图边缘时朝中心修正
     const lim = tank.worldSize - 40;
@@ -2188,12 +2497,12 @@ class TankAI {
       const d = new THREE.Vector3().subVectors(ob.position, tank.position);
       d.y = 0;
       const dd = d.length();
-      if (dd < 22) {   // 探测 14→22m:提前拐弯,不再顶到墙前才急转(巷战蹭墙的根因)
+      if (dd < 22) {   // 提前拐弯,远时轻推变线,近时满舵+减速
         const dotFwd = d.dot(fwd);
         if (dotFwd > 0) {
           const sideDist = d.dot(right);
           if (Math.abs(sideDist) < (ob.radius || 3) + 3.5) {
-            const urgency = (22 - dd) / 22;   // 越近越急:远时轻推提前变线,近时满舵+减速
+            const urgency = (22 - dd) / 22;
             turn += (sideDist >= 0 ? -1 : 1) * (0.35 + urgency * 0.65);
             throttle *= 1 - urgency * 0.6;
           }
@@ -2201,7 +2510,23 @@ class TankAI {
       }
     }
 
-    tank.drive(throttle, turn, dt);
+    // 卡死脱困（巷战夹缝/顶墙）：2.5s 挪不动且在给油 → 倒车打满舵 1.2s 甩头，顺便换环绕方向
+    this._stuckT = (this._stuckT || 0) + dt;
+    if (this._stuckT > 2.5) {
+      const moved = this._lastPos ? tank.position.distanceTo(this._lastPos) : 99;
+      if (moved < 1.5 && Math.abs(throttle) > 0.3) {
+        this._unstickT = 1.2;
+        this._orbitDir *= -1;
+      }
+      this._stuckT = 0;
+      this._lastPos = tank.position.clone();
+    }
+    if (this._unstickT > 0) {
+      this._unstickT -= dt;
+      tank.drive(-1, this._orbitDir * 0.9, dt);
+    } else {
+      tank.drive(throttle, turn, dt);
+    }
     const _aimPt = target.position.clone();
     if (typeof target.forwardVector !== 'function') _aimPt.y += 1.2;   // 瞄车体高度(部位判定命中模块更多)
     tank.aimTurretAt(_aimPt, dt);
@@ -2422,6 +2747,13 @@ function createTerrain(scene, mode, mapId) {
 
   // —— 障碍物：集中在交战区(±spread)，按地图主题生成 ——
   const spread = mode === 'tank' ? half - 30 : half;
+  // 征服模式据点位置（与 _setupObjective 同式）：据点周边 34m 留空，别让楼/石头糊在点里
+  // ⚠ 这里 half = worldSize（450），_setupObjective 里 h = worldSize/2（225）——别搞混，历史命名就这样
+  const zh = half / 2;
+  const zPts = mode === 'tank'
+    ? [[-zh * 0.58, -zh * 0.10], [0, zh * 0.06], [zh * 0.58, -zh * 0.10]]
+    : [];
+  const nearZone = (x, z, r = 34) => zPts.some(([zx, zz]) => Math.hypot(x - zx, z - zz) < r);
   const baseCount = (mode === 'plane' ? 24 : 46) * (spread / 260);
   const obstacleCount = Math.round(baseCount * (theme.density || 1));
   const buildPal = theme.build || 0x80766a;
@@ -2435,39 +2767,43 @@ function createTerrain(scene, mode, mapId) {
   };
 
   // 城镇(街区网格) / 工厂(大片厂房)——密集巷战
+  // 街宽原则：street ≥ 楼最大跨 + 两侧抖动 + 坦克直径(6m) + 余量，保证任何街区之间都开得过去
+  // （原 street=14 vs 楼深最大 18：通道最坏是负的，坦克正好卡死在楼缝里）
   if (theme.urban && mode === 'tank') {
     if (theme.urban === 'shed') {
-      // 工厂：宽矮大厂房 + 小铁棚
-      const cell = 70, street = 14;
+      // 工厂：宽矮大厂房 + 小铁棚（street 32、厂房跨度 ≤20 → 最窄通道 32-20-4=8m）
+      const cell = 70, street = 32;
       for (let bx = -spread; bx < spread; bx += cell + street) {
         for (let bz = -spread; bz < spread; bz += cell + street) {
-          if (Math.hypot(bx, bz) < 75) continue;
-          const w = randRange(20, 32), h = randRange(8, 14), d = randRange(18, 30);
+          if (Math.hypot(bx, bz) < 75 || nearZone(bx, bz)) continue;
+          const w = randRange(14, 20), h = randRange(8, 14), d = randRange(12, 18);
           const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: buildPal, roughness: 0.85, metalness: 0.2 }));
-          m.position.set(bx + randRange(-6, 6), h / 2 + terrainHeight(bx, bz), bz + randRange(-6, 6));
+          m.position.set(bx + randRange(-2, 2), h / 2 + terrainHeight(bx, bz), bz + randRange(-2, 2));
           m.castShadow = true; m.receiveShadow = true; group.add(m);
           obstacles.push({ position: new THREE.Vector3(m.position.x, 0, m.position.z), radius: Math.max(w, d) / 2, height: h + terrainHeight(m.position.x, m.position.z) });
-          if (Math.random() < 0.6) addBuilding(bx + randRange(-cell / 2, cell / 2), bz + randRange(-cell / 2, cell / 2), 0x4a4a50);
+          const sx = bx + randRange(-cell / 2, cell / 2), sz = bz + randRange(-cell / 2, cell / 2);
+          if (Math.random() < 0.6 && !nearZone(sx, sz)) addBuilding(sx, sz, 0x4a4a50);
         }
       }
     } else {
-      // 城镇：街区四边大楼（同街区差不多高，像真街区）
-      const cell = 62, street = 14;
+      // 城镇：街区四边大楼（同街区差不多高，像真街区；street 26、楼跨 ≤14 → 最窄通道 26-14-4=8m）
+      const cell = 62, street = 26;
       for (let bx = -spread; bx < spread; bx += cell + street) {
         for (let bz = -spread; bz < spread; bz += cell + street) {
-          if (Math.hypot(bx, bz) < 78) continue;   // 中央战场/占领点留空
+          if (Math.hypot(bx, bz) < 78 || nearZone(bx, bz, 44)) continue;   // 中央战场/据点留空
           const ph = randRange(11, 26);
           const place = (ox, oz) => {
-            const w = randRange(10, 18), h = ph + randRange(-3, 3), d = randRange(10, 18);
+            if (nearZone(bx + ox, bz + oz)) return;
+            const w = randRange(8, 14), h = ph + randRange(-3, 3), d = randRange(8, 14);
             const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: buildPal, roughness: 0.9 }));
             m.position.set(bx + ox, h / 2 + terrainHeight(bx + ox, bz + oz), bz + oz);
             m.castShadow = true; m.receiveShadow = true; group.add(m);
             obstacles.push({ position: new THREE.Vector3(bx + ox, 0, bz + oz), radius: Math.max(w, d) / 2, height: h + terrainHeight(bx + ox, bz + oz) });
           };
-          place(randRange(-cell / 3, cell / 3), -cell / 2 + randRange(-3, 3));
-          place(randRange(-cell / 3, cell / 3), cell / 2 + randRange(-3, 3));
-          place(-cell / 2 + randRange(-3, 3), randRange(-cell / 3, cell / 3));
-          place(cell / 2 + randRange(-3, 3), randRange(-cell / 3, cell / 3));
+          place(randRange(-cell / 3, cell / 3), -cell / 2 + randRange(-2, 2));
+          place(randRange(-cell / 3, cell / 3), cell / 2 + randRange(-2, 2));
+          place(-cell / 2 + randRange(-2, 2), randRange(-cell / 3, cell / 3));
+          place(cell / 2 + randRange(-2, 2), randRange(-cell / 3, cell / 3));
           if (Math.random() < 0.6) place(randRange(-8, 8), randRange(-8, 8));
         }
       }
@@ -2477,7 +2813,7 @@ function createTerrain(scene, mode, mapId) {
   // 小镇群（散落村镇）
   for (let c = 0; c < (theme.towns || 0); c++) {
     const cx = randRange(-spread * 0.8, spread * 0.8), cz = randRange(-spread * 0.8, spread * 0.8);
-    if (Math.hypot(cx, cz) < 60) continue;
+    if (Math.hypot(cx, cz) < 60 || nearZone(cx, cz, 60)) continue;
     for (let k = 0; k < randInt(6, 10); k++) {
       const x = cx + randRange(-26, 26), z = cz + randRange(-26, 26);
       if (Math.abs(x) < 24 && Math.abs(z) < 24) continue;
@@ -2492,6 +2828,7 @@ function createTerrain(scene, mode, mapId) {
   for (let i = 0; i < obstacleCount; i++) {
     const x = randRange(-spread, spread), z = randRange(-spread, spread);
     if (Math.abs(x) < 24 && Math.abs(z) < 24) continue;
+    if (nearZone(x, z)) continue;   // 据点周边留空（散落掩体也别糊点）
     const type = pickType();
     let mesh, radius;
     if (type === 'building') {
@@ -2761,7 +3098,7 @@ class Game {
 
   _setupHint() {
     if (this.mode === 'tank') {
-      this.hud.setHint('<b>点击画面锁定鼠标</b>（炮塔可无限转，Esc 暂停）· <b>WASD</b> 车体 · <b>左键</b>主炮 · <b>1/2/3</b>切弹种 · <b>空格</b>机枪 · <b>Shift</b>瞄准镜 · <b>R</b>修车 · <b>F</b>灭火 · <b>G</b>烟雾弹 · <b>V</b>标记集火');
+      this.hud.setHint('<b>点击画面锁定鼠标</b>（炮塔可无限转，Esc 暂停）· <b>WASD</b> 车体 · <b>左键</b>主炮 · <b>1/2/3</b>切弹种 · <b>空格</b>机枪 · <b>Shift</b>瞄准镜（<b>滚轮</b>测距 · <b>Z</b>倍率）· <b>R</b>修车 · <b>F</b>灭火 · <b>G</b>烟雾弹 · <b>V</b>标记集火');
     } else {
       this.hud.setHint('<b>点击画面锁定鼠标</b>（指哪飞哪，自动改平，Esc 暂停）· <b>W/S</b>油门 · <b>Shift</b>加力 · <b>左键</b>开火 · <b>右键/X</b>导弹(喷气机) · <b>F</b>灭火');
     }
@@ -2859,14 +3196,22 @@ class Game {
     this.stats = { hits: 0, pen: 0, bounce: 0, nopen: 0, ammoKills: 0, fired: 0 };   // 结算统计(发射数在 _updateHUD 前从 em.pShells 汇总)
     this.sp = 500;              // SP 出生点（世界大战经济）：击杀攒、重生扣
     this._streak = 0; this._streakT = 0;   // 连杀窗口(8s内连杀累计)
+    this._rangeAuto = true; this._rangeSet = null;   // 瞄准镜测距装订（null=未手动装订）
+    this._scopeMag = this._scopeMag || 4;             // 倍率偏好跨局保留
     applyDifficulty(this.difficulty); // 按难度重算 CONFIG
     this.terrain = createTerrain(this.scene, this.worldwar ? 'tank' : mode, this.mapId);   // 世界大战永远用坦克地形（不管玩家选飞机还是坦克）
     if (this.em && this.terrain && this.terrain.obstacles) this.em.obstacles = this.terrain.obstacles;   // 障碍物注入 em，供炮弹碰撞检测
     const R = CONFIG.rules;
     this.kills = 0;
+    this.matchT = 0;            // 比赛计时（战绩板/击杀日志时间戳）
+    this.killLog = [];          // 击杀日志（谁杀了谁）
+    this._namePool = [];        // AI 代号池（打乱按序取）
+    this._mapBg = null;         // 大地图地形底图缓存（换图失效）
     this.playerLives = R.playerLives;
     this.enemyTickets = this.endless ? Infinity : (mode === 'tank' ? R.tankTickets : R.planeTickets);
-    this.enemiesToSpawn = this.enemyTickets;
+    this.enemiesToSpawn = this.objective === 'capture' ? 9999 : this.enemyTickets;   // 征服：增援池挂票数（票未尽援不断），上限在 _updateEnemySpawns 按票算
+    this._bleedHolder = null;   // 流失播报状态（占多数点的一方）
+    this._noEnemyT = 0;         // 敌方全灭计时（兜底判胜用）
     this.respawnTimer = -1;       // 玩家重生倒计时，-1 表示无
     this._enemySpawnTimer = -1;   // 敌方刷新倒计时
     this._allySpawnTimer = -1;    // 队友刷新倒计时
@@ -2881,47 +3226,157 @@ class Game {
     // 初始铺一波敌人
     const initial = Math.min(R.maxConcurrentEnemies, this.enemyTickets);
     for (let i = 0; i < initial; i++) this._spawnEnemy();
-    this.enemiesToSpawn = this.enemyTickets - initial;
+    if (this.objective !== 'capture') this.enemiesToSpawn = this.enemyTickets - initial;   // 征服模式保持 9999 池（按票门控）
 
     // 初始队友
     for (let i = 0; i < this.allyCount; i++) this._spawnAlly();
 
     this._setupObjective();
     this.hud.setCenterMessage('');
-    this.hud.addFeed(this.worldwar ? '世界大战 · 坦克+飞机混合作战！死后按 T/P 选新载具' : (this.objective === 'capture' ? '战斗开始 · 占领中央据点！' : '战斗开始 · 队友已就位'), 'info');
+    this.hud.addFeed(this.worldwar ? '世界大战 · 坦克+飞机混合作战！死后按 T/P 选新载具' : (this.objective === 'capture' ? '战斗开始 · 征服 A/B/C 三点！' : '战斗开始 · 队友已就位'), 'info');
   }
 
-  // 占领模式：据点设置/清理。中央圆柱+光环，蓝南红北出生。
+  // 征服模式（战雷式 A/B/C）：三点各自独立占领，占多数点使对方票数流失，击杀也扣票，先耗尽者输。
   _setupObjective() {
     this._clearCapture();
     this.captureProgress = 0;
-    if (this.objective !== 'capture') { if (this.hud) this.hud.setCapture(null); return; }
+    if (this.objective !== 'capture') { if (this.hud) { this.hud.setCapture(null); this.hud.setZones(null); } return; }
     const r = CONFIG.tank.captureRadius;
-    this.captureZone = new THREE.Mesh(
-      new THREE.CylinderGeometry(r, r, 0.4, 40),
-      new THREE.MeshBasicMaterial({ color: 0x554a2a, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
-    );
-    this.captureZone.position.set(0, 0.3, 0);
-    this.captureZoneRing = new THREE.Mesh(
-      new THREE.TorusGeometry(r, 0.9, 8, 48),
-      new THREE.MeshBasicMaterial({ color: 0xffdd44 })
-    );
-    this.captureZoneRing.rotation.x = Math.PI / 2;
-    this.captureZoneRing.position.set(0, 1.2, 0);
-    this.scene.add(this.captureZone, this.captureZoneRing);
-    this._zoneTarget = { position: new THREE.Vector3(0, 0, 0), alive: true, isZone: true };
-    this.hud.addFeed('占领模式 · 控制中央据点，进度先满 100% 获胜', 'info');
+    const h = CONFIG.tank.worldSize / 2;
+    const CQ = CONFIG.rules.conquest;
+    this.blueTickets = CQ.tickets;
+    this.redTickets = CQ.tickets;
+    this.zones = [
+      { id: 'A', pos: new THREE.Vector3(-h * 0.58, 0, -h * 0.10) },
+      { id: 'B', pos: new THREE.Vector3(0, 0, h * 0.06) },
+      { id: 'C', pos: new THREE.Vector3(h * 0.58, 0, -h * 0.10) },
+    ];
+    for (const z of this.zones) {
+      z.progress = 0;
+      z.owner = 'neutral';
+      z.mesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(r, r, 0.4, 40),
+        new THREE.MeshBasicMaterial({ color: 0x554a2a, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
+      );
+      z.mesh.position.set(z.pos.x, 0.3, z.pos.z);
+      z.ring = new THREE.Mesh(
+        new THREE.TorusGeometry(r, 0.9, 8, 48),
+        new THREE.MeshBasicMaterial({ color: 0xffdd44 })
+      );
+      z.ring.rotation.x = Math.PI / 2;
+      z.ring.position.set(z.pos.x, 1.2, z.pos.z);
+      z.sprite = zoneLetterSprite(z.id);
+      z.sprite.position.set(z.pos.x, 16, z.pos.z);
+      this.scene.add(z.mesh, z.ring, z.sprite);
+    }
+    this.hud.addFeed('征服模式 · 占领 A/B/C 三点耗尽敌方票数（击杀也扣票）', 'info');
   }
   _clearCapture() {
-    for (const m of [this.captureZone, this.captureZoneRing]) {
-      if (m) { this.scene.remove(m); m.geometry.dispose(); m.material.dispose(); }
+    if (this.zones) {
+      for (const z of this.zones) {
+        this.scene.remove(z.mesh, z.ring, z.sprite);
+        z.mesh.geometry.dispose(); z.mesh.material.dispose();
+        z.ring.geometry.dispose(); z.ring.material.dispose();
+        z.sprite.material.map.dispose(); z.sprite.material.dispose();
+      }
+      this.zones = null;
     }
-    this.captureZone = null; this.captureZoneRing = null; this._zoneTarget = null;
+    if (this.hud) this.hud.setZones(null);
   }
 
   _playerBasePos() {
     if (this.mode === 'tank') return new THREE.Vector3(0, 0, -(CONFIG.tank.worldSize - 45));   // 南侧边缘
     return new THREE.Vector3(0, CONFIG.plane.spawnAltitude, 0);
+  }
+
+  // 取一个不重复的 AI 代号（池耗尽就编号续命）
+  _nextName() {
+    if (this._namePool.length === 0) this._namePool = AI_NAMES.slice().sort(() => Math.random() - 0.5);
+    return this._namePool.pop() || '无名-' + Math.floor(Math.random() * 90 + 10);
+  }
+
+  // 大地图数据（HUD.showBigMap 用）
+  _bigMapData() {
+    return {
+      half: this.terrain ? this.terrain.half : CONFIG.tank.worldSize,
+      player: this.player && this.player.alive ? { x: this.player.position.x, z: this.player.position.z, h: this.player.heading ?? 0 } : null,
+      allies: this.allies.filter((a) => a.alive).map((a) => ({ x: a.position.x, z: a.position.z })),
+      enemies: this.enemies.filter((e) => e.alive).map((e) => ({ x: e.position.x, z: e.position.z })),
+      zones: (this.objective === 'capture' && this.zones)
+        ? this.zones.map((z) => ({ id: z.id, x: z.pos.x, z: z.pos.z, r: CONFIG.tank.captureRadius, owner: z.owner })) : null,
+      conquest: this.objective === 'capture',
+      blueT: this.blueTickets, redT: this.redTickets,
+      kills: this.kills, enemyTickets: this.enemyTickets, lives: Math.max(0, this.playerLives),
+      time: this.matchT, bgCanvas: this._buildMapBg(),
+    };
+  }
+
+  // 地形底图（起伏明暗+建筑点）：每局缓存一张
+  _buildMapBg() {
+    if (this._mapBg) return this._mapBg;
+    const S = 512, half = this.terrain ? this.terrain.half : CONFIG.tank.worldSize;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = S;
+    const ctx = cv.getContext('2d');
+    const N = 128, cell = S / N;
+    let hMin = Infinity, hMax = -Infinity;
+    const hs = new Float32Array(N * N);
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+      const h = terrainHeight(-half + (i / (N - 1)) * 2 * half, -half + (j / (N - 1)) * 2 * half);
+      hs[i * N + j] = h;
+      if (h < hMin) hMin = h; if (h > hMax) hMax = h;
+    }
+    const span = Math.max(0.001, hMax - hMin);
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+      const t = (hs[i * N + j] - hMin) / span;
+      const r = Math.round(24 + t * 60), g = Math.round(40 + t * 44), b = Math.round(26 + t * 30);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(i * cell, j * cell, cell + 0.5, cell + 0.5);
+    }
+    if (this.terrain) {
+      ctx.fillStyle = 'rgba(150,150,160,.5)';
+      for (const ob of this.terrain.obstacles) {
+        const s = Math.max(1.5, (ob.radius || 3) / half * 0.5 * S);
+        ctx.fillRect((ob.position.x / half * 0.5 + 0.5) * S - s / 2, (ob.position.z / half * 0.5 + 0.5) * S - s / 2, s, s);
+      }
+    }
+    this._mapBg = cv;
+    return cv;
+  }
+
+  // 战绩板数据
+  _scoreData() {
+    const mk = (v, me = false) => ({ name: v.displayName || '未知', kills: v.killCount || 0, alive: v.alive, team: v.team, boss: !!v.isBoss, me });
+    const blue = [], red = [];
+    if (this.player) blue.push(mk(this.player, true));
+    for (const a of this.allies) blue.push(mk(a));
+    for (const e of this.enemies) red.push(mk(e));
+    return {
+      time: this.matchT,
+      conquest: this.objective === 'capture',
+      blueT: this.blueTickets, redT: this.redTickets,
+      kills: this.kills, enemyTickets: this.enemyTickets,
+      blue, red, log: this.killLog,
+    };
+  }
+
+  // 征服模式 AI 抢点目标：优先攻最近的非己方点；全占则守最近的己方点（返回 isZone 伪实体）。
+  _zoneTargetFor(pos, team) {
+    if (this.objective !== 'capture' || !this.zones) return null;
+    let best = null, bestD = Infinity;
+    for (const z of this.zones) {
+      if (z.owner === team) continue;
+      const d = pos.distanceToSquared(z.pos);
+      if (d < bestD) { bestD = d; best = z; }
+    }
+    if (!best) {
+      bestD = Infinity;
+      for (const z of this.zones) {
+        const d = pos.distanceToSquared(z.pos);
+        if (d < bestD) { bestD = d; best = z; }
+      }
+    }
+    return best ? { position: best.pos, alive: true, isZone: true } : null;
   }
 
   _makePlayer() {
@@ -2941,6 +3396,7 @@ class Game {
     }
     this.gunnerView = false;
     this._snapCam = true;
+    this.player.displayName = '你';
     // 预置相机位置，避免第一帧输入用到默认相机（0,0,0）
     if (this.mode === 'tank') this._updateCameraTank(0.016);
     else this._updateCameraPlane(0.016);
@@ -2956,12 +3412,14 @@ class Game {
       e.group.position.set(randRange(-h * 0.4, h * 0.4), 0, randRange(h * 0.55, h - 45));
       e.heading = Math.atan2(-e.group.position.x, -e.group.position.z);
       e.ai = new TankAI(e);
+      e.displayName = this._nextName();
       this.em.addTank(e);
       this.enemies.push(e);
     } else {
       const ang = randRange(0, Math.PI * 2);
       const dist = randRange(150, 220);
       const e = new Plane({ side: 'enemy', team: 'red', color: 0xb5462e, type: randomPlaneType().id });
+      e.displayName = this._nextName();
       e.group.position.set(Math.sin(ang) * dist, CONFIG.plane.spawnAltitude + randRange(-10, 12), Math.cos(ang) * dist);
       const toCenter = this._playerBasePos().clone().sub(e.group.position).normalize();
       e.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), toCenter);
@@ -2999,10 +3457,12 @@ class Game {
       e.group.position.set(randRange(-40, 40), 0, randRange(-(h - 45), -(h * 0.55)));
       e.heading = Math.atan2(-e.group.position.x, -e.group.position.z);
       e.ai = new TankAI(e);
+      e.displayName = this._nextName();
       this.em.addTank(e);
       this.allies.push(e);
     } else {
       const e = new Plane({ side: 'ally', team: 'blue', color: 0x5a8eb8, type: randomPlaneType().id });
+      e.displayName = this._nextName();
       e.group.position.set(randRange(-30, 30), CONFIG.plane.spawnAltitude + randRange(-8, 8), randRange(-30, 30));
       e.group.quaternion.identity();
       e.ai = new PlaneAI(e);
@@ -3054,19 +3514,39 @@ class Game {
     this._aimYaw = (this._aimYaw ?? t.heading) - mdx * YAW_SENS;       // 鼠标左右 → 瞄准方位
     this._aimHeight = clamp((this._aimHeight ?? 0) - mdy * H_SENS, -28, this.worldwar ? 120 : 28); // 世界大战抬高到120：能瞄天上飞机
     this._tankAimPt = t.position.clone().add(new THREE.Vector3(Math.sin(this._aimYaw) * R, 2 + this._aimHeight, Math.cos(this._aimYaw) * R));
-    t.aimTurretAt(this._tankAimPt, dt, 0);
 
-    // 修车（按住 R）：不能动但可以开火/灭火，消耗时间修血+模块
-    this._repairing = inp.isDown('KeyR') && t.health < t.maxHealth;
+    // —— 炮手瞄准镜：滚轮装订射距（手动补偿弹道下坠），Z 切倍率，C 回自动测距 ——
+    const notches = inp.consumeWheel();
+    this._dAim = t.position.distanceTo(this._tankAimPt);
+    if (this.gunnerView && notches !== 0) {
+      if (this._rangeAuto) { this._rangeAuto = false; this._rangeSet = clamp(Math.round(this._dAim / 10) * 10, 20, 400); }   // 首次滚动：从当前实际距离起装订
+      this._rangeSet = clamp(this._rangeSet + notches * 10, 20, 400);
+      if (this.sfx) this.sfx.ui();
+    }
+    if (this._consumePress(inp, 'KeyZ') && this.gunnerView) { this._scopeMag = (this._scopeMag || 4) === 4 ? 8 : 4; if (this.sfx) this.sfx.ui(); }
+    if (this._consumePress(inp, 'KeyC') && this.gunnerView && !this._rangeAuto) { this._rangeAuto = true; this.hud.addFeed('📏 已切回自动测距', 'info'); }
+    // 弹道下坠补偿：炮口上抬 0.5·g·(d/v)²（自动=按实际距离实时补偿；手动=按装订射距，装错就打高/打低）
+    const dEff = this._rangeAuto ? this._dAim : this._rangeSet;
+    const drop = 0.5 * CONFIG.tank.shellGravity * Math.pow(dEff / CONFIG.tank.shellSpeed, 2);
+    const gunPt = this._tankAimPt.clone(); gunPt.y += drop;
+    t.aimTurretAt(gunPt, dt, 0);
+
+    // 修车（按住 R）：不能动但可以开火/灭火，消耗时间修血+模块。
+    // 血满但零件坏了（履带/炮管/发动机）也能修——原先被 health<max 挡住，R 对零件完全无效。
+    const modsBroken = t.modules && (t.modules.track > 0 || t.modules.barrel > 0 || t.modules.engine > 0);
+    this._repairing = inp.isDown('KeyR') && (t.health < t.maxHealth || modsBroken);
     if (this._repairing) {
       t.drive(0, 0, dt);   // 修车时不能移动（覆盖上面的 drive）
-      t.health = Math.min(t.maxHealth, t.health + 15 * dt);
+      if (t.health < t.maxHealth) t.health = Math.min(t.maxHealth, t.health + 15 * dt);
       if (t.modules) {
-        if (t.modules.track > 0) t.modules.track = Math.max(0, t.modules.track - dt * 3);
-        if (t.modules.barrel > 0) t.modules.barrel = Math.max(0, t.modules.barrel - dt * 3);
-        if (t.modules.engine > 0) t.modules.engine = Math.max(0, t.modules.engine - dt * 3);
+        // 按住 R = 主动抢修 6/s（被动自修 0.5/s 的两倍以上；发动机 7s 伤 1 秒出头修好）
+        if (t.modules.track > 0) t.modules.track = Math.max(0, t.modules.track - dt * 6);
+        if (t.modules.barrel > 0) t.modules.barrel = Math.max(0, t.modules.barrel - dt * 6);
+        if (t.modules.engine > 0) t.modules.engine = Math.max(0, t.modules.engine - dt * 6);
       }
-      this.hud.setCenterMessage(`🔧 修车中… ${Math.floor(t.health)}/${t.maxHealth}`);
+      this.hud.setCenterMessage(t.health < t.maxHealth
+        ? `🔧 修车中… ${Math.floor(t.health)}/${t.maxHealth}`
+        : '🔧 修理零件中…');
     }
 
     if (inp.mouseDown) t.tryFire(this.em);
@@ -3090,7 +3570,9 @@ class Game {
 
   _handleInputPlane(dt) {
     this.hud.hideShell();   // 开飞机时藏掉坦克弹种框（worldwar 切载具后不残留）
+    this.hud.hideScope();   // 同上：瞄准镜遮罩不残留
     const inp = this.input;
+    inp.consumeWheel();     // 排空滚轮累积（飞机模式不用，避免切回坦克瞬间跳射距）
     const p = this.player;
     if (!p.alive) return;
     // 指针锁定时用"虚拟瞄准点"（累积鼠标移动，光标不会飞出窗口）；未锁定时用光标绝对位置。
@@ -3153,16 +3635,22 @@ class Game {
     this.camera.updateProjectionMatrix();
   }
 
+  // 瞄准镜倍率 → 视场角：mag = tan(基础FOV/2) / tan(镜内FOV/2)，基础为第三人称 62°。
+  _scopeFov() {
+    const mag = this._scopeMag || 4;
+    return THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(62) / 2) / mag));
+  }
+
   _updateCameraTank(dt) {
     const t = this.player;
     if (this.gunnerView) {
       const muzzle = t.getMuzzleWorld();
       const dir = t.getBarrelDir();
-      const desired = muzzle.clone().addScaledVector(dir, -2.0).add(new THREE.Vector3(0, 0.6, 0));   // 抬到炮管上方，避免被炮管遮挡
+      const desired = muzzle.clone().addScaledVector(dir, -2.0 - 0.6 * t.recoil).add(new THREE.Vector3(0, 0.6, 0));   // 后坐瞬间相机也被"推"向后；抬到炮管上方避免被炮管遮挡
       if (this._snapCam) { this.camera.position.copy(desired); this._snapCam = false; }
       else this.camera.position.lerp(desired, 0.5);
       this.camera.lookAt(muzzle.clone().addScaledVector(dir, 60));
-      this._setFov(26, dt);
+      this._setFov(this._scopeFov(), dt);   // 倍率视场：4x≈17° / 8x≈8.6°
     } else {
       // 相机跟"鼠标瞄准方位"(_aimYaw)，不再跟炮塔方位——鼠标一动相机立刻转，炮塔随后 slew 对齐。
       const ay = this._aimYaw ?? t.heading;
@@ -3179,6 +3667,13 @@ class Game {
       const look = this._tankAimPt ? this._tankAimPt.clone() : tp.clone().addScaledVector(_tankFwd, 60).add(new THREE.Vector3(0, 2, 0));
       this.camera.lookAt(look);
       this._setFov(62, dt);
+    }
+    // 开炮后坐（弹簧驱动）：击发瞬间镜头猛磕上去、过冲回弹再稳住；
+    // 带随机滚转=冲击乱抖。recoil 过冲变负时镜头微微下点——回弹的真实感。
+    if (t.recoil !== 0) {
+      const k = t.recoil * (this.gunnerView ? 0.30 : 0.10);
+      this.camera.rotateX(-k);
+      this.camera.rotateZ(randRange(-1, 1) * k * 0.35);
     }
   }
 
@@ -3240,6 +3735,7 @@ class Game {
     const dt = Math.min(this.clock.getDelta(), 0.05);
     // Esc 暂停/恢复统一走常驻 _onEscKey（锁定时 Esc 由浏览器退锁、_onPLChange 暂停）。
     if (this.paused) { this.renderer.render(this.scene, this.camera); return; }
+    if (this.state === 'playing') this.matchT += dt;
     if (this.mode === 'tank' && this.player && this.player.alive) {
       // 十字准星 = 炮膛实际指向（炮口 + 炮管方向投影到屏幕）：随炮塔转，不锁屏幕中央。
       // 相机跟鼠标、炮塔随后 slew 对齐时，准星从偏处滑向中央（与红环重合即对准）。
@@ -3249,9 +3745,18 @@ class Game {
         const sp = this._tankAimPt.clone().project(this.camera);
         this.hud.positionAimCircle(sp.x, sp.y, sp.z < 1);
       } else this.hud.positionAimCircle(0, 0, false);
+      // 炮手瞄准镜：镜筒分化替代十字准星（hitmarker 保留在分化中心闪）；射距信息行随动。
+      if (this.gunnerView) {
+        const rt = this._rangeAuto ? `${Math.round(this._dAim || 0)}m（自动）` : `${this._rangeSet}m（手动）`;
+        this.hud.showScope({ mag: this._scopeMag || 4, rangeText: rt, fov: this._scopeFov() });
+        this.hud.setCrosshairVisible(false);
+      } else {
+        this.hud.hideScope();
+        this.hud.setCrosshairVisible(true);
+      }
       // 未锁定指针时显示"点击锁定"提示：锁定后炮塔可无限旋转（movementX/Y 累积），
       // 否则鼠标碰到屏幕边缘就停（clientX 差值被窗口宽度限死）。
-      if (this.state === 'playing' && !this._pointerLocked) this.hud.showLockPrompt();
+      if (this.state === 'playing' && !this._pointerLocked && !this.gunnerView) this.hud.showLockPrompt();
       else this.hud.hideLockPrompt();
     } else if (this.mode === 'plane' && this.player && this.player.alive) {
       // 飞机：准星跟随虚拟瞄准点 NDC（指针锁定后 clientX/Y 冻结，必须用累积的虚拟点，否则准星钉死）
@@ -3262,6 +3767,8 @@ class Game {
     } else {
       this.hud.positionCrosshair(this.input.mouseX, this.input.mouseY);
       this.hud.positionAimCircle(0, 0, false);
+      this.hud.hideScope();   // 阵亡/切载具：镜筒遮罩撤掉
+      this.hud.setCrosshairVisible(true);
       this.hud.hideLockPrompt();
     }
     this.sfx.resume();
@@ -3323,16 +3830,17 @@ class Game {
       const obstacles = this.terrain && this.terrain.obstacles;
       const blueAlive = (this.player && this.player.alive ? [this.player] : []).concat(this.allies.filter((a) => a.alive));
       const redAlive = this.enemies.filter((e) => e.alive);
-      const zoneT = (this.objective === 'capture') ? this._zoneTarget : null;
       for (const e of this.enemies) {
         if (!e.ai) continue;
         let t = this._nearest(e.position, blueAlive);
-        if (zoneT && (!t || e.position.distanceTo(t.position) > 75)) t = zoneT;   // 没附近敌人就抢点
+        const zoneT = this._zoneTargetFor(e.position, 'red');   // 没附近敌人就抢点
+        if (zoneT && (!t || e.position.distanceTo(t.position) > 75)) t = zoneT;
         e.ai.update(dt, { target: t, entityManager: this.em, obstacles, smokes: this.em.smokes });
       }
       for (const a of this.allies) {
         if (!a.ai) continue;
         let t = this._nearest(a.position, redAlive, this._markedTarget);   // 标记目标全队集火
+        const zoneT = this._zoneTargetFor(a.position, 'blue');
         if (zoneT && (!t || a.position.distanceTo(t.position) > 75)) t = zoneT;
         a.ai.update(dt, { target: t, entityManager: this.em, obstacles, smokes: this.em.smokes });
       }
@@ -3407,24 +3915,54 @@ class Game {
         this._updateCameraDeath(dt);          // 阵亡观战：看向最近敌人，告诉玩家战场朝向
       }
 
-      if (this.objective === 'capture' && this.captureZone) {
-        let blue = 0, red = 0;
-        // 高度门槓：飞机（有 forwardVector）须离地 <15m 才算占点（贴地压制）；掠过头顶不算
-        const inZ = (t) => t && t.alive && t.position.distanceTo(this._zoneTarget.position) < CONFIG.tank.captureRadius
-          && (typeof t.forwardVector !== 'function' || t.position.y - terrainHeight(t.position.x, t.position.z) < 15);
-        if (inZ(this.player)) blue++;
-        for (const a of this.allies) if (inZ(a)) blue++;
-        for (const e of this.enemies) if (inZ(e)) red++;
-        const rate = (100 / 25) * dt;   // 无争议 ~25s 占满
-        if (blue > red) this.captureProgress = Math.min(100, this.captureProgress + rate);
-        else if (red > blue) this.captureProgress = Math.max(-100, this.captureProgress - rate);
-        const lead = this.captureProgress;
-        this.captureZone.material.color.setHex(lead > 1 ? 0x4f7a3a : lead < -1 ? 0x7a2a2a : 0x554a2a);
-        this.captureZoneRing.material.color.setHex(lead > 1 ? 0x66ff66 : lead < -1 ? 0xff6666 : 0xffdd44);
-        this.hud.setCapture(lead);
+      if (this.objective === 'capture' && this.zones) {
+        const R = CONFIG.tank.captureRadius, R2 = R * R, rate = (100 / 25) * dt;   // 无争议 ~25s 占满
+        // 高度门槛：飞机（有 forwardVector）须离地 <15m 才算占点（贴地压制）；掠过头顶不算
+        const inZ = (t, z) => {
+          if (!t || !t.alive) return false;
+          const dx = t.position.x - z.pos.x, dz = t.position.z - z.pos.z;
+          if (dx * dx + dz * dz > R2) return false;
+          if (typeof t.forwardVector === 'function' && t.position.y - terrainHeight(t.position.x, t.position.z) >= 15) return false;
+          return true;
+        };
+        for (const z of this.zones) {
+          let blue = 0, red = 0;
+          if (inZ(this.player, z)) blue++;
+          for (const a of this.allies) if (inZ(a, z)) blue++;
+          for (const e of this.enemies) if (inZ(e, z)) red++;
+          if (blue > red) z.progress = Math.min(100, z.progress + rate);
+          else if (red > blue) z.progress = Math.max(-100, z.progress - rate);
+          if (z.progress >= 100 && z.owner !== 'blue') { z.owner = 'blue'; this.hud.addFeed(`🔵 据点 ${z.id} 已被我方占领`, 'kill'); this.sfx.ui(); }
+          else if (z.progress <= -100 && z.owner !== 'red') { z.owner = 'red'; this.hud.addFeed(`🔴 据点 ${z.id} 被敌方占领`, 'death'); }
+          const contested = Math.abs(z.progress) < 100 && z.progress !== 0;
+          z.mesh.material.color.setHex(z.owner === 'blue' ? 0x2e4a2a : z.owner === 'red' ? 0x5a2424 : 0x554a2a);
+          z.ring.material.color.setHex(z.owner === 'blue' ? 0x66ff66 : z.owner === 'red' ? 0xff6666 : contested ? 0xffdd44 : 0xaa9955);
+          z.sprite.material.color.setHex(z.owner === 'blue' ? 0x9fd0ff : z.owner === 'red' ? 0xffb0a0 : 0xffffff);
+        }
+        // 票数流失：占多数点的一方使对方扣票（2 点缓速 / 3 点快速）；击杀扣票在 cullDead 里
+        const bq = this.zones.filter((z) => z.owner === 'blue').length;
+        const rq = this.zones.filter((z) => z.owner === 'red').length;
+        const CQ = CONFIG.rules.conquest;
+        if (bq >= 2) this.redTickets -= (bq === 2 ? CQ.bleed2 : CQ.bleed3) * dt;
+        if (rq >= 2) this.blueTickets -= (rq === 2 ? CQ.bleed2 : CQ.bleed3) * dt;
+        this.redTickets = Math.max(0, this.redTickets);
+        this.blueTickets = Math.max(0, this.blueTickets);
+        // 流失状态播报（开始/停止时说一声，别每帧刷屏）+ 顶栏高亮正在流失的一方
+        const holder = bq >= 2 ? 'blue' : rq >= 2 ? 'red' : null;
+        if (holder !== this._bleedHolder) {
+          this._bleedHolder = holder;
+          if (holder === 'blue') this.hud.addFeed(`🔥 我方占据 ${bq} 点，敌方票数持续流失！`, 'kill');
+          else if (holder === 'red') this.hud.addFeed(`⚠ 敌方占据 ${rq} 点，我方票数流失中！夺回据点！`, 'death');
+        }
+        this.hud.setZones(this.zones, this.blueTickets, this.redTickets, CQ.tickets, holder);
       }
 
       this._updateHUD();
+      // 大地图 M / 战绩板 Tab（按住显示，不暂停比赛）
+      if (this.state === 'playing' && this.input.isDown('KeyM')) this.hud.showBigMap(this._bigMapData());
+      else this.hud.hideBigMap();
+      if (this.state === 'playing' && this.input.isDown('Tab')) this.hud.showScoreboard(this._scoreData());
+      else this.hud.hideScoreboard();
       // 炸弹落点标记（CCIP）：用 3D 地面圆环+竖直光柱标记落点（稳定不卡，不用屏幕投影）
       if (this.mode === 'plane' && this.player && this.player.alive && this.player.maxBombs > 0) {
         const _pfwd = this.player.forwardVector();
@@ -3459,7 +3997,7 @@ class Game {
         if (this._bombRing) this._bombRing.visible = false;
         if (this._bombPole) this._bombPole.visible = false;
       }
-      this._checkEnd();
+      this._checkEnd(dt);
     }
 
     } catch (err) { console.error('⚠ _animate:', err); if (!this._aErr) { this._aErr = true; try { this.hud.addFeed('⚠ ' + (err.message || err), 'info'); } catch (e) {} } }
@@ -3837,16 +4375,29 @@ class Game {
       const scale = isPlane ? 2.5 : 3.5;
       this.em.addEffect(new Explosion(r.position.clone().add(new THREE.Vector3(0, 1.5, 0)), scale, 0xffa040));
       const tag = r.lastCrit ? ` · ${r.lastCrit}` : '';
+      // 击杀日志（战绩板 Tab）：谁 ▸ 击毁了 谁；顺手给击杀者记人头
+      {
+        const atk = r._lastAttacker;
+        if (atk) {
+          atk.killCount = (atk.killCount || 0) + 1;
+          const nm = (v) => v === this.player ? '你' : (v.displayName || '未知');
+          const m = Math.floor(this.matchT / 60), s = String(Math.floor(this.matchT % 60)).padStart(2, '0');
+          this.killLog.push({ t: `${m}:${s}`, a: nm(atk), v: `${nm(r)}·${label}`, aTeam: atk.team });
+          if (this.killLog.length > 30) this.killLog.shift();
+        }
+      }
       if (r === this.player) {
         this.hud.addFeed(`你的${label}被击毁${tag}`, 'death');
         this.hud.hideCrosshair();            // 阵亡：藏掉准星，别让它留在屏上误导
         this._deathCamTarget = null;          // 观战目标重新选
         this.player = null;
         this.playerLives -= 1;
+        if (this.objective === 'capture') this.blueTickets = Math.max(0, this.blueTickets - CONFIG.rules.conquest.killCost);   // 征服：阵亡扣己方票
         if (this.playerLives > 0) this.respawnTimer = this.worldwar ? CONFIG.rules.respawnDelay * 1.8 : CONFIG.rules.respawnDelay;
       } else if (r.team === 'red') {
         const wasBoss = r.isBoss;
         this.kills += 1;
+        if (this.objective === 'capture') this.redTickets = Math.max(0, this.redTickets - CONFIG.rules.conquest.killCost);     // 征服：击杀扣敌方票
         if (this.endless && this.kills % 10 === 0) this._spawnBoss(); // 每 10 击杀出一只精英
         const atk = r._lastAttacker;
         // SP 奖励(世界大战) + 玩家连杀播报
@@ -3868,6 +4419,7 @@ class Game {
         this.hud.addFeed(`${who}敌方${label}${tag}${bonus}`, 'kill');
       } else if (r.team === 'blue') {
         this.hud.addFeed(`友方${label}被击毁${tag}`, 'death');
+        if (this.objective === 'capture') this.blueTickets = Math.max(0, this.blueTickets - CONFIG.rules.conquest.killCost);   // 征服：队友阵亡同样扣票
       }
     }
   }
@@ -3966,11 +4518,15 @@ class Game {
     const maxC = this.endless
       ? Math.min(8, CONFIG.rules.maxConcurrentEnemies + Math.floor(this.kills / 8))
       : CONFIG.rules.maxConcurrentEnemies;
-    // 维持场上敌人数：若有空位且还有配额，安排一次刷新
+    // 维持场上敌人数：若有空位且还有配额，安排一次刷新。
+    // 征服模式上限挂票数：ceil(敌方票/击杀扣票)——票未尽援不断，票流失增援同步缩水（歼灭也能把票打空）。
+    const cap = this.objective === 'capture'
+      ? Math.ceil(this.redTickets / CONFIG.rules.conquest.killCost)
+      : this.enemyTickets;
     if (this._enemySpawnTimer <= 0 &&
         aliveEnemies < maxC &&
         this.enemiesToSpawn > 0 &&
-        this.kills + aliveEnemies < this.enemyTickets) {
+        this.kills + aliveEnemies < cap) {
       this._enemySpawnTimer = CONFIG.rules.enemyRespawnDelay;
     }
     if (this._enemySpawnTimer > 0) {
@@ -4007,7 +4563,7 @@ class Game {
         maxHealth: this.player.maxHealth,
         reloadFraction: this.player.reloadFraction,
         kills: this.kills,
-        tickets: this.enemyTickets,
+        tickets: this.objective === 'capture' ? null : this.enemyTickets,   // 征服模式票数在顶栏
         lives: Math.max(0, this.playerLives),
         enemiesLeft,
       });
@@ -4019,6 +4575,9 @@ class Game {
       this.hud.drawMinimap({
         playerPos: this.player.position,
         playerHeading: heading,
+        zones: (this.objective === 'capture' && this.zones)
+          ? this.zones.map((z) => ({ x: z.pos.x, y: 0, z: z.pos.z, r: CONFIG.tank.captureRadius, owner: z.owner, id: z.id }))
+          : null,
         enemies: this.enemies.filter((e) => e.alive).map((e) => {
           const h = e.heading ?? (typeof e.forwardVector === 'function' ? Math.atan2(e.forwardVector().x, e.forwardVector().z) : null);   // 飞机用航向
           return { x: e.position.x, y: e.position.y, z: e.position.z, h };
@@ -4031,7 +4590,7 @@ class Game {
       // 按载具实体类型判（worldwar 下 this.mode 可能与玩家实际载具不同步；坦克实体永远不显示 lead 提前量环）
       if (!this.worldwar && typeof this.player.forwardVector === 'function') this._updateLeadReticle(); else this.hud.positionLead(0, 0, false);   // worldwar 混战不显示 lead 提前量环（玩家反馈不需要）；纯飞机模式才显示
     } else {
-      this.hud.update({ kills: this.kills, tickets: this.enemyTickets, lives: Math.max(0, this.playerLives), enemiesLeft });
+      this.hud.update({ kills: this.kills, tickets: this.objective === 'capture' ? null : this.enemyTickets, lives: Math.max(0, this.playerLives), enemiesLeft });
       this.hud.setModules(null);
       this.hud.positionLead(0, 0, false);
     }
@@ -4066,12 +4625,17 @@ class Game {
     else this.hud.positionLead(0, 0, false);
   }
 
-  _checkEnd() {
+  _checkEnd(dt = 0.016) {
     if (this.state !== 'playing') return;
     if (this.objective === 'capture') {
-      // 占领模式：进度先满 100% 的一方获胜
-      if (this.captureProgress >= 100) { this._end(true); return; }
-      if (this.captureProgress <= -100) { this._end(false); return; }
+      // 征服模式：先耗尽对方票数者获胜（占点流失 + 击杀扣票两条路）
+      if (this.redTickets <= 0) { this._end(true); return; }
+      if (this.blueTickets <= 0) { this._end(false); return; }
+      // 全灭兜底：敌方一辆不剩且 6 秒无增援（战雷式 team wipe）——防止"打完坦克票没耗完"卡局
+      if (this.enemies.length === 0) {
+        this._noEnemyT += dt;
+        if (this._noEnemyT > 6) { this.hud.addFeed('⚔ 敌方战力耗尽！', 'kill'); this._end(true); return; }
+      } else this._noEnemyT = 0;
     } else if (!this.endless && this.kills >= this.enemyTickets) { this._end(true); return; }
     if (this.playerLives <= 0 && this.respawnTimer <= 0 && !(this.player && this.player.alive)) {
       this._end(false);
@@ -4085,6 +4649,9 @@ class Game {
     // 程序化退出无 ESC 冷却，也顺带消除下一局开局"要点两次才锁上"的问题。
     if (document.pointerLockElement) document.exitPointerLock();
     this.hud.hideCrosshair();
+    this.hud.hideScope();                 // 结束时撤掉瞄准镜遮罩
+    this.hud.hideBigMap();                // 大地图/战绩板也撤掉
+    this.hud.hideScoreboard();
     this.hud.positionLead(0, 0, false);   // 结束时清提前量瞄准环，防卡屏残留
     if (this._bombX) this._bombX.style.display = 'none';
     this.hud.setCenterMessage('');
@@ -4110,6 +4677,8 @@ class Game {
     // 重置上一局残留的 per-match 状态（避免瞄准角/错误标志/观战目标串到新局）
     this._aimYaw = null;
     this._aimHeight = null;
+    this._rangeAuto = true;   // 测距装订不跨局保留（重开从自动测距起）
+    this._rangeSet = null;
     this._jHold = false;
     this._aErr = false;
     this._deathCamTarget = null;
@@ -4232,7 +4801,7 @@ function renderEndlessBtn() {
 }
 function renderObjectiveBtn() {
   if (!objectiveBtn) return;
-  objectiveBtn.textContent = `🎯 占领模式：${objective === 'capture' ? '开启' : '关闭'}`;
+  objectiveBtn.textContent = `🎯 征服模式(A/B/C)：${objective === 'capture' ? '开启' : '关闭'}`;
   objectiveBtn.classList.toggle('active', objective === 'capture');
   objectiveBtn.style.display = (worldwar || pendingMode === 'tank') ? '' : 'none';   // 世界大战时也显示
 }
@@ -4349,7 +4918,7 @@ function renderLoadout() {
   loEls.name.textContent = t.name;
   loEls.weapon.textContent = weaponDesc(isTank, t);
   loEls.stats.innerHTML = statBars(isTank, t);
-  loEls.summary.textContent = `难度：${DIFFICULTY_LABELS[difficulty]}　·　无尽：${endless ? '开' : '关'}${isTank ? `　·　目标：${objective === 'capture' ? '占领' : '歼灭'}　·　🗺 ${MAPS[mapIndex].name}` : ''}${worldwar ? '　·　🌍世界大战' : ''}　·　💰 ${meta.money}`;
+  loEls.summary.textContent = `难度：${DIFFICULTY_LABELS[difficulty]}　·　无尽：${endless ? '开' : '关'}${isTank ? `　·　目标：${objective === 'capture' ? '征服' : '歼灭'}　·　🗺 ${MAPS[mapIndex].name}` : ''}${worldwar ? '　·　🌍世界大战' : ''}　·　💰 ${meta.money}`;
   renderEndlessBtn();
   renderObjectiveBtn();
   renderMapBtn();
