@@ -4759,27 +4759,35 @@ class Game {
     const spd = target.speed != null ? target.speed : ((target.lastThrottle || 0) * (target.maxSpeed || 10));
     const aim = target.position.clone().addScaledVector(tv, spd * lead);
     p.setAimPoint(aim);   // AI 也用世界命中点（消视差，弹从机头直指预测点）
-    // —— 被锁定规避：有追踪导弹咬我 / 260m 内敌坦克炮口正对我 → 1.2s 急转+陡升/俯冲闪避 ——
+    // —— 被锁定规避：追踪导弹咬我（真危险）才触发；260m 内敌坦克炮口正对我也触发但更宽松 ——
+    // 规避带 3s 冷却+贴地禁俯冲：多方向敌人总有人瞄着你，无冷却会陷入"永远规避"死锁
+    // （表现为直升机原地急转圈/俯冲托底蹭地，完全不受控）。
     let locked = false;
     for (const pr of this.em.projectiles) {
       if (pr.alive && pr.homing && pr.target === p) { locked = true; break; }
     }
-    if (!locked) {
+    if (!locked && (this._evadeCd || 0) <= 0) {
       for (const e of this.enemies) {
-        if (!e.alive || e.turretYaw === undefined || e.position.distanceTo(p.position) > 260) continue;
+        // 炮口威胁只算 120m 内（真危险射程；260m 外被瞄是常态，躲不过来也不用躲——盘旋本身就在防瞄）
+        if (!e.alive || e.turretYaw === undefined || e.position.distanceTo(p.position) > 120) continue;
         const wy = e.heading + e.turretYaw;
         const dxa = p.position.x - e.position.x, dza = p.position.z - e.position.z;
         let da = Math.atan2(dxa, dza) - wy;
         da = Math.atan2(Math.sin(da), Math.cos(da));
-        if (Math.abs(da) < 0.12) { locked = true; break; }   // 炮口指着我
+        if (Math.abs(da) < 0.06) { locked = true; break; }   // 炮口几乎正对着我（锥角收紧防频繁误触发）
       }
     }
-    if (locked) { this._evadeT = 1.2; if (this._evadeT <= 1.2 + dt) { this._evadeDir = Math.random() < 0.5 ? 1 : -1; this._evadeVert = Math.random() < 0.5 ? 1 : -1; } }
+    if (this._evadeCd > 0) this._evadeCd -= dt;
+    if (locked && (this._evadeCd || 0) <= 0) {
+      this._evadeT = 1.2; this._evadeCd = 3;   // 规避 1.2s，之后至少 3s 不再触发（防死锁循环）
+      this._evadeDir = Math.random() < 0.5 ? 1 : -1;
+      this._evadeVert = (p.position.y - gy) < 20 ? 1 : (Math.random() < 0.5 ? 1 : -1);   // 低空禁俯冲（防托底蹭地转圈）
+    }
     if ((this._evadeT || 0) > 0) {
       this._evadeT -= dt;
       p.setYawInput(this._evadeDir);
-      p.setPitchInput(0.55 * this._evadeDir);   // 急转带前冲侧滑
-      p.setClimb(this._evadeVert);              // 陡升/俯冲二选一
+      p.setPitchInput(0.35 * this._evadeDir);   // 急转带前冲侧滑（幅度收敛防贴地）
+      p.setClimb(this._evadeVert);
       return;   // 规避优先，暂停开火专心躲
     }
     // 机头正对目标（迎敌观感）：偏航直接对准，距离用前后倾控制
