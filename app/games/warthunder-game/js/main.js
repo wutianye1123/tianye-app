@@ -3936,6 +3936,30 @@ class PlaneAI {
     const toT = new THREE.Vector3().subVectors(target.position, plane.position);
     const dist = toT.length() || 1;
     const isAirTarget = typeof target.forwardVector === 'function';
+
+    // —— 导弹规避（蓝方专属：AI 代打/友军；敌机不加——玩家的导弹得打得中）——
+    // 导弹咬我 → 2s 急侧转+蛇形俯仰甩弹道（追踪弹转向速率有限，横向大机动能甩脱），
+    // 规避优先于攻击，3.5s 冷却防连续触发死循环。
+    if (plane.side !== 'enemy') {
+      let msl = null;
+      for (const pr of em.projectiles) { if (pr.alive && pr.homing && pr.target === plane) { msl = pr; break; } }
+      this._evCd = (this._evCd || 0) - dt;
+      if (msl && this._evCd <= 0) { this._evT = 2; this._evCd = 3.5; this._evSide = Math.random() < 0.5 ? 1 : -1; this._evDir = msl.velocity.clone().normalize(); }
+      if ((this._evT || 0) > 0) {
+        this._evT -= dt;
+        const d = this._evDir || plane.forwardVector();
+        const perp = new THREE.Vector3(-d.z, 0, d.x).multiplyScalar(this._evSide);
+        const aimDir = perp.clone();
+        aimDir.y = Math.sin(this._evT * 5) * 0.35;   // 侧转带蛇形俯仰，破坏追踪弹提前量
+        aimDir.normalize();
+        // 低空安全：规避不许扎地
+        const gy0 = plane.position.y - terrainHeight(plane.position.x, plane.position.z);
+        if (gy0 < 25) aimDir.y = Math.max(aimDir.y, 0.4), aimDir.normalize();
+        plane.aimToward(aimDir, dt, Math.max(this.aggr || 0.6, 1.2));   // 规避时坡度拉满
+        plane.throttle = 1;
+        return;   // 规避优先，暂停攻击 2s
+      }
+    }
     const aggr = this.aggr || 0.6;
 
     if (isAirTarget) {
