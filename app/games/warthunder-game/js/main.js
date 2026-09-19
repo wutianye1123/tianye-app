@@ -5258,7 +5258,7 @@ class Game {
       }
       // 边走边修：血量<95% 或模块坏即持续修（相当于 R 键常按——无距离/脱战条件，战斗中照修）。
       const modsBroken = t.modules && (t.modules.track > 0 || t.modules.barrel > 0 || t.modules.engine > 0);
-      if (t.health < t.maxHealth * 0.95 || modsBroken) {
+      if (t.health < t.maxHealth || modsBroken) {
         if (t.health < t.maxHealth) t.health = Math.min(t.maxHealth, t.health + 15 * dt);
         if (t.modules) for (const k of ['track', 'barrel', 'engine']) {
           if (t.modules[k] > 0) t.modules[k] = Math.max(0, t.modules[k] - dt * 6);
@@ -5415,7 +5415,7 @@ class Game {
       this._planeAimNDC = { x: pp.x, y: pp.y };
       // AI 副驾驶：起火自动灭火 + 边飞边修（血量<95% 持续回血，R 键同款速率）
       if (p.burning) { const ext = p.tryExtinguish(); if (ext) this.hud.addFeed('🤖 AI：已灭火', 'info'); }
-      if (p.health < p.maxHealth * 0.95) p.health = Math.min(p.maxHealth, p.health + 12 * dt);
+      if (p.health < p.maxHealth) p.health = Math.min(p.maxHealth, p.health + 12 * dt);   // 血量不满立刻修（R 键同款速率）
       return;
     }
     // 指针锁定时用"虚拟瞄准点"（累积鼠标移动，光标不会飞出窗口）；未锁定时用光标绝对位置。
