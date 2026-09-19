@@ -2600,7 +2600,10 @@ class Tank {
 
   takeDamage(d) {
     this.health -= d;
-    if (this.health <= 0) { this.health = 0; this.alive = false; }
+    if (this.health <= 0) {
+      this.health = 0; this.alive = false;
+      if (this.healthBar) this.healthBar.visible = false;   // 残骸不留血条
+    }
   }
 
   // 殉爆炮塔飞出：把炮塔从车体脱离（scene.attach 保世界变换），返回炮塔供 TurretFly 管理。
@@ -4713,16 +4716,22 @@ class Game {
           else if (h.verdict === 'nopen' || h.verdict === 'splash') this.stats.nopen++;
           else this.stats.pen++;
           if (h.killed && h.crit === '弹药殉爆') this.stats.ammoKills++;
-          // 击杀回放触发：【仅击杀】敌坦克那一发播(主炮/机枪/航炮都一样)——
-          // 未击杀的命中不播：真车还活着，克隆车叠在原地就是"幽灵坦克"，且频繁命中会抽搐。
-          if (h.target && typeof h.target.forwardVector !== 'function'
-              && h.proj && h.killed) {
-            // 殉爆名场面：炮塔整个抛飞（须在 cullDead 移车前 pop,炮塔才还在车体上）
-            if (h.crit === '弹药殉爆' && h.target.popTurret) {
-              const tur = h.target.popTurret(this.scene);
-              if (tur) this.em.addEffect(new TurretFly(tur, this.em));
+          // 击杀回放触发：击杀播全套（X光+殉爆名场面）；
+          // 跳弹（未击杀）也播：小窗看炮弹"叮"一声弹上天的慢镜头——限流 3s 一次且不抢击杀回放，
+          // 速射武器连续跳弹也不会疯狂切镜头。
+          if (h.target && typeof h.target.forwardVector !== 'function' && h.proj) {
+            if (h.killed) {
+              // 殉爆名场面：炮塔整个抛飞（须在 cullDead 移车前 pop,炮塔才还在车体上）
+              if (h.crit === '弹药殉爆' && h.target.popTurret) {
+                const tur = h.target.popTurret(this.scene);
+                if (tur) this.em.addEffect(new TurretFly(tur, this.em));
+              }
+              this._startKillReplay(h.target, h.hitPoint, h.killed, h.verdict, h.proj, h.proj.shellDef ? h.proj.shellDef.id : null, h.crit);
+            } else if (h.verdict === 'bounce' && !this._shellcam
+                       && performance.now() - (this._lastBounceCam || 0) > 3000) {
+              this._lastBounceCam = performance.now();
+              this._startKillReplay(h.target, h.hitPoint, false, 'bounce', h.proj, h.proj.shellDef ? h.proj.shellDef.id : null, h.crit);
             }
-            this._startKillReplay(h.target, h.hitPoint, h.killed, h.verdict, h.proj, h.proj && h.proj.shellDef ? h.proj.shellDef.id : null, h.crit);
           }
           // 命中反馈按判定结果分级：击毁(红)/致命(橙)/击穿(金)/未击穿(灰蓝)/跳弹(白闪)
           if (h.verdict === 'bounce') {
