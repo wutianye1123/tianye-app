@@ -45,22 +45,57 @@ export function makeCloudTexture() {
 let _camoTex = null;
 export function camoTexture() {
   if (_camoTex) return _camoTex;
-  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const c = document.createElement('canvas'); c.width = c.height = 256;
   const x = c.getContext('2d');
-  x.fillStyle = '#bdbdbd'; x.fillRect(0, 0, 128, 128);
-  x.fillStyle = '#6f6f6f';
-  for (let i = 0; i < 16; i++) {
-    const px = Math.random() * 128, py = Math.random() * 128, r = 9 + Math.random() * 20;
-    x.beginPath();
-    for (let k = 0; k <= 8; k++) { const a = k / 8 * Math.PI * 2, rr = r * (0.7 + Math.random() * 0.5); x.lineTo(px + Math.cos(a) * rr, py + Math.sin(a) * rr); }
+  // 底色：带极轻噪点的军灰
+  x.fillStyle = '#b7b9b6'; x.fillRect(0, 0, 256, 256);
+  // 三层迷彩：深色大块 → 中色中块 → 亮色小块，形状用不规则多边形（手绘斑点感）
+  const blobPoly = (px, py, r, color, jitter) => {
+    x.fillStyle = color; x.beginPath();
+    const n = 9 + (Math.random() * 4 | 0);
+    for (let k = 0; k <= n; k++) {
+      const a = k / n * Math.PI * 2, rr = r * (1 - jitter / 2 + Math.random() * jitter);
+      x.lineTo(px + Math.cos(a) * rr, py + Math.sin(a) * rr * 0.8);   // y 压扁：条状迷彩更像实物
+    }
     x.closePath(); x.fill();
+  };
+  for (let i = 0; i < 10; i++) blobPoly(Math.random() * 256, Math.random() * 256, 26 + Math.random() * 34, '#5f6a5c', 0.7);
+  for (let i = 0; i < 14; i++) blobPoly(Math.random() * 256, Math.random() * 256, 12 + Math.random() * 20, '#7d8779', 0.6);
+  for (let i = 0; i < 12; i++) blobPoly(Math.random() * 256, Math.random() * 256, 6 + Math.random() * 10, '#99a294', 0.5);
+  // 漆面颗粒噪点（远景看不出脏、近景有磨砂质感）
+  const img = x.getImageData(0, 0, 256, 256), d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (Math.random() - 0.5) * 18;
+    d[i] += n; d[i + 1] += n; d[i + 2] += n;
   }
-  x.fillStyle = '#e6e6e6';
-  for (let i = 0; i < 10; i++) { x.beginPath(); x.arc(Math.random() * 128, Math.random() * 128, 5 + Math.random() * 12, 0, 7); x.fill(); }
+  x.putImageData(img, 0, 0);
+  // 雨痕/划痕：几条淡淡的纵向深色细线
+  x.strokeStyle = 'rgba(40,44,40,0.16)'; x.lineWidth = 1;
+  for (let i = 0; i < 22; i++) {
+    const sx = Math.random() * 256;
+    x.beginPath(); x.moveTo(sx, Math.random() * 256); x.lineTo(sx + randRange(-6, 6), Math.random() * 256); x.stroke();
+  }
   _camoTex = new THREE.CanvasTexture(c);
   _camoTex.wrapS = _camoTex.wrapT = THREE.RepeatWrapping;
   _camoTex.repeat.set(2, 2);
+  _camoTex.anisotropy = 4;
   return _camoTex;
+}
+// 共享噪声凹凸纹理：漆面/地面的细颗粒（bumpMap），让平涂表面有微观起伏
+let _noiseTex = null;
+export function makeNoiseTexture() {
+  if (_noiseTex) return _noiseTex;
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d');
+  const img = x.createImageData(128, 128), d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const v = 118 + (Math.random() - 0.5) * 46 + Math.sin(i * 0.37) * 6;   // 中心值≈118，微起伏
+    d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255;
+  }
+  x.putImageData(img, 0, 0);
+  _noiseTex = new THREE.CanvasTexture(c);
+  _noiseTex.wrapS = _noiseTex.wrapT = THREE.RepeatWrapping;
+  return _noiseTex;
 }
 export function makeTrackTexture() {
   const c = document.createElement('canvas'); c.width = 16; c.height = 64;

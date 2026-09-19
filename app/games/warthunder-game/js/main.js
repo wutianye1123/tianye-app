@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTexture, camoTexture, makeTrackTexture, terrainHeight, setTerrainScale } from './lib.js';
+import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTexture, camoTexture, makeTrackTexture, makeNoiseTexture, terrainHeight, setTerrainScale } from './lib.js';
 
 // 坦克贴地姿态用的临时对象（避免每帧分配）
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
@@ -1444,13 +1444,18 @@ class EntityManager {
           const n = t.lastPlateNormal;
           const v = p.velocity;
           const d = v.x * n.x + v.y * n.y + v.z * n.z;
-          v.x -= 2 * d * n.x; v.y -= 2 * d * n.y; v.z -= 2 * d * n.z;
-          v.multiplyScalar(0.55);                                          // 撞板掉能量
-          v.x += randRange(-10, 10); v.y += randRange(2, 10); v.z += randRange(-10, 10);   // 乱飞+偏上（跳弹失控感）
+          v.x -= 2 * d * n.x; v.y -= 2 * d * n.y; v.z -= 2 * d * n.z;   // 沿装甲板法线反射
+          // —— 跳弹冲天：反射后强制把弹丸抬成 35°~55° 仰角射向天空 ——
+          // 只留水平散射、速度保留一半多，曳光会拖出一条清晰的"弹上青天"弧线再坠回地面
+          const sp = v.length() * (0.5 + Math.random() * 0.15);
+          v.normalize();
+          v.y = 0.55 + Math.random() * 0.3;   // 仰角主分量（asin(0.55~0.85)≈33°~58°）
+          v.x += randRange(-0.25, 0.25); v.z += randRange(-0.25, 0.25);
+          v.normalize().multiplyScalar(sp);
           p.mesh.position.copy(hitPoint).addScaledVector(n, p.radius + 0.6);   // 推出命中球，防当帧回打原车
           p._prev.copy(p.mesh.position);                                       // 扫掠起点同步重置（不然下帧线段穿回原车）
           p.pen *= 0.5; p.damage *= 0.5;
-          this.addEffect(new Explosion(hitPoint, 0.9, 0xfff2c0));    // 白黄小火花（区别于命中的橙色爆闪）
+          this.addEffect(new Explosion(hitPoint, 1.4, 0xfff2c0));    // 白黄火花放大一号：跳弹"叮"更醒目
           hits.push({ owner: p.owner, target: t, proj: p, killed: false, crit: null, verdict, hitPoint, penInfo: t.lastPenInfo });
           continue;   // 本帧判完；弹开的弹丸下一帧照常飞行，可再命中任何目标
         }
@@ -1926,8 +1931,11 @@ class Tank {
         // —— 板倾角合成（战雷跳弹的物理来源）：斜装甲法线后仰，方位入射与倾角绕正交轴旋转，
         // cos(总入射角) = cos(方位入射)·cos(倾角)。T-34 首上60°被斜着打：60°+方位 → 轻松过 70° 跳弹线。
         const sRad = ((slopes && slopes[zone]) || 0) * Math.PI / 180;
-        const cosTotal = clamp(cosInc * Math.cos(sRad), 0.02, 1);
-        const totalDeg = Math.acos(cosTotal) * 180 / Math.PI;
+        // 总入射角=方位/俯冲入射+板倾角（加法合成）：T-34 首上 60°+方位 15°=75° 过 70° 线就"叮"。
+        // 旧乘法合成 cos(方位)·cos(倾角) 把总角压扁（60° 倾角+45° 方位才 69°），AP 在 rank1~3
+        // 常见车上数学上几乎无法过 70° 跳弹线——整局见不到一次跳弹的根因。89.9° 封顶防负 cos。
+        const totalDeg = Math.min(89.9, Math.acos(cosInc) * 180 / Math.PI + sRad * 180 / Math.PI);
+        const cosTotal = Math.max(0.02, Math.cos(totalDeg * Math.PI / 180));
         // 跳弹：总入射角超过弹种跳弹角（榴弹 noBounce 不跳；硬芯 62° 比穿甲榴弹 70° 更易跳）
         if (!sh.noBounce && totalDeg > sh.bounceDeg) {
           // 记录装甲板外法线（朝来弹一侧 + 倾角后仰），checkCollisions 据此把弹丸真实弹飞（可见跳弹）
@@ -2745,7 +2753,7 @@ class PlaneAI {
 // ===== js/world/Scene.js =====
 
 // 创建灯光、雾、天空背景，挂到给定 scene 上。
-function setupEnvironment(scene, mode) {
+function setupEnvironment(scene, mode, renderer) {
   // 天空色与雾
   const skyColor = mode === 'plane' ? 0x9ec9e8 : 0xbfd3c4;
   scene.background = new THREE.Color(skyColor);
@@ -2785,9 +2793,45 @@ function setupEnvironment(scene, mode) {
   sun.shadow.camera.top = s;
   sun.shadow.camera.bottom = -s;
   sun.shadow.bias = -0.0005;
+  sun.shadow.normalBias = 0.6;   // 法线偏移：消除斜射面上的阴影条纹（acne）
   sun.shadow.camera.updateProjectionMatrix(); // 改过视景边界后必须更新投影矩阵
   scene.add(sun);
   // 方向光目标默认在原点，跟随太阳方向照射
+
+  // —— 环境反射（PMREM）：给所有 PBR 金属/漆面提供反射来源 ——
+  // 没有它 metalness 材质发暗发灰（塑料感）；有它炮管/履带/座舱盖会映出天空。
+  // 自建微型环境场景：渐变天穹 + 暗色地面 + 太阳亮斑 → 烘成模糊环境贴图。
+  try {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const envScene = new THREE.Scene();
+    envScene.add(new THREE.Mesh(
+      new THREE.SphereGeometry(50, 16, 12),
+      new THREE.MeshBasicMaterial({ map: makeSkyTexture(top, skyColor), side: THREE.BackSide })
+    ));
+    const envGround = new THREE.Mesh(
+      new THREE.CircleGeometry(40, 16),
+      new THREE.MeshBasicMaterial({ color: 0x5a5648 })
+    );
+    envGround.rotation.x = -Math.PI / 2; envGround.position.y = -2;
+    envScene.add(envGround);
+    const sunBall = new THREE.Mesh(
+      new THREE.SphereGeometry(3, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xfff6dd })
+    );
+    sunBall.position.set(25, 35, 18);
+    envScene.add(sunBall);
+    scene.environment = pmrem.fromScene(envScene, 0.06).texture;
+    pmrem.dispose();
+  } catch (e) { /* 环境反射失败不影响游戏 */ }
+
+  // 太阳光晕（视线朝太阳方向的柔和亮斑）
+  const flare = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: makeCloudTexture(), color: 0xfff3cf, transparent: true, opacity: 0.65,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+  }));
+  flare.scale.set(180, 180, 1);
+  flare.position.set(640, 1120, 480);
+  scene.add(flare);
 
   // 半球光让天空与地面色调更自然
   scene.add(new THREE.HemisphereLight(skyColor, 0x55502a, 0.4));
@@ -3140,7 +3184,7 @@ class Game {
     this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.5, 3000);
     this.camera.layers.enable(2);   // 层2=燃烧残骸(回放相机不开,避免黑残骸挡克隆车透视)
 
-    setupEnvironment(this.scene, mode);
+    setupEnvironment(this.scene, mode, this.renderer);
 
     this.input = new Input(canvas);
     // 两种模式都：点击画面进入指针锁定，光标不会飞出窗口
