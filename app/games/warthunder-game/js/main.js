@@ -1370,6 +1370,21 @@ class EntityManager {
           const _hp = p.mesh.position.clone().sub(t.position);
           const hitPoint = t.position.clone().addScaledVector(_hp.normalize(), (t.radius || 3) + (p.radius || 0.4) * 0.5);
           const verdict = t.onHit(p.damage, p, hitPoint);   // p/hitPoint 供装甲判定+部位判定
+          // —— 可见跳弹：弹丸不销毁，沿装甲板法线反射弹飞（战雷式"叮"+曳光飞走）——
+          // 掉一半穿深/伤害（撞板失能），弹开的弹丸下一帧照常参与碰撞——还能打到别的车，甚至再跳一次。
+          if (verdict === 'bounce' && t.lastPlateNormal) {
+            const n = t.lastPlateNormal;
+            const v = p.velocity;
+            const d = v.x * n.x + v.y * n.y + v.z * n.z;
+            v.x -= 2 * d * n.x; v.y -= 2 * d * n.y; v.z -= 2 * d * n.z;
+            v.multiplyScalar(0.55);                                          // 撞板掉能量
+            v.x += randRange(-10, 10); v.y += randRange(2, 10); v.z += randRange(-10, 10);   // 乱飞+偏上（跳弹失控感）
+            p.mesh.position.copy(hitPoint).addScaledVector(n, p.radius + 0.6);   // 推出命中球，防当帧回打原车
+            p.pen *= 0.5; p.damage *= 0.5;
+            this.addEffect(new Explosion(hitPoint, 0.9, 0xfff2c0));    // 白黄小火花（区别于命中的橙色爆闪）
+            hits.push({ owner: p.owner, target: t, proj: p, killed: false, crit: null, verdict, hitPoint, penInfo: t.lastPenInfo });
+            break;
+          }
           // 榴弹未击穿→范围爆炸：命中者吃贴甲溅射,再波及附近所有敌方坦克(距离衰减)
           if (verdict === 'splash') {
             t.takeDamage(p.damage * 0.25);   // 命中者：贴甲爆 25%（原溅射逻辑）
@@ -1848,6 +1863,11 @@ class Tank {
         const totalDeg = Math.acos(cosTotal) * 180 / Math.PI;
         // 跳弹：总入射角超过弹种跳弹角（榴弹 noBounce 不跳；硬芯 62° 比穿甲榴弹 70° 更易跳）
         if (!sh.noBounce && totalDeg > sh.bounceDeg) {
+          // 记录装甲板外法线（朝来弹一侧 + 倾角后仰），checkCollisions 据此把弹丸真实弹飞（可见跳弹）
+          let onx = nx, onz = nz;
+          if (vx * onx + vz * onz > 0) { onx = -onx; onz = -onz; }
+          const cs = Math.cos(sRad);
+          this.lastPlateNormal = new THREE.Vector3(onx * cs, Math.sin(sRad), onz * cs);
           this.lastCrit = null;
           return 'bounce';
         }
