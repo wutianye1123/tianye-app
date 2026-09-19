@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTexture, camoTexture, makeTrackTexture, makeNoiseTexture, makeShadowTexture, makeGrassTexture, makeSmokeTexture, terrainHeight, setTerrainScale } from './lib.js';
+import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTexture, camoTexture, makeTrackTexture, makeNoiseTexture, makeShadowTexture, makeGrassTexture, makeSmokeTexture, makeCraterTexture, terrainHeight, setTerrainScale } from './lib.js';
 
 // 坦克贴地姿态用的临时对象（避免每帧分配）
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
@@ -1666,6 +1666,7 @@ class EntityManager {
     this.effects = [];
     this.obstacles = [];   // 障碍物列表（Game 从 terrain 注入，供炮弹碰撞检测）
     this.smokes = [];      // 活跃烟幕记录 [{pos, r}]（AI 视线判定;SmokeScreen 自维护增删）
+    this.craters = [];     // 弹坑贴花（addCrater 滚动管理）
   }
 
   addTank(t) { this.tanks.push(t); this.scene.add(t.group); t.em = this; }
@@ -1680,10 +1681,32 @@ class EntityManager {
   addEffect(e) {
     this.effects.push(e); if (e.mesh) this.scene.add(e.mesh);
     if (e.isExplosion && this.sfx) this.sfx.explosion(e.mesh.position);
+    // 近地爆炸留弹坑（命中载具的空中爆炸不留）
+    if (e.isExplosion) {
+      const s = e.core ? e.core.scale.x : 1;
+      if (e.mesh.position.y - terrainHeight(e.mesh.position.x, e.mesh.position.z) < s * 1.6 + 2) this.addCrater(e.mesh.position, s * 3.2);
+    }
     if (this.effects.length > 160) { // 上限：丢最老的，防特效失控涨帧
       const old = this.effects.shift();
       if (old) { if (old.dispose) old.dispose(); if (old.mesh) this.scene.remove(old.mesh); }
     }
+  }
+
+  // —— 弹坑贴花：炮弹落地/近地爆炸在地表留焦痕（上限 60 滚动，几何/材质共享） ——
+  addCrater(pos, size) {
+    if (!this._craterGeo) {
+      this._craterGeo = new THREE.PlaneGeometry(1, 1);
+      this._craterMat = new THREE.MeshBasicMaterial({ map: makeCraterTexture(), transparent: true, opacity: 0.85, depthWrite: false });
+    }
+    if (this.craters.length >= 60) this.scene.remove(this.craters.shift());   // FIFO：最老的坑让位
+    const m = new THREE.Mesh(this._craterGeo, this._craterMat);
+    m.scale.setScalar(Math.max(1.6, size));
+    m.rotation.x = -Math.PI / 2;
+    m.rotation.z = Math.random() * Math.PI * 2;
+    m.position.set(pos.x, terrainHeight(pos.x, pos.z) + 0.12, pos.z);
+    m.renderOrder = 0.5;
+    this.scene.add(m);
+    this.craters.push(m);
   }
 
   update(dt) {
@@ -1735,6 +1758,8 @@ class EntityManager {
     this.projectiles = this.projectiles.filter((p) => {
       if (!p.alive) {
         this.scene.remove(p.mesh);
+        // 落地弹留小弹坑（贴地死亡=未命中任何东西的弹）
+        if (p.mesh.position.y - terrainHeight(p.mesh.position.x, p.mesh.position.z) < 1.2) this.addCrater(p.mesh.position, p.size * 5);
         // 几何/材质已全局缓存共享（projGeo/projMat），不在此 dispose（否则毁掉缓存）
         if (p.isBomb) {   // 炸弹落地/命中：范围爆炸（冲击波）
           const _bp = p.mesh.position.clone();
@@ -1852,7 +1877,8 @@ class EntityManager {
     for (const t of this.tanks) { if (t.dustTrail) { t.dustTrail.dispose(); t.dustTrail = null; } this.scene.remove(t.group); }
     for (const p of this.planes) this.scene.remove(p.group);
     for (const p of this.projectiles) this.scene.remove(p.mesh);
-    this.tanks = []; this.planes = []; this.projectiles = []; this.effects = []; this.smokes = [];
+    for (const c of this.craters) this.scene.remove(c);
+    this.tanks = []; this.planes = []; this.projectiles = []; this.effects = []; this.smokes = []; this.craters = [];
   }
 }
 

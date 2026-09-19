@@ -142,6 +142,29 @@ export function makeSmokeTexture() {
   return _smokeTex;
 }
 
+// 弹坑贴花：黑心+焦边飞溅斑（炮弹落地/爆炸在地表留痕）
+let _craterTex = null;
+export function makeCraterTexture() {
+  if (_craterTex) return _craterTex;
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 4, 64, 64, 60);
+  g.addColorStop(0, 'rgba(12,10,8,0.95)');
+  g.addColorStop(0.45, 'rgba(24,20,15,0.8)');
+  g.addColorStop(0.75, 'rgba(40,34,26,0.35)');
+  g.addColorStop(1, 'rgba(40,34,26,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  // 焦边飞溅：外圈随机小黑斑（翻起的焦土）
+  for (let i = 0; i < 26; i++) {
+    const a = Math.random() * Math.PI * 2, r = 42 + Math.random() * 20;
+    const px = 64 + Math.cos(a) * r, py = 64 + Math.sin(a) * r;
+    x.fillStyle = `rgba(20,16,12,${0.25 + Math.random() * 0.4})`;
+    x.beginPath(); x.arc(px, py, 2 + Math.random() * 5, 0, 7); x.fill();
+  }
+  _craterTex = new THREE.CanvasTexture(c);
+  return _craterTex;
+}
+
 // 接地暗影贴图：径向渐变柔和黑斑（车底假 AO，让载具"压在地上"）
 let _shadowTex = null;
 export function makeShadowTexture() {
