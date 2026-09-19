@@ -280,9 +280,13 @@ const PLANE_TYPES = [
   { id:'f15ex',     name:'F-15EX 鹰II',   icon:'🇺🇸', hp:1.7,  speed:1.35, agi:1.05, dmg:1.5,  rank:5, rp:3100, prereq:'su35',    price:9800 },
   { id:'f35',       name:'F-35 闪电II',   icon:'🇺🇸', hp:2.0,  speed:1.6,  agi:1.5,  dmg:1.8, missiles:true, fastMissile:true, rank:6, rp:6000, prereq:'j20', price:20000 }, // 满级终极战机：每一项都拉到全场最高+导弹
   { id:'f35b',      name:'B-21 突袭者',   icon:'🇺🇸', hp:2.2,  speed:1.65, agi:1.55, dmg:1.85, missiles:true, fastMissile:true, bombs:true, rank:6, rp:8000, prereq:'f35', price:28000 }, // 满级隐身轰炸机：全满+导弹+炸弹，极贵
+  // ===== 直升机（heli:true：悬停物理 + 机炮 + 火箭巢；AI 不驾驶）=====
+  { id:'mi24',   name:'Mi-24 雌鹿',  icon:'🇷🇺', hp:1.6,  speed:1.0,  agi:0.8, dmg:1.3, heli:true, missiles:true, rank:3, rp:1200, prereq:'mig29', price:5000 },
+  { id:'z10',    name:'直-10',       icon:'🇨🇳', hp:1.3,  speed:1.05, agi:0.9, dmg:1.25, heli:true, missiles:true, rank:4, rp:2200, prereq:'j10',   price:8000 },
+  { id:'ah64',   name:'AH-64 阿帕奇', icon:'🇺🇸', hp:1.5,  speed:1.0,  agi:0.85, dmg:1.4,  heli:true, missiles:true, rank:5, rp:3000, prereq:'heavy',  price:9500 },
 ];
 function planeTypeById(id) { return PLANE_TYPES.find((p) => p.id === id) || PLANE_TYPES[0]; }
-function randomPlaneType() { return PLANE_TYPES[Math.floor(Math.random() * PLANE_TYPES.length)]; }
+function randomPlaneType() { const pool = PLANE_TYPES.filter((p) => !p.heli); return pool[Math.floor(Math.random() * pool.length)]; }   // AI 不开直升机（飞行AI不适配悬停物理）
 
 
 
@@ -3334,8 +3338,186 @@ class TankAI {
 }
 
 
-// ===== js/ai/PlaneAI.js =====
+// ===== js/entities/Helicopter.js =====
+// 直升机（PLANE_TYPES 里 heli:true 的机型）：悬停物理 + 机炮 + 火箭巢。
+// 实现 Plane 兼容接口（mouseAim/forwardVector/tryFire/tryFireMissile/reloadFraction…），
+// 直接接入飞机模式的相机/HUD/输入分支；AI 不驾驶（飞行AI不适配悬停）。
+// 操控：鼠标左右=偏航、鼠标上下/WASD=前倾后倾（前倾加速）、Shift=爬升、Space=下降、左键=机炮、右键/X=火箭巢齐射。
+class Heli {
+  constructor({ side = 'player', team = 'blue', color = 0x3a5a3a, type = 'mi24' } = {}) {
+    const pt = planeTypeById(type);
+    this.side = side; this.team = team; this.type = type; this.isHeli = true;
+    this.typeName = pt.name;
+    this.color = color;
+    this.group = new THREE.Group();
+    const isEnemy = team === 'red';
+    this.maxHealth = (isEnemy ? CONFIG.plane.enemyHealth : CONFIG.plane.maxHealth) * pt.hp;
+    this.health = this.maxHealth;
+    this.radius = 7;
+    this.heading = 0; this.pitch = 0; this.roll = 0;
+    this.speed = 0; this.vertSpeed = 0;
+    this.maxSpeed = 62 * pt.speed;
+    this.alive = true; this.burning = false; this.extCooldown = 0;
+    this._aimPitch = 0; this._yawRate = 0; this._climb = 0; this._throttleIn = 0;
+    this.reloadTimer = 0; this.fireCooldown = 0.09;
+    this.maxMissiles = 12; this.missiles = this.maxMissiles; this.missileCooldown = 0;   // 火箭巢组数（HUD 导弹位显示）
+    this.maxBombs = 0; this.bombs = 0;   // 无炸弹（防飞机模式输入分支误读）
+    this.modules = null; this.crew = null;
+    this._build();
+  }
+  get position() { return this.group.position; }
+  forwardVector() { return new THREE.Vector3(0, 0, 1).applyQuaternion(this.group.quaternion); }
 
+  _build() {
+    const mat = new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.55, metalness: 0.3, map: camoTexture(nationOf(this.type)), bumpMap: sharedBump(3, 3), bumpScale: 0.05 });
+    const darkMat = new THREE.MeshStandardMaterial({ color: 0x232323, roughness: 0.7, metalness: 0.3 });
+    const glassMat = new THREE.MeshStandardMaterial({ color: 0x9fc8e0, roughness: 0.1, metalness: 0.6, transparent: true, opacity: 0.6 });
+    // 机身：横置胶囊（机头圆钝机尾收）+ 座舱玻璃
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(1.1, 4.6, 6, 12), mat);
+    body.rotation.x = Math.PI / 2; body.castShadow = true; this.group.add(body);
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(1.1, 12, 10), glassMat);
+    nose.position.z = 2.6; nose.scale.set(0.9, 0.8, 1.1); this.group.add(nose);
+    // 短翼 + 火箭巢挂架（左右各一吊舱）
+    for (const sx of [-1, 1]) {
+      const wing = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.16, 1.1), mat);
+      wing.position.set(sx * 1.7, 0.25, 0.3); wing.rotation.z = sx * 0.08; wing.castShadow = true; this.group.add(wing);
+      const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 1.6, 10), darkMat);
+      pod.rotation.x = Math.PI / 2; pod.position.set(sx * 2.5, 0.05, 0.3); this.group.add(pod);
+    }
+    // 尾梁 + 尾桨
+    const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.5, 4.6, 8), mat);
+    tail.rotation.x = Math.PI / 2; tail.position.z = -3.6; tail.castShadow = true; this.group.add(tail);
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.4, 0.9), mat);
+    fin.position.set(0, 0.7, -5.4); this.group.add(fin);
+    this.tailRotor = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.0, 0.22), darkMat);
+    this.tailRotor.position.set(0.25, 0.7, -5.4); this.group.add(this.tailRotor);
+    // 主旋翼：半透明圆盘（高速旋转的模糊感）+ 两片可见桨叶
+    this.rotorDisc = new THREE.Mesh(new THREE.CircleGeometry(7.2, 26), new THREE.MeshBasicMaterial({ color: 0x1a1a1a, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }));
+    this.rotorDisc.rotation.x = -Math.PI / 2; this.rotorDisc.position.y = 1.9; this.group.add(this.rotorDisc);
+    this.rotorHub = new THREE.Group(); this.rotorHub.position.y = 1.9; this.group.add(this.rotorHub);
+    for (let i = 0; i < 2; i++) {
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(14, 0.07, 0.5), darkMat);
+      blade.rotation.y = i * Math.PI / 2; this.rotorHub.add(blade);
+    }
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 1.0, 8), darkMat);
+    mast.position.y = 1.4; this.group.add(mast);
+    // 旋翼下洗接地暗影
+    this.blob = new THREE.Mesh(new THREE.PlaneGeometry(11, 11), new THREE.MeshBasicMaterial({ map: makeShadowTexture(), transparent: true, depthWrite: false, opacity: 0.7 }));
+    this.blob.rotation.x = -Math.PI / 2; this.blob.renderOrder = 1;
+    this.blobWrap = new THREE.Group(); this.blobWrap.add(this.blob);
+  }
+
+  mouseAim(nx, ny, dt) {
+    this._yawRate = clamp(nx * 1.35, -1, 1);          // 光标左右=偏航速率
+    this._aimPitch = clamp(-ny * 1.25, -1, 1);        // 光标上推=前倾加速
+  }
+  setThrottleInput(td, dt) { this._throttleIn = td; } // W/S 与光标上下叠加
+  setClimb(v) { this._climb = v; }                    // Shift(+1)/Space(-1)：垂直速度目标
+  get throttle() { return Math.abs(this.speed) / this.maxSpeed; }   // HUD 兼容
+
+  update(dt) {
+    if (this.reloadTimer > 0) this.reloadTimer -= dt;
+    if (this.missileCooldown > 0) this.missileCooldown -= dt;
+    if (this.maxMissiles > 0 && this.missiles < this.maxMissiles) {   // 火箭组自动补充（慢）
+      this.missileRegen = (this.missileRegen || 0) + dt;
+      if (this.missileRegen >= 14) { this.missileRegen = 0; this.missiles++; }
+    }
+    if (this.burning) {
+      this.health -= CONFIG.rules.crit.burnDps * dt;
+      if (this.health <= 0) { this.health = 0; this.alive = false; }
+    }
+    if (this.extCooldown > 0) this.extCooldown -= dt;
+    // —— 悬停物理：偏航/俯仰/垂直 ——
+    this.heading += this._yawRate * 1.5 * (1 + 0.2 * 0) * dt;
+    const pitchIn = clamp(this._aimPitch + this._throttleIn * 0.85, -1, 1);
+    this.pitch += (pitchIn * 0.38 - this.pitch) * Math.min(1, 3.2 * dt);
+    const targetSpeed = (this.pitch / 0.38) * this.maxSpeed;
+    this.speed += (targetSpeed - this.speed) * Math.min(1, 1.9 * dt);
+    const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
+    this.group.position.x += fx * this.speed * dt;
+    this.group.position.z += fz * this.speed * dt;
+    this.vertSpeed += (this._climb * 13 - this.vertSpeed) * Math.min(1, 2.6 * dt);
+    this.group.position.y += this.vertSpeed * dt;
+    // 高度钳制：贴地托住（不摔毁，街机手感）、限高
+    const gnd = terrainHeight(this.group.position.x, this.group.position.z) + 3.5;
+    if (this.group.position.y < gnd) { this.group.position.y = gnd; if (this.vertSpeed < -8) this.takeDamage(8); this.vertSpeed = Math.max(0, this.vertSpeed); }
+    if (this.group.position.y > 170) { this.group.position.y = 170; this.vertSpeed = Math.min(0, this.vertSpeed); }
+    // 地图边界
+    const lim = CONFIG.plane.worldSize;
+    this.group.position.x = clamp(this.group.position.x, -lim, lim);
+    this.group.position.z = clamp(this.group.position.z, -lim, lim);
+    // 姿态：YXZ（先偏航再俯仰滚转）；滚转=偏航侧倾感
+    this.roll += (-this._yawRate * 0.35 - this.roll) * Math.min(1, 3 * dt);
+    this.group.rotation.set(this.pitch, this.heading, this.roll, 'YXZ');
+    // 旋翼动画
+    this.rotorHub.rotation.y += dt * 26;
+    this.rotorDisc.rotation.z += dt * 9;
+    this.tailRotor.rotation.x += dt * 40;
+    // 下洗暗影：贴地、随高度淡出
+    if (this.blobWrap) {
+      if (!this.blobWrap.parent && this.group.parent) this.group.parent.add(this.blobWrap);
+      if (this.blobWrap.parent) {
+        const gy = terrainHeight(this.group.position.x, this.group.position.z);
+        this.blobWrap.position.set(this.group.position.x, gy + 0.1, this.group.position.z);
+        this.blob.material.opacity = clamp(0.75 - (this.group.position.y - gy - 20) / 120, 0, 0.75);
+        this.blobWrap.visible = this.alive;
+      }
+    }
+    if (this.healthBar) { this.healthBar.lookAt(this._camPos || this.group.position.clone().add(new THREE.Vector3(0, 0, 10))); }
+  }
+
+  get reloadFraction() { return clamp(1 - this.reloadTimer / this.fireCooldown, 0, 1); }
+  canFire() { return this.alive && this.reloadTimer <= 0; }
+  getMuzzleWorld(target = new THREE.Vector3()) { return this.group.position.clone().addScaledVector(this.forwardVector(), 3.2).add(new THREE.Vector3(0, -0.6, 0)); }
+  tryFire(em) {
+    if (!this.canFire()) return false;
+    const muzzle = this.getMuzzleWorld();
+    const dir = this.forwardVector();
+    const s = 0.012;   // 机炮散布
+    dir.x += randRange(-s, s); dir.y += randRange(-s, s); dir.z += randRange(-s, s); dir.normalize();
+    em.addProjectile(new Projectile({
+      position: muzzle, direction: dir, speed: 320, damage: 16 * (planeTypeById(this.type).dmg || 1),
+      owner: this, ownerTeam: this.team, gravity: 4, life: 2.5,
+      color: 0xffe08a, size: 0.3, pen: 115,
+      shellDef: { id: 'cannon', name: '航炮弹', penMul: 1, dmgMul: 1, bounceDeg: 74, noBounce: false },
+    }));
+    this.reloadTimer = this.fireCooldown;
+    return true;
+  }
+  // 火箭巢：一次齐射 4 枚无制导火箭（大爆炸），冷却 2.4s、共 12 组（HUD 导弹位）
+  tryFireMissile(em, enemies) {
+    if (!this.alive || this.missileCooldown > 0 || this.missiles <= 0) return false;
+    this.missiles--; this.missileCooldown = 2.4;
+    const fwd = this.forwardVector();
+    for (let i = 0; i < 4; i++) {
+      const dir = fwd.clone();
+      const s = 0.02 + i * 0.006;
+      dir.x += randRange(-s, s); dir.y += randRange(-s, s); dir.z += randRange(-s, s); dir.normalize();
+      em.addProjectile(new Projectile({
+        position: this.group.position.clone().addScaledVector(fwd, 2).add(new THREE.Vector3(randRange(-1.5, 1.5), -0.2, 0)),
+        direction: dir, speed: 175, damage: 85, owner: this, ownerTeam: this.team,
+        gravity: 6, life: 5, color: 0xffa050, size: 0.5, pen: 130,
+        shellDef: { id: 'rocket', name: '火箭弹', penMul: 1, dmgMul: 1, bounceDeg: 80, noBounce: true },
+      }));
+    }
+    return true;
+  }
+  tryFireMG() {}
+  takeDamage(d) { this.health -= d; if (this.health <= 0) { this.health = 0; this.alive = false; } }
+  onHit(damage) { this.takeDamage(damage); return 'pen'; }
+  tryExtinguish() {
+    if (this.extCooldown > 0) return null;
+    this.extCooldown = 8;
+    if (this.burning) { this.burning = false; return true; }
+    return false;
+  }
+  dispose() { if (this.blobWrap) this.blobWrap.removeFromParent(); }
+}
+
+
+// 敌方飞机 AI：复用与玩家相同的"飞行教官"接口，把目标方向喂给 aimToward。
+// 追到一定距离后收油门避免越过，对齐且在射程内时开火。
+// ===== js/ai/PlaneAI.js =====
 
 // 敌方飞机 AI：复用与玩家相同的"飞行教官"接口，把目标方向喂给 aimToward。
 // 追到一定距离后收油门避免越过，对齐且在射程内时开火。
@@ -4246,7 +4428,9 @@ class Game {
       this.player.heading = 0;
       this.em.addTank(this.player);
     } else {
-      this.player = new Plane({ side: 'player', color: 0x3a6b9e, type: this.planeType });
+      this.player = planeTypeById(this.planeType).heli
+        ? new Heli({ side: 'player', color: 0x3a5a3a, type: this.planeType })
+        : new Plane({ side: 'player', color: 0x3a6b9e, type: this.planeType });
       this.player.group.position.copy(base);
       this.player.group.quaternion.identity();
       this.em.addPlane(this.player);
@@ -4533,7 +4717,13 @@ class Game {
     const ny = this.settings.invertY ? -ndc.y : ndc.y;
     p.mouseAim(-ndc.x * this.settings.planeGain, ny * this.settings.planeGain, dt); // 水平方向校准：光标左移→左转
 
-    if (inp.isDown('ShiftLeft') || inp.isDown('ShiftRight')) {
+    if (p.isHeli) {
+      // 直升机：Shift 爬升 / Space 下降（悬停物理，油门由俯仰承担）
+      p.setClimb((inp.isDown('ShiftLeft') || inp.isDown('ShiftRight') ? 1 : 0) + (inp.isDown('Space') ? -1 : 0));
+      if (inp.isDown('KeyW')) p.setThrottleInput(1, dt);
+      else if (inp.isDown('KeyS')) p.setThrottleInput(-1, dt);
+      else p.setThrottleInput(0, dt);
+    } else if (inp.isDown('ShiftLeft') || inp.isDown('ShiftRight')) {
       p.throttle = 1;
     } else {
       let td = 0;
