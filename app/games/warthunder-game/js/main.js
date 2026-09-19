@@ -1769,8 +1769,9 @@ class EntityManager {
           p.mesh.position.copy(hitPoint).addScaledVector(n, p.radius + 0.6);   // 推出命中球，防当帧回打原车
           p._prev.copy(p.mesh.position);                                       // 扫掠起点同步重置（不然下帧线段穿回原车）
           p.pen *= 0.5; p.damage *= 0.5;
+          t.takeDamage(p.damage * 0.10);   // 跳弹也啃一点血（10%）：撞击震伤乘员/外部件，薄炮车打硬甲不至于零作为
           this.addEffect(new Explosion(hitPoint, 1.4, 0xfff2c0));    // 白黄火花放大一号：跳弹"叮"更醒目
-          hits.push({ owner: p.owner, target: t, proj: p, killed: false, crit: null, verdict, hitPoint, penInfo: t.lastPenInfo });
+          hits.push({ owner: p.owner, target: t, proj: p, killed: wasAlive && !t.alive, crit: t.lastCrit, verdict, hitPoint, penInfo: t.lastPenInfo });
           continue;   // 本帧判完；弹开的弹丸下一帧照常飞行，可再命中任何目标
         }
         // 榴弹未击穿→范围爆炸：命中者吃贴甲溅射,再波及附近所有敌方坦克(距离衰减)
@@ -1785,6 +1786,7 @@ class EntityManager {
           }
         }
         // (hitPoint 已在 onHit 前算好,回放与部位判定共用)
+        if (verdict === 'nopen') t.takeDamage(p.damage * 0.15);   // 未击穿啃 15% 血：超压震伤/崩落装甲碎片，低穿车对硬目标不再零作为
         p.alive = false;
         this.addEffect(new Explosion(hitPoint, t.radius ? t.radius * 0.6 : 1, 0xffa040));
         hits.push({ owner: p.owner, target: t, proj: p, killed: wasAlive && !t.alive, crit: t.lastCrit, verdict, hitPoint, penInfo: t.lastPenInfo });
