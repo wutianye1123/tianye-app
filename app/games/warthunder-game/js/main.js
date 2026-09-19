@@ -4589,8 +4589,12 @@ class Game {
       const _rt = this._rayAimHit(_muz.x, _muz.y, _muz.z, _bd.x, _bd.y, _bd.z);
       const _bore = _aimGun.copy(_muz).addScaledVector(_bd, _rt >= 0 ? _rt : 300).project(this.camera);
       this.hud.positionCrosshair((_bore.x * 0.5 + 0.5) * window.innerWidth, (-_bore.y * 0.5 + 0.5) * window.innerHeight);
-      // 纯手动模式：不显示红环收敛点（炮塔摇杆手感，十字=炮口真实落点，别无他物）
-      this.hud.positionAimCircle(0, 0, false);
+      // 红环 = 鼠标指定的炮塔转向收敛点（纯手动锚点：跟鼠标走，不吸附敌车）——
+      // 炮塔没转到位时红环在前方引导，与十字重合即"炮到位"。
+      if (this._aimHitPt) {
+        const sp = _aimDir.copy(this._aimHitPt).project(this.camera);
+        this.hud.positionAimCircle(sp.x, sp.y, sp.z < 1);
+      } else this.hud.positionAimCircle(0, 0, false);
       // 炮手瞄准镜：镜筒分化替代十字准星（hitmarker 保留在分化中心闪）；射距信息行随动。
       if (this.gunnerView) {
         const rt = this._rangeAuto ? `${Math.round(this._dAim || 0)}m（自动）` : `${this._rangeSet}m（手动）`;
