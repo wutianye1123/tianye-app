@@ -11,6 +11,9 @@ const _scSide = new THREE.Vector3();   // 回放弹道侧向
 const _tankM = new THREE.Matrix4(), _tankY = new THREE.Vector3(0, 1, 0);
 const _recoilQ = new THREE.Quaternion(), _recoilAxis = new THREE.Vector3(1, 0, 0);   // 开炮后坐俯仰（局部 X 轴）
 const _tankQ = new THREE.Quaternion(), _tankWQ = new THREE.Quaternion();
+const _aimMuz = new THREE.Vector3();     // 落点瞄准：炮口世界坐标
+const _aimDir = new THREE.Vector3();     // 落点瞄准：视线/炮管线方向
+const _aimGun = new THREE.Vector3();     // 落点瞄准：炮塔瞄准点（aimTurretAt 只读，可复用）
 
 
 // ===== js/config.js =====
@@ -1044,6 +1047,20 @@ function segSphereT(p0, p1, c, r) {
   if (disc < 0) return -1;
   const t = (-b - Math.sqrt(disc)) / (2 * a);
   return (t >= 0 && t <= 1) ? t : -1;
+}
+
+// 射线（起点 o、单位方向 d）与球 (c, r) 相交：返回进入距离 t≥0，未命中 -1。零分配（标量参数版）。
+// 起点在球内返回 -1（跳过——落点瞄准时相机贴着友军/墙，不把准星吸到自己脸上）。
+function raySphereT(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
+  const fx = ox - cx, fy = oy - cy, fz = oz - cz;
+  const cc = fx * fx + fy * fy + fz * fz - r * r;
+  if (cc <= 0) return -1;
+  const b = 2 * (fx * dx + fy * dy + fz * dz);
+  if (b >= 0) return -1;
+  const disc = b * b - 4 * cc;   // a=1（d 单位向量）
+  if (disc < 0) return -1;
+  const t = (-b - Math.sqrt(disc)) / 2;
+  return t >= 0 ? t : -1;
 }
 
 
@@ -3615,7 +3632,30 @@ class Game {
 
     // —— 炮手瞄准镜：滚轮装订射距（手动补偿弹道下坠），Z 切倍率，C 回自动测距 ——
     const notches = inp.consumeWheel();
-    this._dAim = t.position.distanceTo(this._tankAimPt);
+    // —— 落点瞄准（战雷街机导演模式）：炮塔瞄"视线射线在世界上的真实命中点"，十字=弹着点 ——
+    // 第三人称：射线从相机出发（十字在屏幕正中=射线方向），命中敌车球/障碍/地形取最近者；
+    // 镜内：相机骑在炮管上已无视差，仍瞄 90m 锚点方向，但沿炮管线实测射距（真·自动测距）。
+    // 弹道下坠补偿 v 按当前弹种实际炮口速取（榴弹慢/硬芯快，速度不同补偿量不同）。
+    t.getMuzzleWorld(_aimMuz);
+    let aimWorld, aimRange;
+    if (this.gunnerView) {
+      const bd = t.getBarrelDir();
+      const rt = this._rayAimHit(_aimMuz.x, _aimMuz.y, _aimMuz.z, bd.x, bd.y, bd.z);
+      aimWorld = this._tankAimPt;
+      aimRange = rt >= 0 ? rt : 300;   // 打天：按远距补
+    } else {
+      this.camera.getWorldDirection(_aimDir);
+      const rt = this._rayAimHit(this.camera.position.x, this.camera.position.y, this.camera.position.z, _aimDir.x, _aimDir.y, _aimDir.z);
+      if (rt >= 0) {
+        aimWorld = _aimGun.copy(_aimDir).multiplyScalar(rt).add(this.camera.position);
+        aimRange = aimWorld.distanceTo(_aimMuz);
+      } else {
+        aimWorld = this._tankAimPt;   // 打天：退回 90m 锚点（相机正看着它，无视差）
+        aimRange = t.position.distanceTo(this._tankAimPt);
+      }
+    }
+    this._dAim = aimRange;   // 实测射距：瞄准镜测距显示/装订起点都是真值了
+    this._aimHitPt = (this._aimHitPt || new THREE.Vector3()).copy(aimWorld);   // 红环=炮塔收敛点（HUD 投影用）
     if (this.gunnerView && notches !== 0) {
       if (this._rangeAuto) { this._rangeAuto = false; this._rangeSet = clamp(Math.round(this._dAim / 10) * 10, 20, 700); }   // 首次滚动：从当前实际距离起装订
       this._rangeSet = clamp(this._rangeSet + notches * 10, 20, 700);
@@ -3623,11 +3663,10 @@ class Game {
     }
     if (this._consumePress(inp, 'KeyZ') && this.gunnerView) { this._scopeMag = (this._scopeMag || 4) === 4 ? 8 : 4; if (this.sfx) this.sfx.ui(); }
     if (this._consumePress(inp, 'KeyC') && this.gunnerView && !this._rangeAuto) { this._rangeAuto = true; this.hud.addFeed('📏 已切回自动测距', 'info'); }
-    // 弹道下坠补偿：炮口上抬 0.5·g·(d/v)²（自动=按实际距离实时补偿；手动=按装订射距，装错就打高/打低）
-    // v 按当前弹种实际炮口速取（榴弹慢/硬芯快，速度不同补偿量不同）。
+    // 弹道下坠补偿：炮口上抬 0.5·g·(d/v)²（自动=按实测距离实时补偿；手动=按装订射距，装错就打高/打低）
     const dEff = this._rangeAuto ? this._dAim : this._rangeSet;
     const drop = 0.5 * CONFIG.tank.shellGravity * Math.pow(dEff / tankShellSpeed(t.shellKind), 2);
-    const gunPt = this._tankAimPt.clone(); gunPt.y += drop;
+    const gunPt = _aimGun.copy(aimWorld); gunPt.y += drop;
     t.aimTurretAt(gunPt, dt, 0);
 
     // 修车（按住 R）：不能动但可以开火/灭火，消耗时间修血+模块。
@@ -3726,6 +3765,54 @@ class Game {
     this.camera.getWorldDirection(this._tmpDir);
     if (this._tmpDir.dot(hit.clone().sub(this.camera.position)) <= 0) return null; // 落在相机后方则忽略
     return hit;
+  }
+
+  // 落点瞄准：视线/炮管线射线 → 世界上最近的命中（敌方载具球 → 障碍圆 → 地形 ray-march）。
+  // 返回射线距离（-1=打天无命中）。第三人称炮塔瞄这个命中点：十字=弹着点，任何距离无视差。
+  // 旧方案炮塔与相机视线只在固定 90m 锚点汇合，近距视差 ~1.5m——贴脸炮弹全从目标脚下打低穿地。
+  // 只测敌方：炮弹本来就不与友军碰撞（穿过），准星也该穿过去打后面的敌人。
+  _rayAimHit(ox, oy, oz, dx, dy, dz) {
+    let bestT = Infinity;
+    const myTeam = this.player ? this.player.team : 'blue';
+    for (const v of this.em.tanks) {
+      if (!v.alive || v === this.player || v.team === myTeam) continue;
+      const t = raySphereT(ox, oy, oz, dx, dy, dz, v.position.x, v.position.y + 1.2, v.position.z, (v.radius || 3) + 0.2);
+      if (t >= 0 && t < bestT) bestT = t;
+    }
+    for (const v of this.em.planes) {
+      if (!v.alive || v.team === myTeam) continue;
+      const t = raySphereT(ox, oy, oz, dx, dy, dz, v.position.x, v.position.y, v.position.z, (v.radius || 8) + 0.2);
+      if (t >= 0 && t < bestT) bestT = t;
+    }
+    for (const ob of (this.em.obstacles || [])) {
+      const fx = ox - ob.position.x, fz = oz - ob.position.z;
+      const a2 = dx * dx + dz * dz;
+      if (a2 < 1e-6) continue;                       // 接近垂直上仰：水平面无交
+      const rr = (ob.radius || 3) + 0.2;
+      const cc = fx * fx + fz * fz - rr * rr;
+      if (cc <= 0) continue;                         // 相机在障碍圆内：跳过
+      const b = 2 * (fx * dx + fz * dz);
+      if (b >= 0) continue;
+      const disc = b * b - 4 * a2 * cc;
+      if (disc < 0) continue;
+      const t = (-b - Math.sqrt(disc)) / (2 * a2);
+      if (t < 0 || t >= bestT) continue;
+      if (oy + dy * t < (ob.height ?? 30) + 1) bestT = t;   // 进入点高于楼顶：飞过，不挡
+    }
+    // 地形 ray-march（3m 步进 + 5 次二分细化，只在比现有命中更近处找）
+    const maxD = Math.min(bestT === Infinity ? 500 : bestT, 500);
+    for (let d = 4; d < maxD; d += 3) {
+      if (oy + dy * d < terrainHeight(ox + dx * d, oz + dz * d)) {
+        let lo = d - 3, hi = d;
+        for (let i = 0; i < 5; i++) {
+          const m = (lo + hi) / 2;
+          if (oy + dy * m < terrainHeight(ox + dx * m, oz + dz * m)) hi = m; else lo = m;
+        }
+        bestT = Math.min(bestT, hi);
+        break;
+      }
+    }
+    return bestT === Infinity ? -1 : bestT;
   }
 
   // —— 相机 ——
@@ -3836,12 +3923,17 @@ class Game {
     if (this.paused) { this.renderer.render(this.scene, this.camera); return; }
     if (this.state === 'playing') this.matchT += dt;
     if (this.mode === 'tank' && this.player && this.player.alive) {
-      // 十字准星 = 炮膛实际指向（炮口 + 炮管方向投影到屏幕）：随炮塔转，不锁屏幕中央。
-      // 相机跟鼠标、炮塔随后 slew 对齐时，准星从偏处滑向中央（与红环重合即对准）。
-      const _bore = this.player.getMuzzleWorld(new THREE.Vector3()).addScaledVector(this.player.getBarrelDir(), 80).project(this.camera);
+      // 十字准星 = 炮膛射线在世界上真实落点的投影（炮口+炮管方向 ray 命中敌车/障碍/地形）。
+      // 原先投影"80m 定点"：相机在炮管上方 4.5m，近距视差 ~2°，准星贴脸对准也打低穿地。
+      // 现在准星=当前弹道真实落点——贴上去就命中；炮塔 slew 未到位时准星真实滞后（战雷街机导演模式）。
+      const _muz = this.player.getMuzzleWorld(_aimMuz);
+      const _bd = this.player.getBarrelDir();
+      const _rt = this._rayAimHit(_muz.x, _muz.y, _muz.z, _bd.x, _bd.y, _bd.z);
+      const _bore = _aimGun.copy(_muz).addScaledVector(_bd, _rt >= 0 ? _rt : 300).project(this.camera);
       this.hud.positionCrosshair((_bore.x * 0.5 + 0.5) * window.innerWidth, (-_bore.y * 0.5 + 0.5) * window.innerHeight);
-      if (this._tankAimPt) {
-        const sp = this._tankAimPt.clone().project(this.camera);
+      // 红环 = 炮塔正在转向的收敛点（视线射线命中点）：与十字重合即"炮到位"
+      if (this._aimHitPt) {
+        const sp = _aimDir.copy(this._aimHitPt).project(this.camera);
         this.hud.positionAimCircle(sp.x, sp.y, sp.z < 1);
       } else this.hud.positionAimCircle(0, 0, false);
       // 炮手瞄准镜：镜筒分化替代十字准星（hitmarker 保留在分化中心闪）；射距信息行随动。
@@ -4776,6 +4868,7 @@ class Game {
     // 重置上一局残留的 per-match 状态（避免瞄准角/错误标志/观战目标串到新局）
     this._aimYaw = null;
     this._aimHeight = null;
+    this._aimHitPt = null;   // 落点瞄准收敛点（重生后由首帧 _handleInputTank 重建）
     this._rangeAuto = true;   // 测距装订不跨局保留（重开从自动测距起）
     this._rangeSet = null;
     this._jHold = false;
