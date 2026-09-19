@@ -4352,10 +4352,10 @@ class Game {
         this._pilotSmokeT = 22;          // 血量告急：放烟幕墙遮蔽撤离（用玩家的烟幕弹库存/冷却）
         this._launchSmoke();
       }
+      // 边走边修：血量<55% 或模块坏即持续修（战斗中也修，不打断机动/开火——玩家 R 键同款）。
+      // 不加"脱战才修"条件：AI 常年在交战环带里，那种条件等于永远不修。
       const modsBroken = t.modules && (t.modules.track > 0 || t.modules.barrel > 0 || t.modules.engine > 0);
-      const safe = !target || t.position.distanceTo(target.position) > 70;   // 最近威胁 70m 外=脱战
-      if ((t.health < t.maxHealth * 0.55 || modsBroken) && safe) {
-        // 边走边修：不停车（TankAI 的机动继续），只回血修模块
+      if (t.health < t.maxHealth * 0.55 || modsBroken) {
         if (t.health < t.maxHealth) t.health = Math.min(t.maxHealth, t.health + 15 * dt);
         if (t.modules) for (const k of ['track', 'barrel', 'engine']) {
           if (t.modules[k] > 0) t.modules[k] = Math.max(0, t.modules[k] - dt * 6);
