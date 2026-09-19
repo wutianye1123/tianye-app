@@ -4295,15 +4295,12 @@ class Game {
       aimWorld = this._tankAimPt;
       aimRange = rt >= 0 ? rt : 300;   // 打天：按远距补
     } else {
-      this.camera.getWorldDirection(_aimDir);
-      const rt = this._rayAimHit(this.camera.position.x, this.camera.position.y, this.camera.position.z, _aimDir.x, _aimDir.y, _aimDir.z);
-      if (rt >= 0) {
-        aimWorld = _aimGun.copy(_aimDir).multiplyScalar(rt).add(this.camera.position);
-        aimRange = aimWorld.distanceTo(_aimMuz);
-      } else {
-        aimWorld = this._tankAimPt;   // 打天：退回 90m 锚点（相机正看着它，无视差）
-        aimRange = t.position.distanceTo(this._tankAimPt);
-      }
+      // —— 纯手动瞄准：炮塔只跟鼠标方位/高低（90m 锚点）——鼠标是炮塔摇杆，不做视线射线对敌车吸附 ——
+      // 下坠补偿距离沿炮口线实测（只测地形/障碍，不吸载具）：炮口指哪测哪。
+      const bd = t.getBarrelDir();
+      const rt = this._rayAimHit(_aimMuz.x, _aimMuz.y, _aimMuz.z, bd.x, bd.y, bd.z, true);
+      aimWorld = this._tankAimPt;
+      aimRange = rt >= 0 ? rt : t.position.distanceTo(this._tankAimPt);
     }
     this._dAim = aimRange;   // 实测射距：瞄准镜测距显示/装订起点都是真值了
     this._aimHitPt = (this._aimHitPt || new THREE.Vector3()).copy(aimWorld);   // 红环=炮塔收敛点（HUD 投影用）
@@ -4430,18 +4427,20 @@ class Game {
   // 返回射线距离（-1=打天无命中）。第三人称炮塔瞄这个命中点：十字=弹着点，任何距离无视差。
   // 旧方案炮塔与相机视线只在固定 90m 锚点汇合，近距视差 ~1.5m——贴脸炮弹全从目标脚下打低穿地。
   // 只测敌方：炮弹本来就不与友军碰撞（穿过），准星也该穿过去打后面的敌人。
-  _rayAimHit(ox, oy, oz, dx, dy, dz) {
+  _rayAimHit(ox, oy, oz, dx, dy, dz, noVehicles = false) {
     let bestT = Infinity;
     const myTeam = this.player ? this.player.team : 'blue';
-    for (const v of this.em.tanks) {
-      if (!v.alive || v === this.player || v.team === myTeam) continue;
-      const t = raySphereT(ox, oy, oz, dx, dy, dz, v.position.x, v.position.y + 1.2, v.position.z, (v.radius || 3) + 0.2);
-      if (t >= 0 && t < bestT) bestT = t;
-    }
-    for (const v of this.em.planes) {
-      if (!v.alive || v.team === myTeam) continue;
-      const t = raySphereT(ox, oy, oz, dx, dy, dz, v.position.x, v.position.y, v.position.z, (v.radius || 8) + 0.2);
-      if (t >= 0 && t < bestT) bestT = t;
+    if (!noVehicles) {   // noVehicles：纯手动模式跳过载具吸附——炮塔不自动瞄敌车
+      for (const v of this.em.tanks) {
+        if (!v.alive || v === this.player || v.team === myTeam) continue;
+        const t = raySphereT(ox, oy, oz, dx, dy, dz, v.position.x, v.position.y + 1.2, v.position.z, (v.radius || 3) + 0.2);
+        if (t >= 0 && t < bestT) bestT = t;
+      }
+      for (const v of this.em.planes) {
+        if (!v.alive || v.team === myTeam) continue;
+        const t = raySphereT(ox, oy, oz, dx, dy, dz, v.position.x, v.position.y, v.position.z, (v.radius || 8) + 0.2);
+        if (t >= 0 && t < bestT) bestT = t;
+      }
     }
     for (const ob of (this.em.obstacles || [])) {
       const fx = ox - ob.position.x, fz = oz - ob.position.z;
@@ -4590,11 +4589,8 @@ class Game {
       const _rt = this._rayAimHit(_muz.x, _muz.y, _muz.z, _bd.x, _bd.y, _bd.z);
       const _bore = _aimGun.copy(_muz).addScaledVector(_bd, _rt >= 0 ? _rt : 300).project(this.camera);
       this.hud.positionCrosshair((_bore.x * 0.5 + 0.5) * window.innerWidth, (-_bore.y * 0.5 + 0.5) * window.innerHeight);
-      // 红环 = 炮塔正在转向的收敛点（视线射线命中点）：与十字重合即"炮到位"
-      if (this._aimHitPt) {
-        const sp = _aimDir.copy(this._aimHitPt).project(this.camera);
-        this.hud.positionAimCircle(sp.x, sp.y, sp.z < 1);
-      } else this.hud.positionAimCircle(0, 0, false);
+      // 纯手动模式：不显示红环收敛点（炮塔摇杆手感，十字=炮口真实落点，别无他物）
+      this.hud.positionAimCircle(0, 0, false);
       // 炮手瞄准镜：镜筒分化替代十字准星（hitmarker 保留在分化中心闪）；射距信息行随动。
       if (this.gunnerView) {
         const rt = this._rangeAuto ? `${Math.round(this._dAim || 0)}m（自动）` : `${this._rangeSet}m（手动）`;
