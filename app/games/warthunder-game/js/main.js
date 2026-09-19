@@ -10,6 +10,7 @@ const _kcTmp = new THREE.Vector3();   // X 光回放临时量（免每帧 new）
 const _scLook = new THREE.Vector3();   // 回放相机平滑视线
 const _projFwd = new THREE.Vector3(0, 0, 1);   // 曳光定向基准
 const _projTmp = new THREE.Vector3();
+const _p1 = new THREE.Vector3(), _p2 = new THREE.Vector3(), _p3 = new THREE.Vector3();   // 导弹避障临时向量
 const _scSide = new THREE.Vector3();   // 回放弹道侧向
 const _tankM = new THREE.Matrix4(), _tankY = new THREE.Vector3(0, 1, 0);
 const _recoilQ = new THREE.Quaternion(), _recoilAxis = new THREE.Vector3(1, 0, 0);   // 开炮后坐俯仰（局部 X 轴）
@@ -1133,12 +1134,14 @@ class Projectile {
     this.alive = true;
   }
 
-  update(dt) {
+  update(dt, obstacles) {
     if (this.homing && this.target && this.target.alive) {
       const desired = this.target.position.clone().sub(this.mesh.position).normalize();
       const cur = this.velocity.clone().normalize();
       cur.lerp(desired, clamp(this.homing * dt, 0, 1)).normalize();
       this.velocity.copy(cur.multiplyScalar(this.velocity.length()));
+      // —— 避障（追踪弹专属）：地形上抬 + 建筑侧绕，避免一头拍在山/楼上 ——
+      this._avoidObstacles(dt, obstacles);
     }
     if (this.gravity) this.velocity.y -= this.gravity * dt;
     this._prev.copy(this.mesh.position);   // 移动前快照：本帧扫掠线段起点
@@ -1150,6 +1153,42 @@ class Projectile {
     this.life -= dt;
     if (this.life <= 0) this.alive = false;
     if (this.mesh.position.y < terrainHeight(this.mesh.position.x, this.mesh.position.z) + 0.1) this.alive = false; // 落地（贴地形）
+  }
+
+  // 追踪弹避障：前视 0.7s 路径上有山/楼 → 向"上+侧向"偏转（绕过后继续咬目标）
+  _avoidObstacles(dt, obstacles) {
+    const speed = this.velocity.length();
+    const look = Math.min(60, speed * 0.7);
+    _p1.copy(this.velocity).normalize();                       // 前向
+    _p2.set(0, 0, 0);                                          // 避让方向累加
+    let danger = false;
+    // 地形：前视点贴地 → 上抬（两个采样点：中距+近距）
+    _p3.copy(this.mesh.position).addScaledVector(_p1, look * 0.6);
+    const th1 = terrainHeight(_p3.x, _p3.z);
+    if (_p3.y < th1 + 4) { _p2.y += 1; danger = true; }
+    _p3.copy(this.mesh.position).addScaledVector(_p1, look * 0.25);
+    const th2 = terrainHeight(_p3.x, _p3.z);
+    if (_p3.y < th2 + 2.5) { _p2.y += 1.4; danger = true; }
+    // 建筑/岩石：前视线段 vs 障碍圆柱 → 侧向+上抬绕开
+    for (const ob of (obstacles || [])) {
+      const ox = ob.position.x - this.mesh.position.x, oz = ob.position.z - this.mesh.position.z;
+      const along = ox * _p1.x + oz * _p1.z;
+      if (along <= 2 || along > look) continue;
+      const side = Math.abs(ox * -_p1.z + oz * _p1.x);
+      const rr = (ob.radius || 3) + 2;
+      if (side < rr && (ob.height ?? 30) > this.mesh.position.y - 2) {   // 楼顶比弹高才挡路（矮楼/墙直接飞过）
+        danger = true;
+        // 侧向远离障碍中心 + 上抬（楼高挡路时上抬为主）
+        _p2.x += (ox * -_p1.z + oz * _p1.x) > 0 ? _p1.z : -_p1.z;
+        _p2.z += (ox * -_p1.z + oz * _p1.x) > 0 ? -_p1.x : _p1.x;
+        _p2.y += 0.8;
+      }
+    }
+    if (!danger) return;
+    // 朝避让方向偏转（转向强度随危险接近提升，绕过后无危险自然回咬目标）
+    _p2.normalize();
+    _p3.copy(this.velocity).normalize().lerp(_p2, Math.min(1, 3.5 * dt)).normalize();
+    this.velocity.copy(_p3.multiplyScalar(speed));
   }
 }
 
@@ -1713,7 +1752,7 @@ class EntityManager {
   update(dt) {
     for (const t of this.tanks) if (t.alive) t.update(dt);
     for (const p of this.planes) if (p.alive) p.update(dt);
-    for (const p of this.projectiles) p.update(dt);
+    for (const p of this.projectiles) p.update(dt, this.obstacles);
     for (const e of this.effects) e.update(dt);
 
     // 炮弹 vs 障碍物（楼房/树等）：穿不过，命中销毁 + 小火花（炸弹靠落点爆炸，不拦）。
@@ -3388,6 +3427,7 @@ class Heli {
     this._aimPitch = 0; this._yawRate = 0; this._climb = 0; this._throttleIn = 0;
     this.reloadTimer = 0; this.fireCooldown = 0.09;
     this.maxMissiles = 12; this.missiles = this.maxMissiles; this.missileCooldown = 0;   // 火箭巢组数（HUD 导弹位显示）
+    if (type === 'ah64') { this.maxMissiles = 8; this.missiles = 8; this.rocketCd = 0; }   // AH-64：右键=地狱火×8 + E键=火箭(无限,5发一巢装填4s)
     this.maxBombs = 0; this.bombs = 0;   // 无炸弹（防飞机模式输入分支误读）
     this.modules = null; this.crew = null;
     this._build();
@@ -3446,7 +3486,8 @@ class Heli {
   update(dt) {
     if (this.reloadTimer > 0) this.reloadTimer -= dt;
     if (this.missileCooldown > 0) this.missileCooldown -= dt;
-    if (this.maxMissiles > 0 && this.missiles < this.maxMissiles) {   // 火箭组自动补充（慢）
+    if (this.rocketCd > 0) this.rocketCd -= dt;   // AH-64 火箭：无限弹，每次齐射后装填
+    if (this.maxMissiles > 0 && this.missiles < this.maxMissiles) {   // 火箭组/导弹自动补充（慢）
       this.missileRegen = (this.missileRegen || 0) + dt;
       if (this.missileRegen >= 14) { this.missileRegen = 0; this.missiles++; }
     }
@@ -3512,11 +3553,58 @@ class Heli {
     this.reloadTimer = this.fireCooldown;
     return true;
   }
-  // 火箭巢：一次齐射 4 枚无制导火箭（大爆炸），冷却 2.4s、共 12 组（HUD 导弹位）
+  // 导弹位（右键/X）：AH-64=地狱火追踪导弹（锁准星前半球目标）；Mi-24/直-10=无制导火箭巢齐射
   tryFireMissile(em, enemies) {
     if (!this.alive || this.missileCooldown > 0 || this.missiles <= 0) return false;
-    this.missiles--; this.missileCooldown = 2.4;
-    const fwd = (this._aimDir || this.forwardVector()).clone();   // 火箭巢也沿准星齐射
+    if (this.type === 'ah64') {
+      // —— 地狱火：追踪导弹（目标=准星前半球最近敌人）——
+      let best = null, bestD = Infinity;
+      const aim = (this._aimDir || this.forwardVector());
+      for (const t of (enemies || [])) {
+        if (!t.alive || t.team === this.team) continue;
+        const to = t.position.clone().sub(this.position);
+        const d = to.length();
+        if (d > 600) continue;
+        if (aim.dot(to.normalize()) < 0.5) continue;   // 准星 60° 锥内才锁
+        if (d < bestD) { bestD = d; best = t; }
+      }
+      const dir = best ? best.position.clone().sub(this.position).normalize() : aim.clone();
+      const proj = new Projectile({
+        position: this.position.clone().addScaledVector(aim, 2), direction: dir,
+        speed: 190, damage: 260, owner: this, ownerTeam: this.team,
+        gravity: 0, life: 6, color: 0xff5544, size: 0.42,
+      });
+      proj.target = best; proj.homing = 2.2;   // 强追踪：直升机悬停发射也能咬住
+      em.addProjectile(proj);
+      this.missiles--; this.missileCooldown = 1.2;
+      if (best) this._mslTarget = best;
+      return true;
+    }
+    return this.tryFireRockets(em);
+  }
+  // 火箭巢：AH-64 走 E 键——无限弹、按住逐发连射（0.22s 节奏），每打满 5 发自动装填 4s；
+  // Mi-24/直-10 复用导弹位（4 连发齐射）。
+  tryFireRockets(em, fromButton) {
+    const useOwn = this.type === 'ah64' && fromButton !== 'mslot';
+    if (useOwn) {
+      if (this.rocketCd > 0) return false;
+      const fwd = (this._aimDir || this.forwardVector()).clone();
+      const dir = fwd.clone();
+      const s = 0.02;
+      dir.x += randRange(-s, s); dir.y += randRange(-s, s); dir.z += randRange(-s, s); dir.normalize();
+      em.addProjectile(new Projectile({
+        position: this.group.position.clone().addScaledVector(fwd, 2).add(new THREE.Vector3(randRange(-1.5, 1.5), -0.2, 0)),
+        direction: dir, speed: 175, damage: 85, owner: this, ownerTeam: this.team,
+        gravity: 6, life: 5, color: 0xffa050, size: 0.5, pen: 130,
+        shellDef: { id: 'rocket', name: '火箭弹', penMul: 1, dmgMul: 1, bounceDeg: 80, noBounce: true },
+      }));
+      this._rocketCount = (this._rocketCount || 0) + 1;
+      if (this._rocketCount >= 5) { this._rocketCount = 0; this.rocketCd = 4; this._rocketReloaded = true; }   // 5 发一巢：打满装填
+      else this.rocketCd = 0.22;   // 连射节奏
+      return true;
+    }
+    if (this.missiles <= 0 || this.missileCooldown > 0) return false;
+    const fwd = (this._aimDir || this.forwardVector()).clone();
     for (let i = 0; i < 4; i++) {
       const dir = fwd.clone();
       const s = 0.02 + i * 0.006;
@@ -3528,6 +3616,7 @@ class Heli {
         shellDef: { id: 'rocket', name: '火箭弹', penMul: 1, dmgMul: 1, bounceDeg: 80, noBounce: true },
       }));
     }
+    this.missiles--; this.missileCooldown = 2.4;
     return true;
   }
   tryFireMG() {}
@@ -4616,16 +4705,58 @@ class Game {
   // AI 代打的强化挂载/还原（挂在实例上：重生换车自动失效重挂，关闭时精确还原当前实例）
   _startPilot(t) {
     this._stopPilot();   // 还原上一辆（若换车）
-    this._pilotSaved = { t, turretSpeed: t.turretSpeed, reloadTime: t.reloadTime, fireSpread: t.fireSpread, maxSpeed: t.maxSpeed };
-    t.turretSpeed *= 1.8; t.reloadTime *= 0.6; t.fireSpread *= 0.3; t.maxSpeed *= 1.15;
-    this._pilotAI = new TankAI(t);
-    this._pilotAI.fireDelay = 0.25;   // 超强反应：几乎零延迟开火
+    if (t.isHeli) {
+      // 直升机：AI 逻辑走 _heliPilotTick（悬停盘旋+预测瞄准），强化火箭回充
+      this._pilotSaved = { t, missileRegenRate: t._missileRegenRate };
+      this._pilotAI = null;
+    } else if (t.forwardVector) {
+      // 喷气机：PlaneAI 接管，强化机炮伤害
+      this._pilotSaved = { t, bulletDamage: t.bulletDamage };
+      if (t.bulletDamage != null) t.bulletDamage *= 1.5;
+      this._pilotAI = new PlaneAI(t);
+    } else {
+      // 坦克：TankAI 接管 + 全面强化
+      this._pilotSaved = { t, turretSpeed: t.turretSpeed, reloadTime: t.reloadTime, fireSpread: t.fireSpread, maxSpeed: t.maxSpeed };
+      t.turretSpeed *= 1.8; t.reloadTime *= 0.6; t.fireSpread *= 0.3; t.maxSpeed *= 1.15;
+      this._pilotAI = new TankAI(t);
+      this._pilotAI.fireDelay = 0.25;   // 超强反应：几乎零延迟开火
+    }
+  }
+  // —— 直升机 AI 代打：保持 60~110m 距离盘旋悬停，机炮/火箭沿预测命中点打 ——
+  _heliPilotTick(p, target, dt) {
+    const gy = terrainHeight(p.position.x, p.position.z);
+    if (!target) {   // 无目标：巡逻高度悬停慢转
+      p.setClimb(p.position.y < gy + 55 ? 0.5 : 0);
+      p.setPitchInput(0.12);
+      p.setYawInput(0.25);
+      return;
+    }
+    const to = _tmpV3.copy(target.position).sub(p.position);
+    const flatDist = Math.hypot(to.x, to.z) || 1;
+    // 瞄准：目标速度 × 弹丸飞行时间的提前量（坦克速度用 heading 前向近似）
+    const lead = flatDist / 300;
+    const tv = target.forwardVector ? target.forwardVector() : _tankFwd.set(Math.sin(target.heading), 0, Math.cos(target.heading));
+    const spd = target.speed != null ? target.speed : ((target.lastThrottle || 0) * (target.maxSpeed || 10));
+    const aim = target.position.clone().addScaledVector(tv, spd * lead);
+    p.setAimDir(aim.sub(p.position).normalize());
+    // 高度带 terrain+38~58；距离保持 60~110m（远追近退）；偏航朝目标侧 60°（盘旋不直冲）
+    p.setClimb(clamp((gy + 48 - p.position.y) * 0.08, -1, 1));
+    p.setPitchInput(flatDist > 110 ? 0.75 : (flatDist < 60 ? -0.55 : 0.06));
+    const desiredYaw = Math.atan2(to.x, to.z) + 1.0;
+    let dy = desiredYaw - p.heading;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    p.setYawInput(clamp(dy * 1.6, -1, 1));
+    // 开火：机炮常开（260m 内），火箭 180m 内按节奏齐射
+    if (flatDist < 260 && p.canFire()) p.tryFire(this.em);
+    if (flatDist < 180 && p.missiles > 0 && Math.random() < dt * 0.5) p.tryFireMissile(this.em, this.enemies);
+    if (p.type === 'ah64' && flatDist < 160 && Math.random() < dt * 2.5) p.tryFireRockets(this.em, true);   // AI：逐发泼火箭（5发一巢自动装填）
   }
   _stopPilot() {
     const s = this._pilotSaved;
     if (s && s.t) {   // 还原强化参数（车可能已死/已换，还原无害）
-      s.t.turretSpeed = s.turretSpeed; s.t.reloadTime = s.reloadTime;
-      s.t.fireSpread = s.fireSpread; s.t.maxSpeed = s.maxSpeed;
+      if (s.bulletDamage !== undefined) s.t.bulletDamage = s.bulletDamage;
+      s.t.turretSpeed = s.turretSpeed ?? s.t.turretSpeed; s.t.reloadTime = s.reloadTime ?? s.t.reloadTime;
+      s.t.fireSpread = s.fireSpread ?? s.t.fireSpread; s.t.maxSpeed = s.maxSpeed ?? s.t.maxSpeed;
     }
     this._pilotSaved = null; this._pilotAI = null;
   }
@@ -4787,6 +4918,24 @@ class Game {
     inp.consumeWheel();     // 排空滚轮累积（飞机模式不用，避免切回坦克瞬间跳射距）
     const p = this.player;
     if (!p.alive) return;
+    // 🤖 AI 代打（Q 切换）：喷气机=PlaneAI 接管+机炮伤害×1.5；直升机=_heliPilotTick 盘旋悬停+预测瞄准
+    if (this._consumePress(inp, 'KeyQ')) {
+      this.aiPilot = !this.aiPilot;
+      if (this.aiPilot) { this.hud.addFeed('🤖 AI 代打开启（超强）', 'info'); this._startPilot(p); }
+      else { this.hud.addFeed('🤖 AI 代打关闭，人工接管', 'info'); this._stopPilot(); }
+    }
+    if (this.aiPilot) {
+      inp.consumeMovement();   // 排空鼠标累积（关闭 AI 瞬间不跳变）
+      if (p.isHeli ? !this._pilotSaved || this._pilotSaved.t !== p : (!this._pilotAI || this._pilotAI.plane !== p && !this._pilotAI.tank)) this._startPilot(p);
+      const target = this._nearest(p.position, this.enemies.filter((e) => e.alive), this._markedTarget);
+      if (p.isHeli) this._heliPilotTick(p, target, dt);
+      else this._pilotAI.update(dt, { target, entityManager: this.em, smokes: this.em.smokes });
+      // 十字跟机头/准星方向（AI 打哪十字在哪）
+      const fv = p.isHeli ? (p._aimDir || p.forwardVector()) : p.forwardVector();
+      const pp = _tmpV3.copy(p.position).addScaledVector(fv, 80).project(this.camera);
+      this._planeAimNDC = { x: pp.x, y: pp.y };
+      return;
+    }
     // 指针锁定时用"虚拟瞄准点"（累积鼠标移动，光标不会飞出窗口）；未锁定时用光标绝对位置。
     let ndc;
     if (document.pointerLockElement === this.canvas) {
@@ -4827,7 +4976,11 @@ class Game {
     if (this._consumePress(inp, 'KeyF')) this._extinguish(p);
     // 导弹（喷气机）：右键或 X
     if ((inp.rightMouseDown || inp.isDown('KeyX')) && p.missiles > 0) {
-      if (p.tryFireMissile(this.em, this.enemies)) { this.hud.addFeed(`🚀 导弹 ${p.missiles}/${p.maxMissiles}`, 'info'); this.sfx.missile(p.position); }
+      if (p.tryFireMissile(this.em, this.enemies)) { this.hud.addFeed(`🚀 ${p.isHeli && p.type === 'ah64' ? '地狱火' : '导弹/火箭'} ${p.missiles}/${p.maxMissiles}`, 'info'); this.sfx.missile(p.position); }
+    }
+    // AH-64 专属火箭巢（按住 E 逐发连射）：5 发一巢打满自动装填 4s，弹无限
+    if (p.isHeli && p.type === 'ah64' && inp.isDown('KeyE')) {
+      if (p.tryFireRockets(this.em, true) && p.rocketCd >= 4) this.hud.addFeed('🚀 火箭巢装填 4s…', 'info');
     }
     if (this._consumePress(inp, 'KeyV')) this._markTarget();   // 侦察标记(飞机也能标)
     if (this._consumePress(inp, 'KeyB') && p.bombs > 0) {
