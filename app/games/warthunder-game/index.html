@@ -305,6 +305,32 @@ html, body {
 }
 @keyframes dmgFade { 0% { opacity: 1; } 70% { opacity: 0.75; } 100% { opacity: 0; } }
 
+/* 导弹来袭警告（RWR）：顶部红字闪烁 + 全屏红色边框脉冲 */
+#msl-warn {
+  position: absolute;
+  left: 50%; top: 16%;
+  transform: translateX(-50%);
+  font: bold 24px/1 "Microsoft YaHei", sans-serif;
+  color: #ff4040;
+  text-shadow: 0 0 12px rgba(255, 40, 40, 0.9), 0 2px 4px rgba(0,0,0,0.9);
+  letter-spacing: 3px;
+  pointer-events: none;
+  display: none;
+  animation: mslBlink 0.5s steps(2) infinite;
+}
+#msl-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: 12px;
+  box-shadow: inset 0 0 120px rgba(255, 30, 30, 0.55);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+#msl-vignette.on { animation: mslPulse 0.7s ease-in-out infinite; }
+@keyframes mslBlink { 0% { opacity: 1; } 50% { opacity: 0.25; } 100% { opacity: 1; } }
+@keyframes mslPulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.85; } }
+
 /* 跳弹提示：屏幕中下方独立浮动字（不进 feed 流，速射炮下也看得清），连续跳弹聚合计数 */
 #bounce-tip {
   position: absolute;

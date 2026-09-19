@@ -457,6 +457,8 @@ class HUD {
       <div id="reload-ring"></div>
       <div id="dmg-dir"></div>
       <div id="bounce-tip"></div>
+      <div id="msl-warn">⚠ 导弹来袭 ⚠</div>
+      <div id="msl-vignette"></div>
       <div id="hitmarker"></div>
       <div id="lead-reticle" style="display:none"></div>
       <div id="stats">
@@ -496,6 +498,17 @@ class HUD {
     this.reloadRing = container.querySelector('#reload-ring');
     this.dmgDir = container.querySelector('#dmg-dir');
     this.bounceTip = container.querySelector('#bounce-tip');
+    this.mslWarn = container.querySelector('#msl-warn');
+    this.mslVig = container.querySelector('#msl-vignette');
+  }
+
+  // 导弹来袭警告（RWR）：红字闪烁+全屏红晕脉冲；on=false 全部熄灭。
+  setMissileWarn(on) {
+    if (!this.mslWarn && !this.mslVig) return;
+    if (!this.mslWarn) this.mslWarn = this.container.querySelector('#msl-warn');
+    if (!this.mslVig) this.mslVig = this.container.querySelector('#msl-vignette');
+    if (this.mslWarn) this.mslWarn.style.display = on ? 'block' : 'none';
+    if (this.mslVig) { this.mslVig.classList.toggle('on', on); this.mslVig.style.opacity = on ? '' : '0'; }
   }
 
   // 跳弹浮动提示：屏幕中下方独立显示（不进 feed 流，速射炮下 feed 会刷屏看不见），
@@ -3252,8 +3265,23 @@ class TankAI {
   }
 
   update(dt, ctx) {
-    const { target, entityManager: em, obstacles = [], smokes = [] } = ctx;
+    const { target, entityManager: em, obstacles = [], smokes = [], threats = [] } = ctx;
     const tank = this.tank;
+    // —— 蛇形规避：导弹咬我 / 130m 内敌炮口正对我 → 2.5s 左右甩尾走位（破坏瞄准），4s 冷却 ——
+    this._evCd = (this._evCd || 0) - dt;
+    let tankThreat = false;
+    for (const pr of em.projectiles) { if (pr.alive && pr.homing && pr.target === tank) { tankThreat = true; break; } }
+    if (!tankThreat && this._evCd <= 0) {
+      for (const e of threats) {
+        if (!e.alive || e.turretYaw === undefined || e.position.distanceTo(tank.position) > 130) continue;
+        const wy = e.heading + e.turretYaw;
+        const dxa = tank.position.x - e.position.x, dza = tank.position.z - e.position.z;
+        let da = Math.atan2(dxa, dza) - wy;
+        da = Math.atan2(Math.sin(da), Math.cos(da));
+        if (Math.abs(da) < 0.07) { tankThreat = true; break; }
+      }
+    }
+    if (tankThreat && this._evCd <= 0) { this._evT = 2.5; this._evCd = 4; this._evDir = Math.random() < 0.5 ? 1 : -1; }
     // 烟幕判定：目标或自己在烟里 → 不开火（看不清,别浪费炮弹;战雷烟幕核心作用）
     const inSmoke = (p) => smokes.some((s) => p.distanceToSquared(s.pos) < s.r * s.r);
     const smokeBlind = target && !target.isZone && (inSmoke(target.position) || inSmoke(tank.position));
@@ -3349,6 +3377,14 @@ class TankAI {
       this._unstickT -= dt;
       tank.drive(-1, this._orbitDir * 0.9, dt);
     } else {
+      // 蛇形规避叠加：左右甩尾（每 0.55s 翻转方向）+ 保持车速，破坏对方瞄准
+      if ((this._evT || 0) > 0) {
+        this._evT -= dt;
+        this._evFlip = (this._evFlip || 0) + dt;
+        if (this._evFlip > 0.55) { this._evFlip = 0; this._evDir *= -1; }
+        turn = clamp(turn + this._evDir * 0.85, -1, 1);
+        throttle = Math.max(throttle, 0.9);
+      }
       tank.drive(throttle, turn, dt);
     }
     // 瞄准：对坦克瞄车体高度(部位判定命中模块更多)；对飞机算提前量拦截解(目标速度×弹丸飞行时间)；
@@ -4516,6 +4552,8 @@ class Sfx {
   mg(pos) { this._oneshot(0.06, 'lowpass', 2600, 0.22, pos, 1200); }
   explosion(pos) { this._oneshot(0.7, 'lowpass', 600, 1.0, pos, 80); }
   missile(pos) { this._oneshot(0.45, 'bandpass', 900, 0.4, pos, 300); }
+  // RWR 导弹来袭警报：双音急促哔哔（重复触发形成连续告警）
+  alarm() { this._blip(1900, 1750, 0.07, 0.2, 'square'); this._blip(1450, 1350, 0.07, 0.16, 'square'); }
   _blip(freq0, freq1, dur, gain, type) {
     if (this.muted) return;
     this._ensure(); if (!this.ctx) return;
@@ -5620,6 +5658,18 @@ class Game {
       this.hud.setCrosshairVisible(true);
       this.hud.hideLockPrompt();
     }
+    // —— RWR 导弹来袭警告：有追踪弹锁定玩家载具 → 红字+红晕+急促警报（0.35s 节奏重复） ——
+    if (this.state === 'playing' && this.player && this.player.alive) {
+      let inbound = false;
+      for (const pr of this.em.projectiles) {
+        if (pr.alive && pr.homing && pr.target === this.player) { inbound = true; break; }
+      }
+      if (inbound !== this._mslWarnOn) { this._mslWarnOn = inbound; this.hud.setMissileWarn(inbound); }
+      if (inbound) {
+        this._mslBeepT = (this._mslBeepT || 0) - dt;
+        if (this._mslBeepT <= 0) { this._mslBeepT = 0.35; this.sfx.alarm(); }
+      }
+    } else if (this._mslWarnOn) { this._mslWarnOn = false; this.hud.setMissileWarn(false); }
     this.sfx.resume();
     this._updateTouchButtons();
     // 侦察标记维护:倒计时+头顶箭头跟随目标(浮动),过期/目标死→撤
@@ -5686,8 +5736,8 @@ class Game {
         if (zoneT && (!t || e.position.distanceTo(t.position) > 75)) t = zoneT;
         t = this._stickyTarget(e, t, this._markedTarget);   // 目标粘性：别追两下就换人
         e.ai.update(dt, e.isHeli
-          ? { target: t, threats: [this.player, ...this.allies].filter((x) => x && x.alive), entityManager: this.em, obstacles, enemies: this.enemies }   // 敌直升机：威胁=蓝方
-          : { target: t, entityManager: this.em, obstacles, smokes: this.em.smokes });
+          ? { target: t, threats: [this.player, ...this.allies].filter((x) => x && x.alive), entityManager: this.em, obstacles, enemies: this.enemies }   // 敌直升机/坦克：威胁=蓝方（规避用）
+          : { target: t, threats: [this.player, ...this.allies].filter((x) => x && x.alive), entityManager: this.em, obstacles, smokes: this.em.smokes });
       }
       for (const a of this.allies) {
         if (!a.ai) continue;
@@ -5697,7 +5747,7 @@ class Game {
         t = this._stickyTarget(a, t, this._markedTarget);   // 目标粘性
         a.ai.update(dt, a.isHeli
           ? { target: t, threats: redAlive, entityManager: this.em, obstacles, enemies: this.enemies }   // 友直升机：威胁=红方
-          : { target: t, entityManager: this.em, obstacles, smokes: this.em.smokes });
+          : { target: t, threats: redAlive, entityManager: this.em, obstacles, smokes: this.em.smokes });   // 友坦克也喂威胁（蛇形规避用）
       }
 
       this.em.update(dt);
@@ -6613,6 +6663,7 @@ class Game {
     this.hud.hideScope();                 // 结束时撤掉瞄准镜遮罩
     this.hud.hideBigMap();                // 大地图/战绩板也撤掉
     this.hud.hideScoreboard();
+    this.hud.setMissileWarn(false); this._mslWarnOn = false;   // RWR 警告熄灭
     this.hud.positionLead(0, 0, false);   // 结束时清提前量瞄准环，防卡屏残留
     if (this._bombX) this._bombX.style.display = 'none';
     this.hud.setCenterMessage('');
