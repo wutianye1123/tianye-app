@@ -3915,6 +3915,9 @@ class CrashFall {
 class PlaneAI {
   constructor(plane) {
     this.plane = plane;
+    this.phase = 'cruise';   // 对地攻击循环：cruise(高空巡航) → dive(俯冲攻击) → climb(拉起回高)
+    this._diveCd = 0;
+    this._orbit = Math.random() < 0.5 ? 1 : -1;
   }
 
   update(dt, ctx) {
@@ -3932,31 +3935,103 @@ class PlaneAI {
 
     const toT = new THREE.Vector3().subVectors(target.position, plane.position);
     const dist = toT.length() || 1;
-    const desired = toT.multiplyScalar(1 / dist);
+    const isAirTarget = typeof target.forwardVector === 'function';
+    const aggr = this.aggr || 0.6;
 
-    // 略提前量：瞄向目标稍前方（跨类型：飞机用 forwardVector，坦克用 heading 算前向）
-    const tgtFwd = (typeof target.forwardVector === 'function')
-      ? target.forwardVector()
-      : new THREE.Vector3(Math.sin(target.heading || 0), 0, Math.cos(target.heading || 0));
-    const lead = tgtFwd.multiplyScalar(Math.min(dist * 0.15, 20));
-    const aimPt = target.position.clone().add(lead);
-    const aimDir = aimPt.sub(plane.position).normalize();
-
-    // 低血规避：周期性侧滑（jink），让玩家更难追瞄
-    if (plane.health / plane.maxHealth < 0.4) {
-      this._jink = (this._jink || 0) + dt * 2.2;
-      const side = new THREE.Vector3().crossVectors(aimDir, new THREE.Vector3(0, 1, 0)).normalize();
-      aimDir.addScaledVector(side, Math.sin(this._jink) * 0.5).normalize();
+    if (isAirTarget) {
+      // —— 空战：保持原追踪逻辑（互相咬尾），俯冲循环只用于打地面坦克 ——
+      const desired = toT.clone().multiplyScalar(1 / dist);
+      const lead = target.forwardVector().multiplyScalar(Math.min(dist * 0.15, 20));
+      const aimDir = target.position.clone().add(lead).sub(plane.position).normalize();
+      if (plane.health / plane.maxHealth < 0.4) {   // 低血 jink 侧滑
+        this._jink = (this._jink || 0) + dt * 2.2;
+        const side = new THREE.Vector3().crossVectors(aimDir, new THREE.Vector3(0, 1, 0)).normalize();
+        aimDir.addScaledVector(side, Math.sin(this._jink) * 0.5).normalize();
+      }
+      plane.aimToward(aimDir, dt, aggr);
+      plane.throttle = dist > 70 ? 1 : 0.7;
+      this._tryFireGround(plane, target, aimDir, em, smokeBlind, obstacles, dist);
+      return;
     }
 
-    // 地形规避：低空时强制上仰（世界大战打地面目标时防坠机）
-    const groundClear = plane.position.y - terrainHeight(plane.position.x, plane.position.z);
-    if (groundClear < 5) { aimDir.y = Math.max(aimDir.y, 0.2 + (5 - groundClear) * 0.05); aimDir.normalize(); }   // 低空限制降到5：飞机能贴近地面扫射坦克
+    // ===== 对地攻击（战雷俯冲循环）：高空巡航 → 俯冲开火 → 低空拉起 → 回高空 → 再来 =====
+    const gy = terrainHeight(plane.position.x, plane.position.z);
+    const alt = plane.position.y - gy;
+    const flatDist = Math.hypot(toT.x, toT.z) || 1;
+    const dirFlat = new THREE.Vector3(toT.x / flatDist, 0, toT.z / flatDist);
+    const sideFlat = new THREE.Vector3(-dirFlat.z, 0, dirFlat.x).multiplyScalar(this._orbit);
+    // 目标提前量（地面坦克：前向速度×弹丸飞行时间）
+    const tgtFwd = new THREE.Vector3(Math.sin(target.heading || 0), 0, Math.cos(target.heading || 0));
+    const spd = Math.abs(target.lastThrottle || 0) * (target.maxSpeed || 10);
+    const flyT = dist / 350;
+    const aimPt = target.position.clone().addScaledVector(tgtFwd, spd * flyT);
+    let aimDir;
 
-    plane.aimToward(aimDir, dt, this.aggr || 0.6); // 敌机默认柔坡度便于玩家追瞄；AI 代打可用 aggr 拉满机动
-    plane.throttle = dist > 70 ? 1 : 0.7;
+    this._diveCd -= dt;
+    if (this.phase === 'dive') {
+      // 俯冲：直指目标（带提前量），全速俯冲，对齐即开火
+      aimDir = aimPt.clone().sub(plane.position).normalize();
+      plane.throttle = 1;
+      this._tryFireGround(plane, target, aimDir, em, smokeBlind, obstacles, dist);
+      // 拉起条件：相对高度 <45m 或已飞过目标头顶（俯冲过头改天再来一圈）
+      if (alt < 45 || (flatDist < 45 && toT.y > -5)) {
+        this.phase = 'climb';
+      }
+    } else if (this.phase === 'climb') {
+      // 拉起：陡爬 + 侧向脱离（不让防空火力顺着爬升线打）
+      aimDir = plane.forwardVector().clone();
+      aimDir.y = 0;
+      aimDir.addScaledVector(sideFlat, 0.45).normalize();
+      aimDir.y = 0.7;
+      aimDir.normalize();
+      plane.throttle = 1;
+      if (alt > 125) { this.phase = 'cruise'; this._diveCd = 1 + Math.random() * 2; this._orbit *= Math.random() < 0.3 ? -1 : 1; }
+    } else {
+      // 高空巡航：145m 高度带绕目标盘旋，等俯冲窗口
+      aimDir = dirFlat.clone().addScaledVector(sideFlat, 1.3).normalize();
+      aimDir.y = clamp((145 - alt) * 0.012, -0.3, 0.42);
+      aimDir.normalize();
+      plane.throttle = 0.85;
+      if (this._diveCd <= 0 && alt > 115 && flatDist < 300) this.phase = 'dive';
+    }
+      // 低空安全兜底（俯冲失误/地形突变）
+      if (alt < 20) { aimDir.y = Math.max(aimDir.y, 0.55); aimDir.normalize(); }
+      plane.aimToward(aimDir, dt, aggr);
+      // CCIP 投弹（巡航/俯冲中都可能）：落点贴上目标才投——炸弹正好套在坦克身上
+      this._maybeBomb(plane, target, em, dt);
+  }
 
-    // 对齐且在射程内开火（敌方更不准）；视线被楼/山挡住不打（隔楼泼机炮=纯浪费）
+  // —— AI CCIP 投弹：按真实弹道公式模拟"现在投"的落点，与目标水平距 <14m（核弹 25m）才放 ——
+  // 核弹（B-21 类）：库存≥3 且小概率决策，蘑菇云场面留给它。
+  _maybeBomb(plane, target, em, dt) {
+    if (!plane.maxBombs || plane.bombs <= 0 || !target) return;
+    this._bombT = (this._bombT || 0) - dt;
+    if (this._bombT > 0) return;
+    this._bombT = 0.2;   // 落点模拟每 0.2s 一次
+    const isNukeCarrier = plane.bombs >= 3 && plane.type === 'f35b';
+    const useNuke = isNukeCarrier && Math.random() < 0.02;
+    // 弹道模拟（与 tryDropBomb/tryDropNuke 同公式：初速=机速×1.2 前向 -5 垂直，重力同款）
+    const fwd = plane.forwardVector();
+    const g = useNuke ? 18 : CONFIG.plane.bomb.gravity;
+    const vel = fwd.clone().multiplyScalar(useNuke ? plane.speed * 0.8 : plane.speed * 1.2).add(new THREE.Vector3(0, useNuke ? -3 : -5, 0));
+    const pos = plane.position.clone().addScaledVector(fwd, -2).add(new THREE.Vector3(0, -1, 0));
+    const h = 0.06;
+    let t = 0, hit = false;
+    for (let i = 0; i < 300; i++) {   // 最多模拟 18s
+      vel.y -= g * h;
+      pos.x += vel.x * h; pos.y += vel.y * h; pos.z += vel.z * h;
+      t += h;
+      if (pos.y <= terrainHeight(pos.x, pos.z)) { hit = true; break; }
+    }
+    if (!hit || t < 0.3) return;   // 落不到地（天外）/刚出手就砸地（贴地乱投）
+    const miss = Math.hypot(pos.x - target.position.x, pos.z - target.position.z);
+    if (miss < (useNuke ? 25 : 14)) {
+      if (useNuke) plane.tryDropNuke(em);
+      else plane.tryDropBomb(em);
+    }
+  }
+
+  _tryFireGround(plane, target, aimDir, em, smokeBlind, obstacles, dist) {
     const fwd = plane.forwardVector();
     const isEnemy = plane.team === 'red';
     const dotThresh = isEnemy ? 0.996 : 0.99;
