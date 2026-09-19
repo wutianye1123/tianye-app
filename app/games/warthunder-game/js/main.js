@@ -3689,9 +3689,11 @@ function losBlocked(a, b, obstacles) {
     const lineY = a.y + (b.y - a.y) * t;   // 线段在障碍处的近似高度
     if ((ob.height ?? 30) > lineY - 1) return true;   // 障碍顶高于弹道 → 挡
   }
-  for (let i = 1; i <= 4; i++) {   // 山脊挡视线：沿线 4 个地形采样点
-    const t = i / 5;
-    if (a.y + (b.y - a.y) * t < terrainHeight(a.x + dx * t, a.z + dz * t) + 1.5) return true;
+  // 山脊挡视线：沿线 3 个地形采样点。阈值 -0.8（地形要显著高于连线才算挡）——
+  // 坦克炮线离地仅 1.2m，若用"地形+1.5"的余量，正弦起伏的地形处处"挡"，AI 全体哑火。
+  for (let i = 1; i <= 3; i++) {
+    const t = i / 4;
+    if (a.y + (b.y - a.y) * t < terrainHeight(a.x + dx * t, a.z + dz * t) - 0.8) return true;
   }
   return false;
 }
