@@ -3356,21 +3356,44 @@ class PlaneAI {
 // ===== js/world/Scene.js =====
 
 // 创建灯光、雾、天空背景，挂到给定 scene 上。
-function setupEnvironment(scene, mode, renderer) {
-  // 天空色与雾
-  const skyColor = mode === 'plane' ? 0x9ec9e8 : 0xbfd3c4;
-  scene.background = new THREE.Color(skyColor);
-  scene.fog = new THREE.Fog(skyColor, 120, mode === 'plane' ? 700 : 450);
-
-  // 渐变天穹（天顶更深）+ 散落云团
-  const top = mode === 'plane' ? 0x3f74ad : 0x6fa0c8;
+function setupEnvironment(scene, mode, renderer, isNight = false) {
+  // —— 昼 / 夜两套天空与雾 ——
+  let skyColor, top;
+  if (isNight) {
+    skyColor = 0x0b1526; top = 0x020610;
+    scene.background = new THREE.Color(0x05080f);
+    scene.fog = new THREE.Fog(0x070d18, 65, mode === 'plane' ? 520 : 320);   // 夜里雾近而浓：远处溶进黑暗
+    renderer.toneMappingExposure = 1.35;   // 夜间提曝光保可见度（ACES 会压暗）
+  } else {
+    skyColor = mode === 'plane' ? 0x9ec9e8 : 0xbfd3c4;
+    scene.background = new THREE.Color(skyColor);
+    scene.fog = new THREE.Fog(skyColor, 120, mode === 'plane' ? 700 : 450);
+    top = mode === 'plane' ? 0x3f74ad : 0x6fa0c8;
+  }
   const dome = new THREE.Mesh(
     new THREE.SphereGeometry(1600, 24, 16),
     new THREE.MeshBasicMaterial({ map: makeSkyTexture(top, skyColor), side: THREE.BackSide, fog: false, depthWrite: false })
   );
   scene.add(dome);
-  const cloudMat = new THREE.SpriteMaterial({ map: makeCloudTexture(), transparent: true, opacity: 0.85, fog: false, depthWrite: false });
-  const cloudN = mode === 'plane' ? 28 : 16;
+  if (isNight) {
+    // —— 星空（600 颗，固定像素大小，无视雾）+ 月亮圆盘（Bloom 会让它晕出月光）——
+    const N = 600, sp = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      const a = Math.random() * Math.PI * 2, el = 0.12 + Math.random() * 1.35;   // 仰角 7°~85°
+      const r = 1100 + Math.random() * 300;
+      sp[i * 3] = Math.cos(a) * Math.cos(el) * r;
+      sp[i * 3 + 1] = Math.sin(el) * r;
+      sp[i * 3 + 2] = Math.sin(a) * Math.cos(el) * r;
+    }
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+    scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xcfe0ff, size: 2.2, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.9 })));
+    const moon = new THREE.Mesh(new THREE.SphereGeometry(16, 16, 12), new THREE.MeshBasicMaterial({ color: 0xe8eeff, fog: false }));
+    moon.position.set(420, 880, 260);
+    scene.add(moon);
+  }
+  const cloudMat = new THREE.SpriteMaterial({ map: makeCloudTexture(), transparent: true, opacity: isNight ? 0.25 : 0.85, fog: false, depthWrite: false });
+  const cloudN = mode === 'plane' ? (isNight ? 14 : 28) : (isNight ? 8 : 16);
   for (let i = 0; i < cloudN; i++) {
     const s = new THREE.Sprite(cloudMat);
     const r = 120 + Math.random() * (mode === 'plane' ? 650 : 250);
@@ -3380,12 +3403,12 @@ function setupEnvironment(scene, mode, renderer) {
     scene.add(s);
   }
 
-  // 环境光（填充阴影）
-  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  // 环境光（填充阴影）；夜间压到冷蓝微光
+  scene.add(new THREE.AmbientLight(isNight ? 0x30405a : 0xffffff, isNight ? 0.3 : 0.55));
 
-  // 太阳（方向光），投射阴影。黄金时刻：低角度暖阳+拉长阴影（战雷的成片光感）
-  const sun = new THREE.DirectionalLight(0xffd9a0, 1.3);
-  sun.position.set(140, 58, 90);
+  // 太阳/月光（方向光），投射阴影。昼：黄金时刻低角度暖阳+长影；夜：高角度冷月微光
+  const sun = new THREE.DirectionalLight(isNight ? 0x8fb0e8 : 0xffd9a0, isNight ? 0.4 : 1.3);
+  sun.position.set(isNight ? 105 : 140, isNight ? 220 : 58, isNight ? 65 : 90);   // 夜：同方向近置，保阴影视景覆盖
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);   // 4096 在集成显卡上代价过高；2048 在 120m 视景内 texel≈12cm，肉眼难辨
   sun.shadow.camera.near = 10;
@@ -3413,13 +3436,13 @@ function setupEnvironment(scene, mode, renderer) {
     ));
     const envGround = new THREE.Mesh(
       new THREE.CircleGeometry(40, 16),
-      new THREE.MeshBasicMaterial({ color: 0x5a5648 })
+      new THREE.MeshBasicMaterial({ color: isNight ? 0x0c121e : 0x5a5648 })
     );
     envGround.rotation.x = -Math.PI / 2; envGround.position.y = -2;
     envScene.add(envGround);
     const sunBall = new THREE.Mesh(
       new THREE.SphereGeometry(3, 8, 8),
-      new THREE.MeshBasicMaterial({ color: 0xfff6dd })
+      new THREE.MeshBasicMaterial({ color: isNight ? 0x9fb4d8 : 0xfff6dd })   // 夜：月色冷光斑（金属反射不亮得像白天）
     );
     sunBall.position.set(30, 13, 20);   // 与低角度太阳方向一致（金属反射高光位匹配）
     envScene.add(sunBall);
@@ -3427,17 +3450,17 @@ function setupEnvironment(scene, mode, renderer) {
     pmrem.dispose();
   } catch (e) { /* 环境反射失败不影响游戏 */ }
 
-  // 太阳光晕（视线朝太阳方向的柔和亮斑）
+  // 太阳/月光晕（视线朝光源方向的柔和亮斑）
   const flare = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: makeCloudTexture(), color: 0xfff3cf, transparent: true, opacity: 0.65,
+    map: makeCloudTexture(), color: isNight ? 0xcfe0ff : 0xfff3cf, transparent: true, opacity: isNight ? 0.4 : 0.65,
     blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
   }));
-  flare.scale.set(180, 180, 1);
-  flare.position.set(1300, 540, 838);   // 与低角度太阳方向一致
+  flare.scale.set(isNight ? 110 : 180, isNight ? 110 : 180, 1);
+  flare.position.set(isNight ? 1150 : 1300, isNight ? 960 : 540, isNight ? 712 : 838);   // 与光源方向一致
   scene.add(flare);
 
   // 半球光让天空与地面色调更自然
-  scene.add(new THREE.HemisphereLight(skyColor, 0x6b5a40, 0.42));   // 地面反光暖化（黄金时刻）
+  scene.add(new THREE.HemisphereLight(skyColor, isNight ? 0x0a0e14 : 0x6b5a40, isNight ? 0.32 : 0.42));   // 夜：冷蓝月穹/黑地；昼：地面反光暖化
 }
 
 
@@ -3467,7 +3490,7 @@ function createTerrain(scene, mode, mapId) {
   if (theme.height != null) setTerrainScale(theme.height);   // 按地图调整起伏
   if (mode === 'tank') {                                     // 仅陆战按地图覆盖天空/雾（空战保留蓝色天空）
     scene.background = new THREE.Color(theme.bg);
-    scene.fog = new THREE.Fog(theme.fog, 120, 450);
+    scene.fog = new THREE.Fog(theme.fog, theme.night ? 60 : 120, theme.night ? 300 : 450);
   }
 
   // 地面（细分高度场 + 顶点色：按地图调色板，低处→高处渐变）
@@ -3770,6 +3793,7 @@ class Game {
     this.endless = endless;
     this.objective = mode === 'tank' ? objective : 'battle';   // 'battle'(歼灭) | 'capture'(占领，仅陆战)
     this.mapId = mode === 'tank' ? mapId : 'open';             // 地图主题（仅陆战）
+    this._isNight = !!(MAPS.find((m) => m.id === this.mapId) || {}).night;   // 夜战：月光+星空+车头灯
     this.worldwar = worldwar;                                  // 世界大战：混合作战（坦克+飞机同场）
     this.ownedTanks = ownedTanks;                              // 已拥有的坦克型号（选载具面板用）
     this.ownedPlanes = ownedPlanes;                            // 已拥有的飞机型号
@@ -3793,7 +3817,14 @@ class Game {
     this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.5, 3000);
     this.camera.layers.enable(2);   // 层2=燃烧残骸(回放相机不开,避免黑残骸挡克隆车透视)
 
-    setupEnvironment(this.scene, mode, this.renderer);
+    setupEnvironment(this.scene, mode, this.renderer, this._isNight && mode === 'tank');
+    // 夜战车头灯：一盏 SpotLight 照玩家车前方（AI 不给灯——黑暗里找灯打也是夜战玩法）
+    if (this._isNight && mode === 'tank') {
+      this.headlight = new THREE.SpotLight(0xffeec8, 320, 60, 0.52, 0.5, 1.1);
+      this.headlightTarget = new THREE.Object3D();
+      this.scene.add(this.headlight, this.headlightTarget);
+      this.headlight.target = this.headlightTarget;
+    }
 
     this.input = new Input(canvas);
     // 两种模式都：点击画面进入指针锁定，光标不会飞出窗口
@@ -4586,6 +4617,16 @@ class Game {
     if (this.paused) { this.postfx.render(this.scene, this.camera); return; }
     if (this.state === 'playing') this.matchT += dt;
     if (this.mode === 'tank' && this.player && this.player.alive) {
+      // 夜战车头灯同步：灯位=车头前上方，照向车前 30m（跟车头不跟炮塔——车灯装车体上）
+      if (this.headlight) {
+        const on = this.player.alive;
+        this.headlight.visible = on;
+        if (on) {
+          const fx = Math.sin(this.player.heading), fz = Math.cos(this.player.heading);
+          this.headlight.position.set(this.player.position.x + fx * 2.2, this.player.position.y + 2.5, this.player.position.z + fz * 2.2);
+          this.headlightTarget.position.set(this.player.position.x + fx * 30, this.player.position.y + 0.5, this.player.position.z + fz * 30);
+        }
+      }
       // 十字准星 = 炮膛射线在世界上真实落点的投影（炮口+炮管方向 ray 命中敌车/障碍/地形）。
       // 原先投影"80m 定点"：相机在炮管上方 4.5m，近距视差 ~2°，准星贴脸对准也打低穿地。
       // 现在准星=当前弹道真实落点——贴上去就命中；炮塔 slew 未到位时准星真实滞后（战雷街机导演模式）。
@@ -5594,6 +5635,7 @@ class Game {
     this._clearCapture();
     this.em.clear();
     if (this.terrain) { this.scene.remove(this.terrain.group); if (this.terrain.grass) this.terrain.grass.dispose(); }
+    if (this.headlight) { this.scene.remove(this.headlight, this.headlightTarget); this.headlight.dispose(); this.headlight = null; }
     if (this.postfx) this.postfx.dispose();
     this.renderer.dispose();
   }
