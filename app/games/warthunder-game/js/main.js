@@ -4929,6 +4929,18 @@ class Game {
       this.em.addTank(e);
       this.allies.push(e);
     } else {
+      // 我方空中单位：25% 概率出直升机（HeliAI 驾驶），其余喷气机
+      if (Math.random() < 0.25) {
+        const heliTypes = PLANE_TYPES.filter((x) => x.heli);
+        const e = new Heli({ side: 'ally', team: 'blue', color: 0x4a6a52, type: heliTypes[Math.floor(Math.random() * heliTypes.length)].id });
+        e.displayName = this._nextName();
+        e.group.position.set(randRange(-30, 30), CONFIG.plane.spawnAltitude + randRange(-5, 5), randRange(-30, 30));
+        e.ai = new HeliAI(e);
+        this.em.addPlane(e);
+        if (this.worldwar) e.worldSize = CONFIG.tank.worldSize;
+        this.allies.push(e);
+        return;
+      }
       const e = new Plane({ side: 'ally', team: 'blue', color: 0x5a8eb8, type: randomPlaneType().id });
       e.displayName = this._nextName();
       e.group.position.set(randRange(-30, 30), CONFIG.plane.spawnAltitude + randRange(-8, 8), randRange(-30, 30));
@@ -5533,7 +5545,9 @@ class Game {
         let t = this._nearest(a.position, redAlive, this._markedTarget);   // 标记目标全队集火
         const zoneT = this._zoneTargetFor(a.position, 'blue');
         if (zoneT && (!t || a.position.distanceTo(t.position) > 75)) t = zoneT;
-        a.ai.update(dt, { target: t, entityManager: this.em, obstacles, smokes: this.em.smokes });
+        a.ai.update(dt, a.isHeli
+          ? { target: t, threats: redAlive, entityManager: this.em, obstacles, enemies: this.enemies }   // 友直升机：威胁=红方
+          : { target: t, entityManager: this.em, obstacles, smokes: this.em.smokes });
       }
 
       this.em.update(dt);
