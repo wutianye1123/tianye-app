@@ -3517,6 +3517,39 @@ class Heli {
 
 // 敌方飞机 AI：复用与玩家相同的"飞行教官"接口，把目标方向喂给 aimToward。
 // 追到一定距离后收油门避免越过，对齐且在射程内时开火。
+// ===== 雨幕：跟相机的局部雨线（LineSegments 顶点下落循环），900 滴便宜够密 =====
+class RainFX {
+  constructor(scene) {
+    const N = 900;
+    this.N = N;
+    const pos = new Float32Array(N * 2 * 3);
+    this.speeds = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const x = randRange(-42, 42), y = randRange(0, 46), z = randRange(-42, 42);
+      pos[i * 6] = x; pos[i * 6 + 1] = y; pos[i * 6 + 2] = z;
+      pos[i * 6 + 3] = x + 0.08; pos[i * 6 + 4] = y - 1.7; pos[i * 6 + 5] = z;   // 雨线：短斜线
+      this.speeds[i] = randRange(46, 62);
+    }
+    const geo = new THREE.BufferGeometry();
+    this.attr = new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute('position', this.attr);
+    this.mesh = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xaebfd0, transparent: true, opacity: 0.34 }));
+    this.mesh.frustumCulled = false;
+    scene.add(this.mesh);
+  }
+  update(dt, camPos) {
+    const a = this.attr.array;
+    this.mesh.position.copy(camPos);
+    for (let i = 0; i < this.N; i++) {
+      const dy = this.speeds[i] * dt;
+      a[i * 6 + 1] -= dy; a[i * 6 + 4] -= dy;
+      if (a[i * 6 + 1] < -2) { const h = 46; a[i * 6 + 1] += h; a[i * 6 + 4] += h; }   // 落地循环回顶
+    }
+    this.attr.needsUpdate = true;
+  }
+  dispose() { this.mesh.geometry.dispose(); this.mesh.material.dispose(); this.mesh.removeFromParent(); }
+}
+
 // ===== js/ai/PlaneAI.js =====
 
 // 敌方飞机 AI：复用与玩家相同的"飞行教官"接口，把目标方向喂给 aimToward。
@@ -3580,14 +3613,19 @@ class PlaneAI {
 // ===== js/world/Scene.js =====
 
 // 创建灯光、雾、天空背景，挂到给定 scene 上。
-function setupEnvironment(scene, mode, renderer, isNight = false) {
-  // —— 昼 / 夜两套天空与雾 ——
+function setupEnvironment(scene, mode, renderer, isNight = false, isRain = false) {
+  // —— 昼 / 夜 / 雨三套天空与雾 ——
   let skyColor, top;
   if (isNight) {
     skyColor = 0x0b1526; top = 0x020610;
     scene.background = new THREE.Color(0x05080f);
     scene.fog = new THREE.Fog(0x070d18, 65, mode === 'plane' ? 520 : 320);   // 夜里雾近而浓：远处溶进黑暗
     renderer.toneMappingExposure = 1.35;   // 夜间提曝光保可见度（ACES 会压暗）
+  } else if (isRain) {
+    skyColor = 0x8d97a1; top = 0x5d6772;
+    scene.background = new THREE.Color(0x99a3ad);
+    scene.fog = new THREE.Fog(0x8a949e, 70, mode === 'plane' ? 560 : 340);   // 雨天灰雾压低能见度
+    renderer.toneMappingExposure = 1.1;
   } else {
     skyColor = mode === 'plane' ? 0x9ec9e8 : 0xbfd3c4;
     scene.background = new THREE.Color(skyColor);
@@ -3627,12 +3665,12 @@ function setupEnvironment(scene, mode, renderer, isNight = false) {
     scene.add(s);
   }
 
-  // 环境光（填充阴影）；夜间压到冷蓝微光
-  scene.add(new THREE.AmbientLight(isNight ? 0x30405a : 0xffffff, isNight ? 0.3 : 0.55));
+  // 环境光（填充阴影）；夜间压到冷蓝微光，雨天灰亮
+  scene.add(new THREE.AmbientLight(isNight ? 0x30405a : (isRain ? 0x9aa4ae : 0xffffff), isNight ? 0.3 : (isRain ? 0.62 : 0.55)));
 
-  // 太阳/月光（方向光），投射阴影。昼：黄金时刻低角度暖阳+长影；夜：高角度冷月微光
-  const sun = new THREE.DirectionalLight(isNight ? 0x8fb0e8 : 0xffd9a0, isNight ? 0.4 : 1.3);
-  sun.position.set(isNight ? 105 : 140, isNight ? 220 : 58, isNight ? 65 : 90);   // 夜：同方向近置，保阴影视景覆盖
+  // 太阳/月光（方向光），投射阴影。昼：黄金时刻低角度暖阳+长影；夜：高角度冷月微光；雨：高角度灰白弱光
+  const sun = new THREE.DirectionalLight(isNight ? 0x8fb0e8 : (isRain ? 0xaab4be : 0xffd9a0), isNight ? 0.4 : (isRain ? 0.55 : 1.3));
+  sun.position.set(isNight ? 105 : (isRain ? 60 : 140), isNight ? 220 : (isRain ? 300 : 58), isNight ? 65 : (isRain ? 90 : 90));
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);   // 4096 在集成显卡上代价过高；2048 在 120m 视景内 texel≈12cm，肉眼难辨
   sun.shadow.camera.near = 10;
@@ -3674,17 +3712,19 @@ function setupEnvironment(scene, mode, renderer, isNight = false) {
     pmrem.dispose();
   } catch (e) { /* 环境反射失败不影响游戏 */ }
 
-  // 太阳/月光晕（视线朝光源方向的柔和亮斑）
-  const flare = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: makeCloudTexture(), color: isNight ? 0xcfe0ff : 0xfff3cf, transparent: true, opacity: isNight ? 0.4 : 0.65,
-    blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
-  }));
-  flare.scale.set(isNight ? 110 : 180, isNight ? 110 : 180, 1);
-  flare.position.set(isNight ? 1150 : 1300, isNight ? 960 : 540, isNight ? 712 : 838);   // 与光源方向一致
-  scene.add(flare);
+  // 太阳/月光晕（雨天阴天无日晕）
+  if (!isRain) {
+    const flare = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: makeCloudTexture(), color: isNight ? 0xcfe0ff : 0xfff3cf, transparent: true, opacity: isNight ? 0.4 : 0.65,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    }));
+    flare.scale.set(isNight ? 110 : 180, isNight ? 110 : 180, 1);
+    flare.position.set(isNight ? 1150 : 1300, isNight ? 960 : 540, isNight ? 712 : 838);   // 与光源方向一致
+    scene.add(flare);
+  }
 
   // 半球光让天空与地面色调更自然
-  scene.add(new THREE.HemisphereLight(skyColor, isNight ? 0x0a0e14 : 0x6b5a40, isNight ? 0.32 : 0.42));   // 夜：冷蓝月穹/黑地；昼：地面反光暖化
+  scene.add(new THREE.HemisphereLight(skyColor, isNight ? 0x0a0e14 : (isRain ? 0x3a4048 : 0x6b5a40), isNight ? 0.32 : (isRain ? 0.5 : 0.42)));   // 夜：冷蓝月穹/黑地；雨：灰天暗地；昼：地面反光暖化
 }
 
 
@@ -3702,6 +3742,7 @@ const MAPS = [
   { id:'factory', name:'工业厂区', urban:'shed', towns:0, density:1.0, build:0x56565c, fog:0x6f6f74, bg:0x808086, gLow:[0.26,0.26,0.28], gHigh:[0.37,0.37,0.40], leaf:0x3a4030, wall:0x4a4a4e, height:0.5, wallColor:0xaaaaaa },
   { id:'snow',    name:'雪原',     urban:false, towns:1, density:1.1, fog:0xd6dfe6, bg:0xe8eef2, gLow:[0.80,0.84,0.88], gHigh:[0.92,0.94,0.97], leaf:0x3a5a40, wall:0x6a6a6a, height:1.1, wallColor:0xc0d0e0 },
   { id:'night',   name:'夜战',     urban:false, towns:1, density:0.9, fog:0x0a1020, bg:0x05080f, gLow:[0.05,0.06,0.09], gHigh:[0.09,0.12,0.17], leaf:0x081408, wall:0x101820, height:0.8, wallColor:0x30405a, night:true },
+  { id:'rain',    name:'雨天',     urban:false, towns:1, density:1.0, fog:0x8a949e, bg:0x99a3ad, gLow:[0.22,0.26,0.24], gHigh:[0.34,0.38,0.34], leaf:0x2a4228, wall:0x555a50, height:0.9, wallColor:0x7a8a99, rain:true },
 ];
 
 // 创建地面 + 障碍物 + 边界，返回 { group, obstacles, half }。mapId 决定地形主题。
@@ -3733,7 +3774,11 @@ function createTerrain(scene, mode, mapId) {
   gpos.needsUpdate = true;
   groundGeo.setAttribute('color', new THREE.Float32BufferAttribute(gcol, 3));
   groundGeo.computeVertexNormals();
-  const groundMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, bumpMap: sharedBump(64, 64), bumpScale: 0.35 });
+  const dirtBump = makeNoiseTexture(); dirtBump.repeat.set(1, 1); dirtBump.needsUpdate = true;
+  const groundMat = new THREE.MeshStandardMaterial({
+    vertexColors: true, roughness: 1, bumpMap: sharedBump(64, 64), bumpScale: 0.35,
+    ...(theme.rain ? { roughness: 0.38, metalness: 0.22 } : {}),   // 雨天湿面：低粗糙反光（环境贴图映出天空）
+  });
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.receiveShadow = true;
   group.add(ground);
@@ -4034,6 +4079,7 @@ class Game {
     this.objective = mode === 'tank' ? objective : 'battle';   // 'battle'(歼灭) | 'capture'(占领，仅陆战)
     this.mapId = mode === 'tank' ? mapId : 'open';             // 地图主题（仅陆战）
     this._isNight = !!(MAPS.find((m) => m.id === this.mapId) || {}).night;   // 夜战：月光+星空+车头灯
+    this._isRain = !!(MAPS.find((m) => m.id === this.mapId) || {}).rain;     // 雨天：雨幕+湿滑反光
     this.worldwar = worldwar;                                  // 世界大战：混合作战（坦克+飞机同场）
     this.ownedTanks = ownedTanks;                              // 已拥有的坦克型号（选载具面板用）
     this.ownedPlanes = ownedPlanes;                            // 已拥有的飞机型号
@@ -4057,7 +4103,8 @@ class Game {
     this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.5, 3000);
     this.camera.layers.enable(2);   // 层2=燃烧残骸(回放相机不开,避免黑残骸挡克隆车透视)
 
-    setupEnvironment(this.scene, mode, this.renderer, this._isNight && mode === 'tank');
+    setupEnvironment(this.scene, mode, this.renderer, this._isNight && mode === 'tank', this._isRain && mode === 'tank');
+    if (this._isRain && mode === 'tank') this.rain = new RainFX(this.scene);   // 雨幕（跟相机）
     // 夜战车头灯：一盏 SpotLight 照玩家车前方（AI 不给灯——黑暗里找灯打也是夜战玩法）
     if (this._isNight && mode === 'tank') {
       this.headlight = new THREE.SpotLight(0xffeec8, 320, 60, 0.52, 0.5, 1.1);
@@ -5048,6 +5095,7 @@ class Game {
 
       this.em.update(dt);
       if (this.terrain?.grass) this.terrain.grass.update(this.camera.position.x, this.camera.position.z);
+      if (this.rain) this.rain.update(dt, this.camera.position);   // 雨幕跟随相机
       this._updateTreeFalls(dt);   // 撞树倒伏：检测坦克碾压 + 倒下动画
       if (this.mode === 'tank') this._resolveObstacles();
 
@@ -5974,6 +6022,7 @@ class Game {
     this.em.clear();
     if (this.terrain) { this.scene.remove(this.terrain.group); if (this.terrain.grass) this.terrain.grass.dispose(); }
     this._stopPilot && this._stopPilot();   // AI 代打参数还原
+    if (this.rain) { this.rain.dispose(); this.rain = null; }
     if (this.headlight) { this.scene.remove(this.headlight, this.headlightTarget); this.headlight.dispose(); this.headlight = null; }
     if (this.postfx) this.postfx.dispose();
     this.renderer.dispose();
