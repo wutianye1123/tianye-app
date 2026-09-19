@@ -2609,7 +2609,8 @@ class Tank {
         const trav = hitPoint ? hitPoint.distanceTo(projectile.launchPos) : 0;
         const penEff = projectile.pen * Math.max(0.4, 1 - (sh.penDrop || 0) * Math.min(1, trav / 1000));
         // 等效装甲：armor 值=法线入射等效（倾角摊薄已含），斜入射增量按 cos(倾角)/cos(总入射)（cos 0.18 封底防除零）
-        const eff = plate * Math.cos(sRad) / Math.max(0.18, cosTotal);
+        // effCap：该弹种的等效装甲上限（直升机机炮等"必穿"武器用——斜入射等效膨胀不再挡弹）
+        const eff = Math.min(sh.effCap ?? Infinity, plate * Math.cos(sRad) / Math.max(0.18, cosTotal));
         if (penEff < eff) {
           // 未击穿：榴弹改走「范围爆炸」(见 checkCollisions 的 needSplash 分支,波及附近敌坦克)，
           // 这里不再单点扣 25%——范围伤害里命中者自己按中心满衰减拿。
@@ -3543,7 +3544,7 @@ class Heli {
       position: muzzle, direction: dir, speed: 320, damage: 16 * (planeTypeById(this.type).dmg || 1),
       owner: this, ownerTeam: this.team, gravity: 0, life: 2.5,   // 直线弹道（无下坠）：所见即所打
       color: 0xffe08a, size: 0.3, pen: 700,
-      shellDef: { id: 'cannon', name: '航炮弹', penMul: 1, dmgMul: 1, bounceDeg: 90, noBounce: true },   // 穿深拉满+永不跳弹：俯冲扫射的入射角合成会高估(真实近垂直被判>85°),直升机炮不参与跳弹
+      shellDef: { id: 'cannon', name: '航炮弹', penMul: 1, dmgMul: 1, bounceDeg: 90, noBounce: true, effCap: 500 },   // 穿深拉满+永不跳弹+等效装甲封顶500:俯冲大入射角的等效膨胀(cos下限0.18能算出5倍真甲)不再挡弹
     }));
     this.reloadTimer = this.fireCooldown;
     return true;
