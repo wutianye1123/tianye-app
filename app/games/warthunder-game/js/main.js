@@ -1504,55 +1504,55 @@ class Wreck {
   dispose() { this.mesh.traverse((c) => { if (c.geometry) c.geometry.dispose(); if (c.material) { Array.isArray(c.material) ? c.material.forEach((m) => m.dispose()) : c.material.dispose(); } }); }
 }
 
-// 烟雾弹（拖行式）：发射后烟源挂在坦克上，随车移动持续在身后生成烟团，
-// 拖出一条 12s 的烟带掩护机动（战雷移动烟幕打法）。烟团注册 em.smokes 供 AI 视线判定。
-const _puffGeo = new THREE.SphereGeometry(3.0, 10, 10);   // 共享几何(数十团烟不重复分配)
-class SmokePuff {
-  constructor(position, em) {
-    this.mesh = new THREE.Mesh(_puffGeo, new THREE.MeshBasicMaterial({ color: 0xcfd4d8, transparent: true, opacity: 0.9, depthWrite: false }));
-    this.mesh.position.copy(position); this.mesh.position.y += 1.5;
-    this.life = 12; this.maxLife = 12; this.alive = true;
-    this.smokeRec = { pos: this.mesh.position, r: 3.8 };
-    if (em) { em.smokes.push(this.smokeRec); this._em = em; }
-  }
-  update(dt) {
-    this.life -= dt;
-    if (this.life <= 0) {
-      this.alive = false;
-      if (this._em) { const i = this._em.smokes.indexOf(this.smokeRec); if (i >= 0) this._em.smokes.splice(i, 1); }
-      return;
-    }
-    const t = 1 - this.life / this.maxLife;
-    this.mesh.scale.setScalar(0.75 + t * 0.5);           // 缓慢膨胀
-    this.mesh.material.opacity = 0.9 * (this.life < 2 ? this.life / 2 : 1);   // 末 2s 淡出
-  }
-  dispose() { this.mesh.material.dispose(); }   // 几何共享不释放
-}
-class SmokeTrail {
+// —— 烟幕墙（战雷式）：G 键释放瞬间在车侧横向铺开一条 ~76m 宽的连续浓烟墙 ——
+// 25 个静态烟源从中间向两侧展开（0.9s 内膨胀成 6-8m 宽扁大烟，互相重叠成整条墙），
+// 12s 后整体淡出。整条墙注册为一个 em.smokes 大球，AI 视线被遮不开火。
+const _puffGeo = new THREE.SphereGeometry(1.0, 10, 8);   // 共享单位球几何，靠 scale 缩放
+class SmokeWall {
   constructor(tank, em) {
-    this.tank = tank; this.em = em;
-    this.life = 12; this.alive = true;   // 拖烟总时长
-    this.spawnT = 0;
-    this.mesh = null;   // 特效接口需要(烟团是独立子特效)
+    this.em = em; this.life = 12; this.alive = true;
+    const h = tank.heading;
+    const rx = Math.cos(h), rz = -Math.sin(h);                       // 横向（墙的展开方向）
+    const cx = tank.position.x - Math.sin(h) * 4, cz = tank.position.z - Math.cos(h) * 4;   // 车尾 4m 处起墙
+    const tex = makeNoiseTexture();
+    this.group = new THREE.Group();
+    this.puffs = [];
+    const N = 25, half = 38;
+    for (let i = 0; i < N; i++) {
+      const s = -half + (i / (N - 1)) * half * 2 + randRange(-1.2, 1.2);
+      const px = cx + rx * s, pz = cz + rz * s;
+      const m = new THREE.Mesh(_puffGeo, new THREE.MeshBasicMaterial({ color: 0xd6dad4, transparent: true, opacity: 0.95, depthWrite: false, map: tex }));
+      m.position.set(px, terrainHeight(px, pz) + randRange(1.1, 2.0), pz);
+      m.scale.setScalar(0.3);
+      m.renderOrder = 3;
+      this.group.add(m);
+      this.puffs.push({ m, w: randRange(6.5, 8.5), hh: randRange(2.6, 3.6), d: randRange(3.4, 4.6), delay: (Math.abs(s) / half) * 0.55 + randRange(0, 0.15), age: 0 });   // delay：中间先起、两侧后铺
+    }
+    this.mesh = this.group;
+    this.rec = { pos: new THREE.Vector3(cx, terrainHeight(cx, cz) + 2, cz), r: half + 8 };   // 整条墙一个烟幕判定球
+    em.smokes.push(this.rec);
   }
   update(dt) {
     this.life -= dt;
-    if (this.life <= 0 || !this.tank || !this.tank.alive) { this.alive = false; return; }
-    this.spawnT -= dt;
-    if (this.spawnT <= 0) {   // 每 0.3s 在车尾两侧生成一团(车速15m/s→间距~4.5m,连成烟带)
-      const h = this.tank.heading;
-      const back = new THREE.Vector3(-Math.sin(h), 0, -Math.cos(h));
-      const right = new THREE.Vector3(Math.cos(h), 0, -Math.sin(h));
-      const side = Math.random() < 0.5 ? -1 : 1;
-      const p = this.tank.position.clone()
-        .addScaledVector(back, 4)
-        .addScaledVector(right, side * randRange(0.5, 2.5));   // 左右交错,烟带更宽
-      p.y = terrainHeight(p.x, p.z);
-      this.em.addEffect(new SmokePuff(p, this.em));
-      this.spawnT = 0.3;
+    if (this.life <= 0) { this.alive = false; return; }
+    const fade = Math.min(1, this.life / 2.5);   // 末段 2.5s 整体淡出
+    for (const p of this.puffs) {
+      if (p.delay > 0) { p.delay -= dt; continue; }
+      p.age += dt;
+      const g = Math.min(1, p.age / 0.9);
+      const e = 1 - (1 - g) * (1 - g);   // ease-out 膨胀
+      p.m.scale.set(p.w * (0.25 + 0.75 * e), p.hh * (0.25 + 0.75 * e), p.d * (0.25 + 0.75 * e));
+      p.m.position.y += 0.15 * dt;   // 缓慢上浮
+      p.m.position.x += Math.sin(p.age * 1.3 + p.w) * 0.18 * dt;   // 轻微横摆（活烟感）
+      p.m.material.opacity = 0.92 * fade;
     }
   }
-  dispose() {}
+  dispose() {
+    const i = this.em.smokes.indexOf(this.rec);
+    if (i >= 0) this.em.smokes.splice(i, 1);
+    for (const p of this.puffs) p.m.material.dispose();
+    this.group.removeFromParent();
+  }
 }
 
 // ===== js/core/EntityManager.js =====
@@ -3826,9 +3826,9 @@ class Game {
     if (this._smokeAmmo <= 0) { this.hud.addFeed('💨 烟雾弹装填中…', 'info'); return; }
     if (this._smokeCd > 0) return;
     this._smokeAmmo--; this._smokeCd = 2;
-    // 拖行烟幕:烟源挂车,开动时身后拖出一条烟带(原地放也会在车周堆烟)
-    this.em.addEffect(new SmokeTrail(t, this.em));
-    this.hud.addFeed('💨 烟雾弹已释放 · 剩余 ' + this._smokeAmmo, 'info');
+    // 战雷式烟幕墙：车侧瞬间横向铺开一条 ~76m 宽连续浓烟墙（AI 视线被遮不开火）
+    this.em.addEffect(new SmokeWall(t, this.em));
+    this.hud.addFeed('💨 烟幕墙已展开 · 剩余 ' + this._smokeAmmo, 'info');
   }
 
   // 侦察标记（V 键）：准星所指敌人 → 全队 AI 集火 10s（战雷侦察机制）
