@@ -1535,20 +1535,22 @@ class EntityManager {
 // team: 'blue'(玩家/队友) | 'red'(敌方)。按队伍区分伤害/装填/散布。
 
 // 每种型号的几何规格：hull[宽,高,长]、炮塔样式与尺寸、炮管[半径,长]、负重轮数、是否有炮口制退器。
+// susp 悬挂样式：christie=大轮克里斯蒂/vvss=谢尔曼转向架/interleave=交错轮/std=普通/road=轮式(无履带)。
+// skirt 侧裙 / smoke 烟幕弹发射器 / fume 炮管抽烟机 / twoPiece 两段炮管 / hullMg 车体机枪 / radar 防空雷达。
 const GEOM = {
-  medium:  { hull:[3.4, 1.0, 5.4], turret:'dome',     turretSize:[2.3, 1.0 ], barrel:[0.17, 3.6], wheels:5, brake:false, slope:0.85 }, // T-34-85
-  m4:      { hull:[3.2, 1.5, 5.2], turret:'dome',     turretSize:[2.2, 1.1 ], barrel:[0.16, 3.0], wheels:6, brake:false, slope:0.45 }, // M4A3 谢尔曼（高）
-  panzer2: { hull:[2.6, 0.95,4.0], turret:'box',      turretSize:[1.6, 0.7 ], barrel:[0.08, 1.8], wheels:5, brake:false, slope:0.40 }, // II 号（小）
-  light:   { hull:[2.9, 1.0, 4.6], turret:'dome',     turretSize:[1.9, 0.9 ], barrel:[0.14, 2.6], wheels:5, brake:false, slope:0.60 }, // M24 霞飞
-  scout:   { hull:[2.6, 0.9, 4.0], turret:'box',      turretSize:[1.5, 0.6 ], barrel:[0.12, 2.2], wheels:8, brake:false, slope:0.50 }, // 234/2 美洲狮（8 轮）
-  td:      { hull:[3.6, 1.1, 6.2], turret:'casemate', turretSize:[3.0, 1.0 ], barrel:[0.26, 4.8], wheels:6, brake:true,  slope:0.70 }, // SU-100
-  panther: { hull:[3.6, 1.2, 6.0], turret:'box',      turretSize:[2.6, 1.1 ], barrel:[0.18, 5.0], wheels:7, brake:true,  slope:0.95 }, // 黑豹 V（长炮管、陡前装甲）
-  heavy:   { hull:[3.9, 1.5, 6.4], turret:'box',      turretSize:[3.0, 1.25], barrel:[0.24, 3.8], wheels:8, brake:true,  slope:0.40 }, // 虎 I（方正高大）
-  is2:     { hull:[3.6, 1.3, 6.0], turret:'dome',     turretSize:[2.8, 1.15], barrel:[0.30, 4.2], wheels:6, brake:true,  slope:0.85 }, // IS-2（122mm 粗管）
-  t80:     { hull:[3.6, 1.1, 6.0], turret:'flat',     turretSize:[3.0, 0.9 ], barrel:[0.22, 4.4], wheels:6, brake:false, slope:0.90 }, // T-80U（现代低矮）
-  assault: { hull:[4.6, 1.8, 7.4], turret:'massive',  turretSize:[3.6, 1.6 ], barrel:[0.34, 3.8], wheels:8, brake:true,  slope:0.50 }, // 鼠式（巨大）
-  m1a2:    { hull:[4.2, 1.4, 6.8], turret:'flat',     turretSize:[3.2, 1.0], barrel:[0.30, 4.6], wheels:7, brake:true,  slope:0.85 }, // M1A2 现代主战坦克
-  aa:      { hull:[3.0, 1.0, 5.0], turret:'box',      turretSize:[2.2, 1.0], barrel:[0.06, 2.0], wheels:6, brake:false, slope:0.50 }, // 防空坦克
+  medium:  { hull:[3.4, 1.0, 5.4], turret:'dome',     turretSize:[2.3, 1.0 ], barrel:[0.17, 3.6], wheels:5, brake:false, slope:0.85, susp:'christie' }, // T-34-85
+  m4:      { hull:[3.2, 1.5, 5.2], turret:'dome',     turretSize:[2.2, 1.1 ], barrel:[0.16, 3.0], wheels:6, brake:false, slope:0.45, susp:'vvss', hullMg:true }, // M4A3 谢尔曼（高）
+  panzer2: { hull:[2.6, 0.95,4.0], turret:'box',      turretSize:[1.6, 0.7 ], barrel:[0.08, 1.8], wheels:5, brake:false, slope:0.40, susp:'std' }, // II 号（小）
+  light:   { hull:[2.9, 1.0, 4.6], turret:'dome',     turretSize:[1.9, 0.9 ], barrel:[0.14, 2.6], wheels:5, brake:false, slope:0.60, susp:'christie' }, // M24 霞飞
+  scout:   { hull:[2.6, 0.9, 4.0], turret:'box',      turretSize:[1.5, 0.6 ], barrel:[0.12, 2.2], wheels:4, brake:false, slope:0.50, susp:'road' }, // 234/2 美洲狮（8 轮轮式）
+  td:      { hull:[3.6, 1.1, 6.2], turret:'casemate', turretSize:[3.0, 1.0 ], barrel:[0.26, 4.8], wheels:6, brake:true,  slope:0.70, susp:'std' }, // SU-100
+  panther: { hull:[3.6, 1.2, 6.0], turret:'box',      turretSize:[2.6, 1.1 ], barrel:[0.18, 5.0], wheels:7, brake:true,  slope:0.95, susp:'interleave', skirt:true }, // 黑豹 V（长炮管、陡前装甲）
+  heavy:   { hull:[3.9, 1.5, 6.4], turret:'box',      turretSize:[3.0, 1.25], barrel:[0.24, 3.8], wheels:8, brake:true,  slope:0.40, susp:'interleave', twoPiece:true, hullMg:true }, // 虎 I（方正高大）
+  is2:     { hull:[3.6, 1.3, 6.0], turret:'dome',     turretSize:[2.8, 1.15], barrel:[0.30, 4.2], wheels:6, brake:true,  slope:0.85, susp:'christie', hullMg:true }, // IS-2（122mm 粗管）
+  t80:     { hull:[3.6, 1.1, 6.0], turret:'flat',     turretSize:[3.0, 0.9 ], barrel:[0.22, 4.4], wheels:6, brake:false, slope:0.90, susp:'std', skirt:true, smoke:true, fume:true }, // T-80U（现代低矮）
+  assault: { hull:[4.6, 1.8, 7.4], turret:'massive',  turretSize:[3.6, 1.6 ], barrel:[0.34, 3.8], wheels:8, brake:true,  slope:0.50, susp:'interleave', hullMg:true }, // 鼠式（巨大）
+  m1a2:    { hull:[4.2, 1.4, 6.8], turret:'flat',     turretSize:[3.2, 1.0], barrel:[0.30, 4.6], wheels:7, brake:true,  slope:0.85, susp:'std', skirt:true, smoke:true, fume:true, hullMg:true }, // M1A2 现代主战坦克
+  aa:      { hull:[3.0, 1.0, 5.0], turret:'box',      turretSize:[2.2, 1.0], barrel:[0.06, 2.0], wheels:6, brake:false, slope:0.50, susp:'std', radar:true }, // 防空坦克
 };
 class Tank {
   constructor({ side = 'player', team = 'blue', color = 0x4a6b3a, type = 'medium' } = {}) {
@@ -1624,30 +1626,98 @@ class Tank {
     this.hull.castShadow = true; this.hull.receiveShadow = true;
     this.group.add(this.hull);
 
-    // 履带 + 负重轮 + 主动轮 + 托带轮 + 翼子板（按车体大小缩放，小车小履带）
-    const ts = clamp(hh / 1.1, 0.72, 1.05);   // 履带尺寸系数：小车(II号/霞飞/美洲狮)缩小
+    // 行走机构（按型号悬挂样式差异化）+ 翼子板/侧裙
+    const ts = clamp(hh / 1.1, 0.72, 1.05);   // 行走机构尺寸系数：小车(II号/霞飞/美洲狮)缩小
     const wheelR = 0.62 * ts;
+    const tx = hw / 2 + 0.35;                 // 履带/轮组横向位置
     for (const sx of [-1, 1]) {
+      const span = hl * 0.82;
+      if (g.susp === 'road') {
+        // —— 轮式（美洲狮）：8 个大轮胎（4 轴×每侧并排双轮），无履带 ——
+        for (let i = 0; i < g.wheels; i++) {
+          const z = -span / 2 + (span * i) / Math.max(1, g.wheels - 1);
+          for (const ox of [-0.42, 0.42]) {
+            const tire = new THREE.Mesh(new THREE.CylinderGeometry(wheelR * 1.15, wheelR * 1.15, 0.42, 14), darkMat);
+            tire.rotation.z = Math.PI / 2;
+            tire.position.set(sx * (hw / 2 + 0.55) + ox * sx, wheelR * 1.15, z);
+            this.group.add(tire);
+          }
+          const hub = new THREE.Mesh(new THREE.CylinderGeometry(wheelR * 0.45, wheelR * 0.45, 1.35, 10), bodyMat);
+          hub.rotation.z = Math.PI / 2;
+          hub.position.set(sx * (hw / 2 + 0.55), wheelR * 1.15, z);
+          this.group.add(hub);
+        }
+        const fenderR = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.1, hl * 0.95), bodyMat);
+        fenderR.position.set(sx * (hw / 2 + 0.55), wheelR * 2.15, 0);
+        this.group.add(fenderR);
+        continue;
+      }
+      // —— 履带式：履带盒 + 按悬挂样式排布负重轮 ——
       const tmat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 1, map: makeTrackTexture() });
       if (sx < 0) this.trackMatL = tmat; else this.trackMatR = tmat;
       const track = new THREE.Mesh(new THREE.BoxGeometry(0.85, wheelR * 2.2, hl * 1.05), tmat);
-      track.position.set(sx * (hw / 2 + 0.35), wheelR, 0);
+      track.position.set(sx * tx, wheelR, 0);
       track.castShadow = true; this.group.add(track);
-      const span = hl * 0.82;
-      for (let i = 0; i < g.wheels; i++) {   // 负重轮
-        const z = -span / 2 + (span * i) / Math.max(1, g.wheels - 1);
-        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(wheelR, wheelR, 0.5, 12), darkMat);
+      const mkWheel = (r, w, z, y, mat) => {
+        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(r, r, w, 14), mat || darkMat);
         wheel.rotation.z = Math.PI / 2;
-        wheel.position.set(sx * (hw / 2 + 0.35), wheelR, z);
-        this.group.add(wheel);   // 负重轮在履带内部，影子被履带整体盖住——不进阴影 pass（省 draw call）
+        wheel.position.set(sx * tx, y !== undefined ? y : wheelR, z);
+        this.group.add(wheel);   // 轮子在履带内部，影子被履带盖住——不进阴影 pass（省 draw call）
+        return wheel;
+      };
+      if (g.susp === 'interleave') {
+        // 交错悬挂（虎I/黑豹/鼠式）：外排大轮 + 内排小轮错位半格，半个轮缘从缝隙里露出来
+        const outerR = wheelR * 0.92, innerR = wheelR * 0.62;
+        for (let i = 0; i < g.wheels; i++) {
+          const z = -span / 2 + (span * i) / Math.max(1, g.wheels - 1);
+          mkWheel(outerR, 0.55, z);                                   // 外排
+          const disc = new THREE.Mesh(new THREE.CylinderGeometry(outerR * 0.55, outerR * 0.55, 0.62, 10), metalMat);
+          disc.rotation.z = Math.PI / 2; disc.position.set(sx * tx, wheelR, z);
+          this.group.add(disc);                                       // 外排轮毂盘（钢色）
+          if (i < g.wheels - 1) mkWheel(innerR, 0.4, z + span / (g.wheels - 1) / 2, wheelR, darkMat);  // 内排错位
+        }
+      } else if (g.susp === 'vvss') {
+        // 谢尔曼 VVSS：三组两轮转向架，每组外露减震弹簧盒（识别度最高的悬挂）
+        const bogies = 3, pairs = 2;
+        for (let b = 0; b < bogies; b++) {
+          const zc = -span / 2 + (span * (b + 0.5)) / bogies;
+          for (let p = 0; p < pairs; p++) mkWheel(wheelR * 0.8, 0.5, zc + (p - 0.5) * wheelR * 1.75);
+          const spring = new THREE.Mesh(new THREE.BoxGeometry(0.55, wheelR * 1.1, 0.5), metalMat);
+          spring.position.set(sx * tx, wheelR * 1.6, zc);
+          this.group.add(spring);
+        }
+      } else if (g.susp === 'christie') {
+        // 克里斯蒂（T-34/IS-2/霞飞）：大直径负重轮 + 轮毂盖，无托带轮
+        for (let i = 0; i < g.wheels; i++) {
+          const z = -span / 2 + (span * i) / Math.max(1, g.wheels - 1);
+          mkWheel(wheelR * 1.18, 0.5, z);
+          const cap = new THREE.Mesh(new THREE.CylinderGeometry(wheelR * 0.5, wheelR * 0.5, 0.56, 10), bodyMat);
+          cap.rotation.z = Math.PI / 2; cap.position.set(sx * tx, wheelR, z);
+          this.group.add(cap);
+        }
+      } else {
+        // 普通悬挂：均布负重轮
+        for (let i = 0; i < g.wheels; i++) {
+          mkWheel(wheelR, 0.5, -span / 2 + (span * i) / Math.max(1, g.wheels - 1));
+        }
       }
       const sprocket = new THREE.Mesh(new THREE.CylinderGeometry(wheelR * 1.3, wheelR * 1.3, 0.5, 10), darkMat);  // 主动轮（车头）
-      sprocket.rotation.z = Math.PI / 2; sprocket.position.set(sx * (hw / 2 + 0.35), wheelR * 1.05, span / 2 + 0.5); this.group.add(sprocket);
-      const roller = new THREE.Mesh(new THREE.CylinderGeometry(wheelR * 0.35, wheelR * 0.35, 0.5, 8), darkMat);   // 托带轮（车顶）
-      roller.rotation.z = Math.PI / 2; roller.position.set(sx * (hw / 2 + 0.35), wheelR * 2.0, 0); this.group.add(roller);
-      const fender = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.12, hl * 0.98), bodyMat);
-      fender.position.set(sx * (hw / 2 + 0.7), hullY + hh * 0.5, 0);
-      this.group.add(fender);
+      sprocket.rotation.z = Math.PI / 2; sprocket.position.set(sx * tx, wheelR * 1.05, span / 2 + 0.5); this.group.add(sprocket);
+      if (g.susp !== 'christie') {
+        const roller = new THREE.Mesh(new THREE.CylinderGeometry(wheelR * 0.35, wheelR * 0.35, 0.5, 8), darkMat);   // 托带轮（车顶）
+        roller.rotation.z = Math.PI / 2; roller.position.set(sx * tx, wheelR * 2.0, 0); this.group.add(roller);
+      }
+      // 翼子板（挡泥板）；侧裙车型（黑豹/T-80/M1）改整片侧裙遮上半履带——现代车主战剪影
+      if (g.skirt) {
+        const skirt = new THREE.Mesh(new THREE.BoxGeometry(0.16, wheelR * 1.5, hl * 0.95), bodyMat);
+        skirt.position.set(sx * (hw / 2 + 0.62), wheelR * 1.35, 0);
+        skirt.castShadow = true;
+        this.group.add(skirt);
+      } else {
+        const fender = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.12, hl * 0.98), bodyMat);
+        fender.position.set(sx * (hw / 2 + 0.7), hullY + hh * 0.5, 0);
+        this.group.add(fender);
+      }
     }
 
     // 炮塔（按型号）+ 炮管
@@ -1674,23 +1744,88 @@ class Tank {
       barrel.position.x = -br * 3;
     }
     if (g.brake) {
-      const brake = new THREE.Mesh(new THREE.CylinderGeometry(br * 1.5, br * 1.5, bl * 0.14, 10), metalMat);
+      // 双腔炮口制退器：加宽扁盒式（横向近两倍炮管直径，侧面开槽轮廓）
+      const brake = new THREE.Mesh(new THREE.CylinderGeometry(br * 1.35, br * 1.35, bl * 0.16, 10), metalMat);
       brake.rotation.x = Math.PI / 2;
       brake.position.set(0, 0, bl);
+      brake.scale.set(1.7, 1, 1);   // 横向拉宽：双腔制退器的扁宽剪影
       this.barrelPivot.add(brake);
     }
-    // 炮管热护套（中段加粗段）：现代炮管标志性细节
-    if ((g.brake || tankTypeById(this.type).rank >= 4) && this.type !== 'aa') {
-      const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(br * 1.12, br * 1.12, bl * 0.42, 12), darkMat);
+    // 抽烟机（现代滑膛炮中段鼓包，T-80U/M1A2）；两段式炮管接口环（虎I）
+    if (g.fume) {
+      const fume = new THREE.Mesh(new THREE.CylinderGeometry(br * 1.45, br * 1.45, bl * 0.14, 12), darkMat);
+      fume.rotation.x = Math.PI / 2;
+      fume.position.set(0, 0, bl * 0.62);
+      this.barrelPivot.add(fume);
+      const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(br * 1.1, br * 1.1, bl * 0.4, 12), darkMat);
       sleeve.rotation.x = Math.PI / 2;
-      sleeve.position.set(0, 0, bl * 0.55);
+      sleeve.position.set(0, 0, bl * 0.42);
       this.barrelPivot.add(sleeve);
+    } else if (g.twoPiece) {
+      const joint = new THREE.Mesh(new THREE.CylinderGeometry(br * 1.22, br * 1.22, bl * 0.1, 12), metalMat);
+      joint.rotation.x = Math.PI / 2;
+      joint.position.set(0, 0, bl * 0.48);
+      this.barrelPivot.add(joint);
     }
     // 炮塔天线（细长鞭状，随炮塔转动）：远看剪影立刻"像真车"
     const antennae = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.045, hh * 1.6, 5), darkMat);
     antennae.position.set(g.turretSize[0] * 0.32, g.turretSize[1] * 0.6 + hh * 0.75, -g.turretSize[0] * 0.28);
     antennae.rotation.x = -0.12;
     this.turret.add(antennae);
+    // 舱盖（指挥塔顶圆盘，略翘起透出缝——像开了盖的实车）
+    if (g.turret !== 'open' && g.turret !== 'casemate') {
+      const hatch = new THREE.Mesh(new THREE.CylinderGeometry(g.turretSize[0] * 0.16, g.turretSize[0] * 0.16, 0.09, 12), darkMat);
+      hatch.position.set(g.turretSize[0] * 0.12, g.turretSize[1] * 1.02, -g.turretSize[0] * 0.18);
+      hatch.rotation.x = -0.18;
+      this.turret.add(hatch);
+      // 车长高射机枪（舱盖前环形枪座+斜上小枪管）
+      const mgRing = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.045, 6, 12), metalMat);
+      mgRing.rotation.x = Math.PI / 2;
+      mgRing.position.set(g.turretSize[0] * 0.12, g.turretSize[1] * 0.98, -g.turretSize[0] * 0.02);
+      this.turret.add(mgRing);
+      const mgun = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.9, 6), metalMat);
+      mgun.rotation.x = Math.PI / 2 - 0.5;
+      mgun.position.set(g.turretSize[0] * 0.12, g.turretSize[1] * 1.12, g.turretSize[0] * 0.18);
+      this.turret.add(mgun);
+    }
+    // 烟幕弹发射器（现代车 T-80U/M1A2）：炮塔两侧前方成组斜置小筒
+    if (g.smoke) {
+      for (const sx of [-1, 1]) {
+        for (let i = 0; i < 4; i++) {
+          const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.34, 6), darkMat);
+          tube.rotation.set(-0.9, 0, 0);
+          tube.position.set(sx * g.turretSize[0] * 0.62, g.turretSize[1] * 0.62, g.turretSize[0] * 0.3 - i * 0.15);
+          this.turret.add(tube);
+        }
+      }
+    }
+    // 防空雷达（ZSU-23-4）：炮塔顶平板搜索雷达——防空坦克的标志性剪影
+    if (g.radar) {
+      const dish = new THREE.Mesh(new THREE.BoxGeometry(g.turretSize[0] * 0.85, 0.08, g.turretSize[0] * 0.6), metalMat);
+      dish.rotation.x = -0.35;
+      dish.position.set(0, g.turretSize[1] * 0.92, 0);
+      dish.castShadow = true;
+      this.turret.add(dish);
+    }
+    // 车体机枪（谢尔曼/虎I/IS-2/鼠式/M1A2）：首上机电员位置的小球座+短管
+    if (g.hullMg) {
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), darkMat);
+      ball.position.set(hw * 0.28, hullY + hh * 0.3, hl / 2 - G * 0.55);
+      this.group.add(ball);
+      const hmg = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.6, 6), metalMat);
+      hmg.rotation.x = Math.PI / 2;
+      hmg.position.set(hw * 0.28, hullY + hh * 0.3, hl / 2 - G * 0.55 + 0.35);
+      this.group.add(hmg);
+    }
+    // 备用履带块挂首上（履带式都带几块——战场急救件）
+    if (g.susp !== 'road') {
+      for (let i = 0; i < 3; i++) {
+        const spare = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.35, 0.1), darkMat);
+        spare.position.set(-hw * 0.28 + i * 0.56, hullY + hh * 0.62, hl / 2 - G * 0.3);
+        spare.rotation.x = 0.15;
+        this.group.add(spare);
+      }
+    }
     // 车头灯一对（前上装甲两侧）+ 尾部储物箱（行军杂物）
     for (const lx of [-1, 1]) {
       const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), new THREE.MeshStandardMaterial({ color: 0xfff8e0, roughness: 0.2, metalness: 0.1, emissive: 0x554422 }));
