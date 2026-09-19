@@ -2419,6 +2419,8 @@ class Tank {
     if (!this.canFire()) return false;
     const muzzleWorld = this.getMuzzleWorld();
     const dir = this._spread(this.getBarrelDir(), this.fireSpread);
+    // 下坠自动补偿：炮管瞄哪打哪（瞄准线=炮管线），出膛瞬间按实测/装订距离抬角抵消重力下坠
+    if (this._dropAngle) { dir.y += this._dropAngle; dir.normalize(); }
     const sh = shellById(this.shellKind);   // 弹种参数随弹丸下发
     em.addProjectile(new Projectile({
       position: muzzleWorld, direction: dir,
@@ -3452,6 +3454,7 @@ const MAPS = [
   { id:'forest',  name:'密林',     urban:false, towns:0, density:1.7, fog:0x8fae84, bg:0xaec5a4, gLow:[0.15,0.32,0.13], gHigh:[0.30,0.40,0.20], leaf:0x2a5a25, wall:0x4a4030, height:1.0, wallColor:0x88ff99 },
   { id:'factory', name:'工业厂区', urban:'shed', towns:0, density:1.0, build:0x56565c, fog:0x6f6f74, bg:0x808086, gLow:[0.26,0.26,0.28], gHigh:[0.37,0.37,0.40], leaf:0x3a4030, wall:0x4a4a4e, height:0.5, wallColor:0xaaaaaa },
   { id:'snow',    name:'雪原',     urban:false, towns:1, density:1.1, fog:0xd6dfe6, bg:0xe8eef2, gLow:[0.80,0.84,0.88], gHigh:[0.92,0.94,0.97], leaf:0x3a5a40, wall:0x6a6a6a, height:1.1, wallColor:0xc0d0e0 },
+  { id:'night',   name:'夜战',     urban:false, towns:1, density:0.9, fog:0x0a1020, bg:0x05080f, gLow:[0.05,0.06,0.09], gHigh:[0.09,0.12,0.17], leaf:0x081408, wall:0x101820, height:0.8, wallColor:0x30405a, night:true },
 ];
 
 // 创建地面 + 障碍物 + 边界，返回 { group, obstacles, half }。mapId 决定地形主题。
@@ -4314,8 +4317,10 @@ class Game {
     // 弹道下坠补偿：炮口上抬 0.5·g·(d/v)²（自动=按实测距离实时补偿；手动=按装订射距，装错就打高/打低）
     const dEff = this._rangeAuto ? this._dAim : this._rangeSet;
     const drop = 0.5 * CONFIG.tank.shellGravity * Math.pow(dEff / tankShellSpeed(t.shellKind), 2);
-    const gunPt = _aimGun.copy(aimWorld); gunPt.y += drop;
-    t.aimTurretAt(gunPt, dt, 0);
+    // 炮管直接瞄红环（十字与红环可精确重合——原来瞄"红环+drop"导致十字永远差一个补偿角追不到红环中心）。
+    // 下坠补偿改为开火瞬间自动抬角（tryFire 读 _dropAngle），瞄准线=炮管线，所见即所指。
+    t._dropAngle = Math.atan2(drop, Math.max(30, dEff));
+    t.aimTurretAt(aimWorld, dt, 0);
 
     // 修车（按住 R）：不能动但可以开火/灭火，消耗时间修血+模块。
     // 血满但零件坏了（履带/炮管/发动机）也能修——原先被 health<max 挡住，R 对零件完全无效。
