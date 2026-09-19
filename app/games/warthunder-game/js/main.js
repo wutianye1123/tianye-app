@@ -4,6 +4,7 @@ import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTe
 // 坦克贴地姿态用的临时对象（避免每帧分配）
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
 const _tmpV3 = new THREE.Vector3();   // 通用临时向量（受击方向计算等，避免每帧分配）
+const _sfxDir = new THREE.Vector3();  // 音效声像：相机朝向临时向量
 const _kcTmp = new THREE.Vector3();   // X 光回放临时量（免每帧 new）
 const _scLook = new THREE.Vector3();   // 回放相机平滑视线
 const _projFwd = new THREE.Vector3(0, 0, 1);   // 曳光定向基准
@@ -744,8 +745,9 @@ class HUD {
       `<span style="color:${col(mods.track)}">🛞履带 ${label(mods.track)}</span> ` +
       `<span style="color:${col(mods.barrel)};margin-left:8px">🎯炮管 ${label(mods.barrel)}</span> ` +
       `<span style="color:${col(mods.engine)};margin-left:8px">⚙️发动机 ${label(mods.engine)}</span>`;
-    if (crew) {   // 乘员条：炮手/驾驶员/装填手（阵亡倒计时，替补自动恢复）
+    if (crew) {   // 乘员条：车长/炮手/驾驶员/装填手（阵亡倒计时，替补自动恢复）
       html += `<br>` +
+        `<span style="color:${ccol(crew.commander)}">👤车长 ${label(crew.commander)}</span> ` +
         `<span style="color:${ccol(crew.gunner)}">👤炮手 ${label(crew.gunner)}</span> ` +
         `<span style="color:${ccol(crew.driver)};margin-left:8px">👤驾驶员 ${label(crew.driver)}</span> ` +
         `<span style="color:${ccol(crew.loader)};margin-left:8px">👤装填手 ${label(crew.loader)}</span>`;
@@ -1902,7 +1904,7 @@ class Tank {
     this._lastAttacker = null;
     this.modules = { track: 0, barrel: 0, engine: 0 }; // 模块损伤：>0 表示损坏剩余秒数
     this.recoil = 0; this.recoilVel = 0;   // 后坐弹簧：位置/速度（欠阻尼二阶，击发给速度冲量）
-    this.crew = { gunner: 0, driver: 0, loader: 0 };   // 乘员：>0 = 阵亡剩余秒(炮手停塔/驾驶员趴窝/装填手装填×2.5)
+    this.crew = { commander: 0, gunner: 0, driver: 0, loader: 0 };   // 乘员：>0 = 阵亡剩余秒(车长停指挥/炮手停塔/驾驶员趴窝/装填手装填×2.5)
 
     // 按队伍 + 型号的性能参数（敌方更弱更慢更不准）
     this.maxSpeed = (isEnemy ? CONFIG.tank.enemySpeed : CONFIG.tank.speed) * tt.speed;
@@ -2323,7 +2325,7 @@ class Tank {
     // 恒速 slew：转速可控（不甩），对齐到 0.5° 内即停，红环与十字重合就不动。
     let diff = desiredYaw - this.turretYaw;
     diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-    const speed = Math.max(1.0, this.turretSpeed * 1.5); // rad/s（重型车更慢）
+    const speed = Math.max(1.0, this.turretSpeed * 1.5) * (this.crew && this.crew.commander > 0 ? 0.55 : 1); // rad/s（重型车更慢）；车长阵亡：指挥瘫痪炮塔转速×0.55
     if (Math.abs(diff) < 0.009) this.turretYaw = desiredYaw;
     else this.turretYaw += clamp(diff, -speed * dt, speed * dt);
     // 炮管俯仰：瞄向瞄准点本身——近/低处自动大角度压炮，远处水平，高处抬头。
@@ -2418,7 +2420,7 @@ class Tank {
   tryFire(em) {
     if (!this.canFire()) return false;
     const muzzleWorld = this.getMuzzleWorld();
-    const dir = this._spread(this.getBarrelDir(), this.fireSpread);
+    const dir = this._spread(this.getBarrelDir(), this.fireSpread * (this.crew && this.crew.commander > 0 ? 2 : 1));   // 车长阵亡：无人指示目标，散布×2
     // 下坠自动补偿：炮管瞄哪打哪（瞄准线=炮管线），出膛瞬间按实测/装订距离抬角抵消重力下坠
     if (this._dropAngle) { dir.y += this._dropAngle; dir.normalize(); }
     const sh = shellById(this.shellKind);   // 弹种参数随弹丸下发
@@ -2575,10 +2577,10 @@ class Tank {
         }
         if (mod === 'crew') {
           this.takeDamage(damage * mult);
-          // 按位置细化:弹道靠最前(驾驶位)→驾驶员;其余车体→炮手/装填手
-          const pick = crewPz > 2.2 * sc ? 'driver' : (Math.random() < 0.5 ? 'gunner' : 'loader');
+          // 按位置细化:弹道靠最前(驾驶位)→驾驶员;其余车体→车长/炮手/装填手三选一
+          const pick = crewPz > 2.2 * sc ? 'driver' : ['commander', 'gunner', 'loader'][Math.floor(Math.random() * 3)];
           this.crew[pick] = 5;
-          this.lastCrit = { gunner: '炮手阵亡', driver: '驾驶员阵亡', loader: '装填手阵亡' }[pick];
+          this.lastCrit = { commander: '车长阵亡', gunner: '炮手阵亡', driver: '驾驶员阵亡', loader: '装填手阵亡' }[pick];
           return 'pen';
         }
         if (mod === 'fuel') {
@@ -3644,7 +3646,7 @@ function createTerrain(scene, mode, mapId) {
     }
     mesh.castShadow = true; mesh.receiveShadow = true;
     group.add(mesh);
-    obstacles.push({ position: new THREE.Vector3(x, 0, z), radius, height: mesh && mesh.geometry && mesh.geometry.parameters && mesh.geometry.parameters.height ? mesh.geometry.parameters.height + terrainHeight(x, z) + 2 : 30 });   // 树冠等杂物的近似顶高
+    obstacles.push({ position: new THREE.Vector3(x, 0, z), radius, height: mesh && mesh.geometry && mesh.geometry.parameters && mesh.geometry.parameters.height ? mesh.geometry.parameters.height + terrainHeight(x, z) + 2 : 30, mesh: type === 'tree' ? mesh : null });   // 树带 mesh：可被坦克撞倒；树冠等杂物的近似顶高
   }
 
   scene.add(group);
@@ -3712,6 +3714,15 @@ class Sfx {
     const d = pos.distanceTo(this.listener.position);
     return Math.max(0, 1 - d / 240);
   }
+  // 立体声声像：声源在相机左/右 → pan [-1,1]（听声辨位：敌人在哪开炮耳朵就知道）
+  _pan(pos) {
+    if (!pos || !this.listener || !this.listener.getWorldDirection) return 0;
+    const dx = pos.x - this.listener.position.x, dz = pos.z - this.listener.position.z;
+    const len = Math.sqrt(dx * dx + dz * dz) || 1;
+    this.listener.getWorldDirection(_sfxDir);
+    // 相机右向 = dir × up（世界 up）→ (-dir.z, 0, dir.x)
+    return clamp((dx * -_sfxDir.z + dz * _sfxDir.x) / len, -1, 1) * 0.75;
+  }
   _noiseBuf(dur) {
     const sr = this.ctx.sampleRate, n = Math.max(1, Math.floor(sr * dur));
     const b = this.ctx.createBuffer(1, n, sr), a = b.getChannelData(0);
@@ -3723,13 +3734,20 @@ class Sfx {
     this._ensure(); if (!this.ctx) return;
     if (pos && this.listener && this._distGain(pos) <= 0.02) return; // 太远不发音，省节点
     const src = this.ctx.createBufferSource(); src.buffer = this._noiseBuf(dur);
-    const f = this.ctx.createBiquadFilter(); f.type = type; f.frequency.setValueAtTime(freq, this.ctx.currentTime);
-    if (freqEnd != null) f.frequency.exponentialRampToValueAtTime(Math.max(40, freqEnd), this.ctx.currentTime + dur);
-    const g = this.ctx.createGain();
     const dg = this._distGain(pos);
+    const muffle = pos ? (0.4 + 0.6 * dg) : 1;   // 远距闷响：高频被空气吃掉（远处炮声只剩低频轰）
+    const f = this.ctx.createBiquadFilter(); f.type = type; f.frequency.setValueAtTime(freq * muffle, this.ctx.currentTime);
+    if (freqEnd != null) f.frequency.exponentialRampToValueAtTime(Math.max(40, freqEnd * muffle), this.ctx.currentTime + dur);
+    const g = this.ctx.createGain();
     g.gain.setValueAtTime(gain * dg, this.ctx.currentTime);
     g.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + dur);
-    src.connect(f); f.connect(g); g.connect(this.master);
+    src.connect(f); f.connect(g);
+    // 方向化：声像随声源在相机的左/右偏移（StereoPanner 不支持时直连）
+    if (pos && this.ctx.createStereoPanner) {
+      const pan = this.ctx.createStereoPanner();
+      pan.pan.value = this._pan(pos);
+      g.connect(pan); pan.connect(this.master);
+    } else g.connect(this.master);
     src.start(); src.stop(this.ctx.currentTime + dur);
   }
   gunshot(pos) { this._oneshot(0.22, 'lowpass', 1400, 0.55, pos, 300); }
@@ -4743,6 +4761,7 @@ class Game {
 
       this.em.update(dt);
       if (this.terrain?.grass) this.terrain.grass.update(this.camera.position.x, this.camera.position.z);
+      this._updateTreeFalls(dt);   // 撞树倒伏：检测坦克碾压 + 倒下动画
       if (this.mode === 'tank') this._resolveObstacles();
 
       const targets = this.worldwar ? [...this.em.tanks, ...this.em.planes] : (this.mode === 'tank' ? this.em.tanks : this.em.planes);
@@ -4917,6 +4936,38 @@ class Game {
     this.postfx.render(this.scene, this.camera);
     this._renderShellcam();   // 右上角跟拍小窗（scissor 二次渲染，无小窗时零开销）
   };
+
+  // —— 树木撞倒（战雷式碾树）：活坦克以移动状态撞上树障碍 → 树绕根部朝背离方向倒伏 ——
+  // 倒地后永久趴在原地（战场痕迹），障碍项即时移除（不再挡弹/挡 AI）。动画自持列表，不走 effects（防被上限挤掉清理）。
+  _updateTreeFalls(dt) {
+    const obstacles = this.terrain?.obstacles;
+    if (!obstacles) return;
+    for (const t of this.em.tanks) {
+      if (!t.alive || Math.abs(t.lastThrottle || 0) < 0.3) continue;
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        const ob = obstacles[i];
+        if (!ob.mesh || ob.mesh._falling) continue;
+        const dx = t.position.x - ob.position.x, dz = t.position.z - ob.position.z;
+        const rr = (t.radius || 3) + ob.radius + 0.6;
+        if (dx * dx + dz * dz < rr * rr) {
+          ob.mesh._falling = true;
+          const len = Math.sqrt(dx * dx + dz * dz) || 1;   // 倒向 = 车撞来的反方向（被推倒）
+          this._treeFalls = this._treeFalls || [];
+          this._treeFalls.push({ mesh: ob.mesh, axis: new THREE.Vector3(dz / len, 0, -dx / len), t: 0 });
+          obstacles.splice(i, 1);   // 不再挡弹/挡 AI
+        }
+      }
+    }
+    if (!this._treeFalls?.length) return;
+    for (let i = this._treeFalls.length - 1; i >= 0; i--) {
+      const f = this._treeFalls[i];
+      f.t = Math.min(1, f.t + dt * 2.4);
+      const e = 1 - Math.pow(1 - f.t, 3);                 // ease-out：越接近地面越慢
+      const ang = e * (Math.PI / 2 - 0.12) + Math.sin(f.t * Math.PI) * -0.06;   // 末端轻微回弹
+      f.mesh.quaternion.setFromAxisAngle(f.axis, ang);
+      if (f.t >= 1) this._treeFalls.splice(i, 1);         // 趴定：mesh 留在原地（随地形组销毁）
+    }
+  }
 
   // —— 右上角击杀回放（战雷式）——
   // 命中敌坦克瞬间才显示。全部回放对象(重演弹丸/克隆车/内部模块/内部爆炸)放【渲染层1】，
