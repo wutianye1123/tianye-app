@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTexture, camoTexture, makeTrackTexture, makeNoiseTexture, makeShadowTexture, makeGrassTexture, terrainHeight, setTerrainScale } from './lib.js';
+import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTexture, camoTexture, makeTrackTexture, makeNoiseTexture, makeShadowTexture, makeGrassTexture, makeSmokeTexture, terrainHeight, setTerrainScale } from './lib.js';
 
 // 坦克贴地姿态用的临时对象（避免每帧分配）
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
@@ -1514,14 +1514,14 @@ class SmokeWall {
     const h = tank.heading;
     const rx = Math.cos(h), rz = -Math.sin(h);                       // 横向（墙的展开方向）
     const cx = tank.position.x - Math.sin(h) * 4, cz = tank.position.z - Math.cos(h) * 4;   // 车尾 4m 处起墙
-    const tex = makeNoiseTexture();
+    const tex = makeSmokeTexture();
     this.group = new THREE.Group();
     this.puffs = [];
     const N = 25, half = 38;
     for (let i = 0; i < N; i++) {
       const s = -half + (i / (N - 1)) * half * 2 + randRange(-1.2, 1.2);
       const px = cx + rx * s, pz = cz + rz * s;
-      const m = new THREE.Mesh(_puffGeo, new THREE.MeshBasicMaterial({ color: 0xd6dad4, transparent: true, opacity: 0.95, depthWrite: false, map: tex }));
+      const m = new THREE.Mesh(_puffGeo, new THREE.MeshBasicMaterial({ color: 0xf0f3ef, transparent: true, opacity: 0.95, depthWrite: false, map: tex }));
       m.position.set(px, terrainHeight(px, pz) + randRange(1.1, 2.0), pz);
       m.scale.setScalar(0.3);
       m.renderOrder = 3;

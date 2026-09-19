@@ -123,6 +123,25 @@ export function makeTrackTexture() {
 
 // 履带纹理（省略——见上方 makeTrackTexture）
 
+// 烟雾贴图：白色底 + 柔和浓淡云纹（乘在白烟上只添层次不压暗——噪声图做 map 会把烟变"泥巴色"）
+let _smokeTex = null;
+export function makeSmokeTexture() {
+  if (_smokeTex) return _smokeTex;
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d');
+  x.fillStyle = '#f7f8f6'; x.fillRect(0, 0, 128, 128);   // 近白底
+  const blot = (px, py, r, a) => {
+    const g = x.createRadialGradient(px, py, 0, px, py, r);
+    g.addColorStop(0, `rgba(215,218,214,${a})`);   // 柔和灰斑（浓度层次）
+    g.addColorStop(1, 'rgba(215,218,214,0)');
+    x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  };
+  for (let i = 0; i < 9; i++) blot(20 + Math.random() * 88, 20 + Math.random() * 88, 26 + Math.random() * 34, 0.5);
+  for (let i = 0; i < 5; i++) blot(20 + Math.random() * 88, 20 + Math.random() * 88, 14 + Math.random() * 20, 0.75);   // 几团更浓的芯
+  _smokeTex = new THREE.CanvasTexture(c);
+  return _smokeTex;
+}
+
 // 接地暗影贴图：径向渐变柔和黑斑（车底假 AO，让载具"压在地上"）
 let _shadowTex = null;
 export function makeShadowTexture() {
