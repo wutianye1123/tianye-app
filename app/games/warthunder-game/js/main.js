@@ -1187,21 +1187,27 @@ function raySphereT(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
 // 由 EntityManager 统一更新并在结束后从场景移除。
 
 // 爆炸：明亮内核快速膨胀 + 烟雾慢速膨胀淡出。
+const _expGeo = new THREE.SphereGeometry(1, 12, 10);   // 共享单位球：爆炸尺寸用 scale 表达（原来每炸 new 两个球几何）
 class Explosion {
   constructor(position, scale = 1, color = 0xffa040) {
-    this.group = new THREE.Group();
-    this.group.position.copy(position);
-
     const s = Math.max(0.5, scale);
-    this.core = new THREE.Mesh(
-      new THREE.SphereGeometry(s, 12, 12),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 })
-    );
-    this.smoke = new THREE.Mesh(
-      new THREE.SphereGeometry(s * 1.2, 10, 10),
-      new THREE.MeshBasicMaterial({ color: 0x4a4a4a, transparent: true, opacity: 0.8 })
-    );
-    this.group.add(this.core, this.smoke);
+    // 整组（group+core+smoke）走实例池：击杀密集时每秒十几次 new group×mesh×mat，GC 压力大
+    let recycled = Explosion._pool && Explosion._pool.pop();
+    if (recycled) {
+      this.group = recycled.group; this.core = recycled.core; this.smoke = recycled.smoke;
+      this.group.visible = true;
+      this.core.material.color.setHex(color); this.core.material.opacity = 1;
+      this.smoke.material.opacity = 0.8;
+    } else {
+      this.group = new THREE.Group();
+      this.core = new THREE.Mesh(_expGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 }));
+      this.smoke = new THREE.Mesh(_expGeo, new THREE.MeshBasicMaterial({ color: 0x4a4a4a, transparent: true, opacity: 0.8 }));
+      this.group.add(this.core, this.smoke);
+    }
+    this.group.position.copy(position);
+    this._s0 = s;                           // 初始尺寸快照（池化复用后 update 动画从这里起算）
+    this.core.scale.setScalar(s);          // 核心初始=s
+    this.smoke.scale.setScalar(s * 1.2);   // 烟初始=1.2s
 
     // 爆炸闪光（从常驻光源池借用：只调位置/颜色/亮度，不 add/remove——防灯光数变化触发全材质重编译）
     const _lh = acquireExplosionLight();
@@ -1217,6 +1223,7 @@ class Explosion {
     this.life = 0.7;
     this.maxLife = 0.7;
     this.alive = true;
+    this._disposed = false;   // 池化复用：重置 dispose 守卫，否则第二次用完无法归还池
     this.isExplosion = true;
     this.mesh = this.group;
   }
@@ -1224,15 +1231,15 @@ class Explosion {
   update(dt) {
     this.life -= dt;
     const t = 1 - this.life / this.maxLife; // 0→1
-    this.core.scale.setScalar(1 + t * 2.5);
-    this.smoke.scale.setScalar(1 + t * 3.5);
+    this.core.scale.setScalar(this._s0 * (1 + t * 2.5));
+    this.smoke.scale.setScalar(this._s0 * 1.2 * (1 + t * 3.5));
     this.core.material.opacity = Math.max(0, 1 - t * 1.4);
     this.smoke.material.opacity = Math.max(0, 0.8 * (1 - t));
     if (this.light) this.light.intensity = Math.max(0, 4 * (1 - t * 1.5));
     if (this.life <= 0) this.alive = false;
   }
 
-  // 归还光源到池（归零亮度、标记可用——常驻场景不摘除），并释放独立几何/材质。
+  // 归还光源到池（归零亮度、标记可用——常驻场景不摘除）；组+mesh 归还实例池（共享几何，不 dispose）。
   dispose() {
     if (this._disposed) return;
     this._disposed = true;
@@ -1241,21 +1248,24 @@ class Explosion {
       this._lightHandle.inUse = false;
       this._lightHandle = null; this.light = null;
     }
-    this.core.geometry.dispose();
-    this.core.material.dispose();
-    this.smoke.geometry.dispose();
-    this.smoke.material.dispose();
+    this.group.visible = false;
+    if (!Explosion._pool) Explosion._pool = [];
+    if (Explosion._pool.length < 40) Explosion._pool.push({ group: this.group, core: this.core, smoke: this.smoke });
+    else { this.core.material.dispose(); this.smoke.material.dispose(); }
   }
 }
 
 // 枪口火焰：极短的亮斑。
+const _flashGeo = new THREE.SphereGeometry(0.6, 8, 8);   // 共享几何（原来每次开炮 new 球——高频开火 GC 大户）
 class MuzzleFlash {
   constructor(position, color = 0xffdd66) {
-    this.mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.6, 8, 8),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 })
-    );
+    let m = MuzzleFlash._pool && MuzzleFlash._pool.pop();
+    if (!m) m = new THREE.Mesh(_flashGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 }));
+    else m.material.color.setHex(color);
+    m.visible = true;
+    this.mesh = m;
     this.mesh.position.copy(position);
+    this.mesh.scale.setScalar(1);
     this.life = 0.08;
     this.maxLife = 0.08;
     this.alive = true;
@@ -1269,14 +1279,23 @@ class MuzzleFlash {
     if (this.life <= 0) this.alive = false;
   }
 
-  dispose() { this.mesh.geometry.dispose(); this.mesh.material.dispose(); }
+  dispose() {   // 归还实例池，不释放共享资源
+    if (!MuzzleFlash._pool) MuzzleFlash._pool = [];
+    if (MuzzleFlash._pool.length < 60) { this.mesh.visible = false; MuzzleFlash._pool.push(this.mesh); }
+    else this.mesh.material.dispose();
+  }
 }
 
 // 烟雾 / 凝结尾迹：缓慢膨胀、上浮、淡出。起火用深灰烟，喷气尾迹用白。
+// mesh+材质走实例池（AI 高频交战下每秒几十团烟，new+dispose 材质会把 GC 顶爆=越打越卡）。
 const _smokeGeo = new THREE.SphereGeometry(1, 6, 6); // 共享单位球，靠 scale 缩放，省去每团烟分配几何
 class Smoke {
   constructor(position, color = 0x888888, size = 0.6, life = 1.2, rise = 1.5, shape = null) {
-    this.mesh = new THREE.Mesh(_smokeGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55 }));
+    let m = Smoke._pool && Smoke._pool.pop();
+    if (!m) m = new THREE.Mesh(_smokeGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55 }));
+    else m.material.color.setHex(color);
+    m.visible = true;
+    this.mesh = m;
     this.mesh.position.copy(position);
     this.size = size;
     this.shape = shape;   // 可选 [sx,sy,sz]：非均匀拉伸（如横排扁烟 [2.4,0.55,1.1]），null=均匀球
@@ -1298,8 +1317,12 @@ class Smoke {
     if (this.life <= 0) this.alive = false;
   }
 
-  // 几何 _smokeGeo 全局共享，不释放；只 dispose 独立 material。
-  dispose() { this.mesh.material.dispose(); }
+  // 几何共享；mesh+材质归还实例池（上限 240 防池无限膨胀），绝不 dispose——复用才是池的意义。
+  dispose() {
+    if (!Smoke._pool) Smoke._pool = [];
+    if (Smoke._pool.length < 240) { this.mesh.visible = false; Smoke._pool.push(this.mesh); }
+    else this.mesh.material.dispose();
+  }
 }
 
 // —— 行驶尘带：坦克身后拖出的连续横向尘土带 ——
