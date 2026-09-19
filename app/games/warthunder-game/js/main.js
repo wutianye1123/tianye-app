@@ -4361,7 +4361,11 @@ class Game {
           if (t.modules[k] > 0) t.modules[k] = Math.max(0, t.modules[k] - dt * 6);
         }
       }
-      this._aimYaw = t.heading + t.turretYaw;   // 相机/红环跟炮塔走（观感自然）
+      this._aimYaw = t.heading + t.turretYaw;   // 相机方位跟炮塔走
+      // 相机注视点（_tankAimPt）也必须同步——它只在玩家输入段更新，AI 模式不更新的话
+      // 相机会死盯开启瞬间的旧点，视角拧死什么都看不见。高低跟炮管俯仰。
+      this._aimHeight = clamp(-Math.tan(t.barrelPitch) * 90, -28, this.worldwar ? 120 : 28);
+      this._tankAimPt = t.position.clone().add(new THREE.Vector3(Math.sin(this._aimYaw) * 90, 2 + this._aimHeight, Math.cos(this._aimYaw) * 90));
       return;   // 玩家输入不驱动
     }
     let throttle = 0, turn = 0;
