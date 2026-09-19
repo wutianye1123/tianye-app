@@ -3466,8 +3466,13 @@ class Heli {
   mouseAim(nx, ny, dt) { /* 鼠标纯瞄准（方向走 setAimDir 的准星射线）；飞行全靠键盘，不与鼠标耦合 */ }
   setYawInput(v) { this._yawRate = clamp(v, -1, 1); }               // A/D：偏航
   setPitchInput(v) { this._throttleIn = clamp(v, -1, 1); }          // W/S：前倾/后倾
-  // 准星方向（鼠标位置反投影的世界射线）：机炮/火箭沿准星打——十字对哪打哪
-  setAimDir(dir) { this._aimDir = dir.clone().normalize(); }
+  // 瞄准：优先"世界命中点"（消视差：弹从机头指向该点，十字压谁打谁）；降级用方向射线
+  setAimPoint(pt) { this._aimPoint = pt.clone(); }
+  setAimDir(dir) { this._aimDir = dir.clone().normalize(); this._aimPoint = null; }
+  _fireDir() {
+    if (this._aimPoint) return this._aimPoint.clone().sub(this.getMuzzleWorld()).normalize();
+    return (this._aimDir || this.forwardVector()).clone();
+  }
   setThrottleInput(td, dt) { this._throttleIn = clamp(td, -1, 1); } // W/S 前后倾（键盘飞行）
   setClimb(v) { this._climb = v; }                    // Shift(+1)/Space(-1)：垂直速度目标
   get throttle() { return Math.abs(this.speed) / this.maxSpeed; }   // HUD 兼容
@@ -3530,12 +3535,12 @@ class Heli {
   tryFire(em) {
     if (!this.canFire()) return false;
     const muzzle = this.getMuzzleWorld();
-    const dir = (this._aimDir || this.forwardVector()).clone();   // 沿准星（相机射线）：十字对哪打哪
-    const s = 0.012;   // 机炮散布
+    const dir = this._fireDir();   // 指向准星世界命中点：消视差
+    const s = 0.006;   // 机炮散布（收紧：200m 处偏差 ~1.2m，命中球 3m 内）
     dir.x += randRange(-s, s); dir.y += randRange(-s, s); dir.z += randRange(-s, s); dir.normalize();
     em.addProjectile(new Projectile({
       position: muzzle, direction: dir, speed: 320, damage: 16 * (planeTypeById(this.type).dmg || 1),
-      owner: this, ownerTeam: this.team, gravity: 4, life: 2.5,
+      owner: this, ownerTeam: this.team, gravity: 0, life: 2.5,   // 直线弹道（无下坠）：所见即所打
       color: 0xffe08a, size: 0.3, pen: 700,
       shellDef: { id: 'cannon', name: '航炮弹', penMul: 1, dmgMul: 1, bounceDeg: 85, noBounce: false },   // 穿深拉满(什么都能穿)+跳弹角放宽：靠低伤害+速射平衡
     }));
@@ -3577,7 +3582,7 @@ class Heli {
     const useOwn = this.type === 'ah64' && fromButton !== 'mslot';
     if (useOwn) {
       if (this.rocketCd > 0) return false;
-      const fwd = (this._aimDir || this.forwardVector()).clone();
+      const fwd = this._fireDir();
       const dir = fwd.clone();
       const s = 0.02;
       dir.x += randRange(-s, s); dir.y += randRange(-s, s); dir.z += randRange(-s, s); dir.normalize();
@@ -3593,7 +3598,7 @@ class Heli {
       return true;
     }
     if (this.missiles <= 0 || this.missileCooldown > 0) return false;
-    const fwd = (this._aimDir || this.forwardVector()).clone();
+    const fwd = this._fireDir();
     for (let i = 0; i < 4; i++) {
       const dir = fwd.clone();
       const s = 0.02 + i * 0.006;
@@ -4751,7 +4756,7 @@ class Game {
     const tv = target.forwardVector ? target.forwardVector() : _tankFwd.set(Math.sin(target.heading), 0, Math.cos(target.heading));
     const spd = target.speed != null ? target.speed : ((target.lastThrottle || 0) * (target.maxSpeed || 10));
     const aim = target.position.clone().addScaledVector(tv, spd * lead);
-    p.setAimDir(aim.sub(p.position).normalize());
+    p.setAimPoint(aim);   // AI 也用世界命中点（消视差，弹从机头直指预测点）
     // —— 被锁定规避：有追踪导弹咬我 / 260m 内敌坦克炮口正对我 → 1.2s 急转+陡升/俯冲闪避 ——
     let locked = false;
     for (const pr of this.em.projectiles) {
@@ -4967,7 +4972,11 @@ class Game {
     }
     if (this.aiPilot) {
       inp.consumeMovement();   // 排空鼠标累积（关闭 AI 瞬间不跳变）
-      if (p.isHeli ? !this._pilotSaved || this._pilotSaved.t !== p : (!this._pilotAI || this._pilotAI.plane !== p && !this._pilotAI.tank)) this._startPilot(p);
+      // 接管句柄失效判定（换机/重生后重建；运算符显式加括号防每帧误重建 new 风暴）
+      const stale = p.isHeli
+        ? (!this._pilotSaved || this._pilotSaved.t !== p)
+        : (!this._pilotAI || (this._pilotAI.plane !== p && this._pilotAI.tank !== p));
+      if (stale) this._startPilot(p);
       const target = this._nearest(p.position, this.enemies.filter((e) => e.alive), this._markedTarget);
       if (p.isHeli) this._heliPilotTick(p, target, dt);
       else this._pilotAI.update(dt, { target, entityManager: this.em, smokes: this.em.smokes });
@@ -4994,10 +5003,13 @@ class Game {
     p.mouseAim(-ndc.x * this.settings.planeGain, ny * this.settings.planeGain, dt); // 水平方向校准：光标左移→左转
 
     if (p.isHeli) {
-      // 直升机：鼠标=纯瞄准（机炮/火箭沿准星世界射线），WASD=飞行（W/S 前后倾、A/D 偏航），Shift 爬升 / Space 下降
+      // 直升机：鼠标=纯瞄准。准星=世界命中点（吸敌球+地形/障碍），弹从机头指向该点——消视差十字压谁打谁。
+      // WASD=飞行（W/S 前后倾、A/D 偏航），Shift 爬升 / Space 下降。
       _aimNdc2.set(ndc.x, ndc.y);
       this.raycaster.setFromCamera(_aimNdc2, this.camera);
-      p.setAimDir(this.raycaster.ray.direction);
+      const rd = this.raycaster.ray.direction;
+      const rt = this._rayAimHit(this.camera.position.x, this.camera.position.y, this.camera.position.z, rd.x, rd.y, rd.z);
+      p.setAimPoint(_tmpV3.copy(this.camera.position).addScaledVector(rd, rt >= 0 ? rt : 300));
       p.setClimb((inp.isDown('ShiftLeft') || inp.isDown('ShiftRight') ? 1 : 0) + (inp.isDown('Space') ? -1 : 0));
       p.setYawInput((inp.isDown('KeyA') ? 1 : 0) - (inp.isDown('KeyD') ? 1 : 0));
       p.setPitchInput((inp.isDown('KeyW') ? 1 : 0) - (inp.isDown('KeyS') ? 1 : 0));
@@ -5544,6 +5556,10 @@ class Game {
   // 回放相机只看层1+层0(场景)，主相机不开层1 → 玩家视角永远看不到任何"幽灵"。
   // 弹道用弹丸出生快照(launchPos/launchVel)按同一物理公式(v=v0+g·t)慢放，完美复现真实轨迹含下坠。
   _startKillReplay(tank, hitPoint, killed, verdict, proj, shellId, crit) {
+    // 节流 0.7s：连杀时每次回放都要 clone(true) 整车+全部材质，密集重启=克隆风暴（卡顿/卡死来源之一）
+    const now = performance.now();
+    if (now - (this._lastReplayT || 0) < 700) return;
+    this._lastReplayT = now;
     if (this._shellcam) this._endShellcam();   // 连杀：新击杀替换当前回放，总播最新一发
     if (this.hud) { if (!this.hud.feedEl) this.hud.feedEl = this.hud.container.querySelector('#feed'); if (this.hud.feedEl) this.hud.feedEl.classList.add('below-cam'); }   // 回放期间：击杀记录下移到小窗下方防遮挡
     const sc = {
@@ -5804,6 +5820,11 @@ class Game {
       c.traverse((m) => { if (m.geometry) m.geometry.dispose(); if (m.material) m.material.dispose(); });
       g.remove(c);
     }
+    // 克隆车的【材质】是 clone 出来的独立副本，必须释放——geometry 与真车共享绝不能动。
+    // 之前只移出场景不 dispose 材质：AI 代打连杀时每次泄漏 ~30 个材质，GPU 内存堆积最终卡死。
+    if (sc.clone) sc.clone.traverse((m) => {
+      if (m.material) (Array.isArray(m.material) ? m.material : [m.material]).forEach((mt) => mt.dispose());
+    });
     this.scene.remove(g);
     this._shellcam = null;
   }
