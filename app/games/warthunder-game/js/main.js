@@ -3543,7 +3543,7 @@ class Heli {
       position: muzzle, direction: dir, speed: 320, damage: 16 * (planeTypeById(this.type).dmg || 1),
       owner: this, ownerTeam: this.team, gravity: 0, life: 2.5,   // 直线弹道（无下坠）：所见即所打
       color: 0xffe08a, size: 0.3, pen: 700,
-      shellDef: { id: 'cannon', name: '航炮弹', penMul: 1, dmgMul: 1, bounceDeg: 85, noBounce: false },   // 穿深拉满(什么都能穿)+跳弹角放宽：靠低伤害+速射平衡
+      shellDef: { id: 'cannon', name: '航炮弹', penMul: 1, dmgMul: 1, bounceDeg: 90, noBounce: true },   // 穿深拉满+永不跳弹：俯冲扫射的入射角合成会高估(真实近垂直被判>85°),直升机炮不参与跳弹
     }));
     this.reloadTimer = this.fireCooldown;
     return true;
