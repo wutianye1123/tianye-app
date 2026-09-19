@@ -4001,34 +4001,50 @@ class PlaneAI {
       this._maybeBomb(plane, target, em, dt);
   }
 
-  // —— AI CCIP 投弹：按真实弹道公式模拟"现在投"的落点，与目标水平距 <14m（核弹 25m）才放 ——
-  // 核弹（B-21 类）：库存≥3 且小概率决策，蘑菇云场面留给它。
+  // —— AI CCIP 投弹：按真实弹道公式模拟"现在投"的落点 ——
+  // 普通炸弹：落点距目标 <14m 才放（正好套在坦克身上）。
+  // 核弹（B-21 类）：先模拟核弹落点，落点 50m 内聚着 ≥4 辆敌方坦克（一大群）才扔——单坦克/散兵不配蘑菇云。
   _maybeBomb(plane, target, em, dt) {
     if (!plane.maxBombs || plane.bombs <= 0 || !target) return;
     this._bombT = (this._bombT || 0) - dt;
     if (this._bombT > 0) return;
     this._bombT = 0.2;   // 落点模拟每 0.2s 一次
-    const isNukeCarrier = plane.bombs >= 3 && plane.type === 'f35b';
-    const useNuke = isNukeCarrier && Math.random() < 0.02;
-    // 弹道模拟（与 tryDropBomb/tryDropNuke 同公式：初速=机速×1.2 前向 -5 垂直，重力同款）
     const fwd = plane.forwardVector();
-    const g = useNuke ? 18 : CONFIG.plane.bomb.gravity;
-    const vel = fwd.clone().multiplyScalar(useNuke ? plane.speed * 0.8 : plane.speed * 1.2).add(new THREE.Vector3(0, useNuke ? -3 : -5, 0));
+    // 核弹：落点聚类判定（一大群坦克聚在一起才扔）
+    if (plane.bombs >= 3 && plane.type === 'f35b') {
+      const npos = this._simBombFall(plane, true);
+      if (npos) {
+        let cluster = 0;
+        for (const t of em.tanks) {
+          if (!t.alive || t.team === plane.team) continue;
+          if (Math.hypot(t.position.x - npos.x, t.position.z - npos.z) < 50) cluster++;
+        }
+        const miss = Math.hypot(npos.x - target.position.x, npos.z - target.position.z);
+        if (cluster >= 4 && miss < 25) { plane.tryDropNuke(em); return; }
+      }
+    }
+    // 普通炸弹：落点贴目标才投
+    const pos = this._simBombFall(plane, false);
+    if (!pos) return;
+    const miss = Math.hypot(pos.x - target.position.x, pos.z - target.position.z);
+    if (miss < 14) plane.tryDropBomb(em);
+  }
+
+  // 模拟一颗炸弹从当前姿态投下的落点（与 tryDropBomb/tryDropNuke 同物理公式）；落不到地返回 null
+  _simBombFall(plane, isNuke) {
+    const fwd = plane.forwardVector();
+    const g = isNuke ? 18 : CONFIG.plane.bomb.gravity;
+    const vel = fwd.clone().multiplyScalar(isNuke ? plane.speed * 0.8 : plane.speed * 1.2).add(new THREE.Vector3(0, isNuke ? -3 : -5, 0));
     const pos = plane.position.clone().addScaledVector(fwd, -2).add(new THREE.Vector3(0, -1, 0));
     const h = 0.06;
-    let t = 0, hit = false;
+    let t = 0;
     for (let i = 0; i < 300; i++) {   // 最多模拟 18s
       vel.y -= g * h;
       pos.x += vel.x * h; pos.y += vel.y * h; pos.z += vel.z * h;
       t += h;
-      if (pos.y <= terrainHeight(pos.x, pos.z)) { hit = true; break; }
+      if (pos.y <= terrainHeight(pos.x, pos.z)) return (t > 0.3 && i < 299) ? pos : null;   // 贴地乱投/模拟超限都不算
     }
-    if (!hit || t < 0.3) return;   // 落不到地（天外）/刚出手就砸地（贴地乱投）
-    const miss = Math.hypot(pos.x - target.position.x, pos.z - target.position.z);
-    if (miss < (useNuke ? 25 : 14)) {
-      if (useNuke) plane.tryDropNuke(em);
-      else plane.tryDropBomb(em);
-    }
+    return null;
   }
 
   _tryFireGround(plane, target, aimDir, em, smokeBlind, obstacles, dist) {
