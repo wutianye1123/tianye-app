@@ -3729,7 +3729,7 @@ class PlaneAI {
     const groundClear = plane.position.y - terrainHeight(plane.position.x, plane.position.z);
     if (groundClear < 5) { aimDir.y = Math.max(aimDir.y, 0.2 + (5 - groundClear) * 0.05); aimDir.normalize(); }   // 低空限制降到5：飞机能贴近地面扫射坦克
 
-    plane.aimToward(aimDir, dt, 0.6); // 敌机用更柔的坡度，便于玩家追瞄
+    plane.aimToward(aimDir, dt, this.aggr || 0.6); // 敌机默认柔坡度便于玩家追瞄；AI 代打可用 aggr 拉满机动
     plane.throttle = dist > 70 ? 1 : 0.7;
 
     // 对齐且在射程内开火（敌方更不准）；视线被楼/山挡住不打（隔楼泼机炮=纯浪费）
@@ -4728,10 +4728,12 @@ class Game {
       this._pilotSaved = { t, missileRegenRate: t._missileRegenRate };
       this._pilotAI = null;
     } else if (t.forwardVector) {
-      // 喷气机：PlaneAI 接管，强化机炮伤害
-      this._pilotSaved = { t, bulletDamage: t.bulletDamage };
+      // 喷气机：PlaneAI 接管，强化机炮伤害 + 机动拉满（满坡度急转，不再慢吞吞拐弯）
+      this._pilotSaved = { t, bulletDamage: t.bulletDamage, agility: t.agility };
       if (t.bulletDamage != null) t.bulletDamage *= 1.5;
+      if (t.agility != null) t.agility *= 1.3;   // 滚转/俯仰速率+30%
       this._pilotAI = new PlaneAI(t);
+      this._pilotAI.aggr = 1.5;   // 坡度系数拉满：转向凌厉
     } else {
       // 坦克：TankAI 接管 + 全面强化
       this._pilotSaved = { t, turretSpeed: t.turretSpeed, reloadTime: t.reloadTime, fireSpread: t.fireSpread, maxSpeed: t.maxSpeed };
@@ -4801,6 +4803,7 @@ class Game {
     const s = this._pilotSaved;
     if (s && s.t) {   // 还原强化参数（车可能已死/已换，还原无害）
       if (s.bulletDamage !== undefined) s.t.bulletDamage = s.bulletDamage;
+      if (s.agility !== undefined) s.t.agility = s.agility;
       s.t.turretSpeed = s.turretSpeed ?? s.t.turretSpeed; s.t.reloadTime = s.reloadTime ?? s.t.reloadTime;
       s.t.fireSpread = s.fireSpread ?? s.t.fireSpread; s.t.maxSpeed = s.maxSpeed ?? s.t.maxSpeed;
     }
