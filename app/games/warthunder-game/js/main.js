@@ -4876,6 +4876,7 @@ class Game {
   // 弹道用弹丸出生快照(launchPos/launchVel)按同一物理公式(v=v0+g·t)慢放，完美复现真实轨迹含下坠。
   _startKillReplay(tank, hitPoint, killed, verdict, proj, shellId, crit) {
     if (this._shellcam) this._endShellcam();   // 连杀：新击杀替换当前回放，总播最新一发
+    if (this.hud) { if (!this.hud.feedEl) this.hud.feedEl = this.hud.container.querySelector('#feed'); if (this.hud.feedEl) this.hud.feedEl.classList.add('below-cam'); }   // 回放期间：击杀记录下移到小窗下方防遮挡
     const sc = {
       t: 0, cam: new THREE.PerspectiveCamera(48, 1.6, 0.5, 3000),
       killed, verdict,
@@ -5122,6 +5123,7 @@ class Game {
   _endShellcam() {
     const sc = this._shellcam;
     if (!sc) return;
+    if (this.hud) { if (!this.hud.feedEl) this.hud.feedEl = this.hud.container.querySelector('#feed'); if (this.hud.feedEl) this.hud.feedEl.classList.remove('below-cam'); }   // 回放结束：击杀记录回到原位
     // ⚠️ 克隆车 clone(true) 与真车【共享 geometry】——绝不能 dispose，否则把（可能还活着的）
     // 真车 GPU 资源也毁掉，主视角出现渲染异常的幽灵。只释放我们自建的资源：
     // 模块/弹体/枪口闪光/火球/火柱；克隆车只移出场景，geometry 留给真车（或随真车销毁）。

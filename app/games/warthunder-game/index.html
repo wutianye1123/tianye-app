@@ -276,6 +276,49 @@ html, body {
 #hitmarker.nopen::before, #hitmarker.nopen::after { background: #7a9ab8; width: 18px; }
 #hitmarker.bounce::before, #hitmarker.bounce::after { background: #ffffff; width: 14px; }
 
+/* 装填环（战雷式）：套在准星外的圆环，装填进度顺时针充满，充满即隐藏 */
+#reload-ring {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 66px; height: 66px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+  display: none;
+  background: conic-gradient(#ffd76a calc(var(--p, 0) * 1%), rgba(255,255,255,0.12) 0);
+  -webkit-mask: radial-gradient(circle, transparent 26px, #000 27px);
+          mask: radial-gradient(circle, transparent 26px, #000 27px);
+  filter: drop-shadow(0 0 3px rgba(0,0,0,0.8));
+}
+
+/* 受击方向指示：屏幕边缘红色弧块，指向伤害来源；fade 自带 1.4s 淡出 */
+#dmg-dir { position: absolute; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; }
+#dmg-dir .dmg-arrow {
+  position: absolute; left: 0; top: 0;
+  width: 110px; height: 30px;
+  margin-left: -55px; margin-top: -15px;
+  border-radius: 50% 50% 8px 8px;
+  background: linear-gradient(to bottom, rgba(255,45,45,0.92), rgba(255,45,45,0));
+  box-shadow: 0 0 14px rgba(255,40,40,0.55);
+  animation: dmgFade 1.4s ease-out forwards;
+}
+@keyframes dmgFade { 0% { opacity: 1; } 70% { opacity: 0.75; } 100% { opacity: 0; } }
+
+/* 跳弹提示：屏幕中下方独立浮动字（不进 feed 流，速射炮下也看得清），连续跳弹聚合计数 */
+#bounce-tip {
+  position: absolute;
+  left: 50%; bottom: 26%;
+  transform: translateX(-50%);
+  font: bold 26px/1 "Microsoft YaHei", sans-serif;
+  color: #ffffff;
+  text-shadow: 0 0 10px rgba(120,180,255,0.9), 0 2px 4px rgba(0,0,0,0.9);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+#bounce-tip.pop { animation: bouncePop 0.3s ease; }
+@keyframes bouncePop { 0% { transform: translateX(-50%) scale(1.35); } 100% { transform: translateX(-50%) scale(1); } }
+
 #stats {
   position: absolute;
   left: 18px; bottom: 18px;
@@ -343,7 +386,10 @@ html, body {
   align-items: flex-end;
   gap: 4px;
   font-size: 13px;
+  transition: top 0.3s ease;   /* 回放小窗出现时整体下移避让 */
 }
+/* 命中回放小窗占据右上（top 46~283px）时，feed 挪到小窗正下方防互相遮挡 */
+#feed.below-cam { top: 296px; }
 .feed-line {
   background: rgba(0, 0, 0, 0.45);
   padding: 3px 10px;
