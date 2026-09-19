@@ -1206,10 +1206,11 @@ class MuzzleFlash {
 // 烟雾 / 凝结尾迹：缓慢膨胀、上浮、淡出。起火用深灰烟，喷气尾迹用白。
 const _smokeGeo = new THREE.SphereGeometry(1, 6, 6); // 共享单位球，靠 scale 缩放，省去每团烟分配几何
 class Smoke {
-  constructor(position, color = 0x888888, size = 0.6, life = 1.2, rise = 1.5) {
+  constructor(position, color = 0x888888, size = 0.6, life = 1.2, rise = 1.5, shape = null) {
     this.mesh = new THREE.Mesh(_smokeGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55 }));
     this.mesh.position.copy(position);
     this.size = size;
+    this.shape = shape;   // 可选 [sx,sy,sz]：非均匀拉伸（如横排扁烟 [2.4,0.55,1.1]），null=均匀球
     this.mesh.scale.setScalar(size);
     this.life = life;
     this.maxLife = life;
@@ -1221,13 +1222,78 @@ class Smoke {
     this.life -= dt;
     const t = 1 - this.life / this.maxLife;
     this.mesh.position.addScaledVector(this.vel, dt);
-    this.mesh.scale.setScalar(this.size * (1 + t * 2.6));
+    const k = this.size * (1 + t * 2.6);
+    if (this.shape) this.mesh.scale.set(k * this.shape[0], k * this.shape[1], k * this.shape[2]);
+    else this.mesh.scale.setScalar(k);
     this.mesh.material.opacity = Math.max(0, 0.55 * (1 - t));
     if (this.life <= 0) this.alive = false;
   }
 
   // 几何 _smokeGeo 全局共享，不释放；只 dispose 独立 material。
   dispose() { this.mesh.material.dispose(); }
+}
+
+// —— 行驶尘带：坦克身后拖出的连续横向尘土带 ——
+// 记录车尾轨迹点（间隔 ~0.9m），条带顶点贴地形，透明度沿带长+点龄双衰减、越老越宽微微上浮；
+// 车停/死亡后停止供点，整条 2.2s 淡出自拆。取代"一团团小烟球"——开过去留下整条横排尘雾。
+class DustTrail {
+  constructor(tank) {
+    this.tank = tank;
+    this.N = 26; this.spacing = 0.9;
+    this.pts = [];   // {x,z,lx,lz,t}：中心点 + 左半宽方向 + 生成时刻
+    this.age = 0; this.deadT = 0; this.alive = true;
+    const geo = new THREE.BufferGeometry();
+    this.posA = new THREE.BufferAttribute(new Float32Array(this.N * 2 * 3), 3).setUsage(THREE.DynamicDrawUsage);
+    this.colA = new THREE.BufferAttribute(new Float32Array(this.N * 2 * 4), 4).setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute('position', this.posA);
+    geo.setAttribute('color', this.colA);
+    const idx = [];
+    for (let i = 0; i < this.N - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+    geo.setIndex(idx);
+    this.mat = new THREE.MeshBasicMaterial({ color: 0xa5906c, transparent: true, depthWrite: false, side: THREE.DoubleSide, vertexColors: true });
+    this.mesh = new THREE.Mesh(geo, this.mat);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 2;
+  }
+  update(dt) {
+    const tk = this.tank;
+    this.age += dt;
+    const moving = tk.alive && Math.abs(tk.lastThrottle || 0) > 0.2;
+    if (moving) {
+      const fx = Math.sin(tk.heading), fz = Math.cos(tk.heading);
+      const cx = tk.position.x - fx * (tk.hullLen || 5) * 0.55, cz = tk.position.z - fz * (tk.hullLen || 5) * 0.55;
+      const lx = Math.cos(tk.heading), lz = -Math.sin(tk.heading);
+      const head = this.pts[0];
+      if (!head || (head.x - cx) ** 2 + (head.z - cz) ** 2 > this.spacing * this.spacing) {
+        this.pts.unshift({ x: cx, z: cz, lx, lz, t: this.age });
+        if (this.pts.length > this.N) this.pts.pop();
+      } else { head.lx = lx; head.lz = lz; }   // 原地转向：头点朝向实时贴合
+      this.deadT = 0;
+    } else this.deadT += dt;
+    const fadeAll = 1 - Math.min(1, this.deadT / 2.2);
+    if (fadeAll <= 0) { this.alive = false; return; }   // 车停久了：整条淡完自拆
+    const n = this.pts.length;
+    const pos = this.posA.array, col = this.colA.array;
+    for (let i = 0; i < this.N; i++) {
+      const o = i * 6, oc = i * 8;
+      const p = this.pts[i];
+      if (!p) { for (let k = 0; k < 6; k++) pos[o + k] = 0; for (let k = 0; k < 8; k++) col[oc + k] = 0; continue; }
+      const ageS = Math.max(0, 1 - (this.age - p.t) / 3.2);   // 单点 3.2s 寿命
+      const lenS = 1 - i / this.N;                             // 带尾渐隐
+      const a = 0.36 * ageS * lenS * fadeAll;
+      const hw = (tk.hullWid || 3) * 0.62 * (1 + i * 0.05);    // 越老越宽（尘扩散）
+      const lift = 0.2 + (this.age - p.t) * 0.07;              // 缓慢上浮
+      const ax = p.x + p.lx * hw, az = p.z + p.lz * hw;
+      const bx = p.x - p.lx * hw, bz = p.z - p.lz * hw;
+      pos[o] = ax; pos[o + 1] = terrainHeight(ax, az) + lift; pos[o + 2] = az;
+      pos[o + 3] = bx; pos[o + 4] = terrainHeight(bx, bz) + lift; pos[o + 5] = bz;
+      col[oc] = col[oc + 1] = col[oc + 2] = col[oc + 4] = col[oc + 5] = col[oc + 6] = 1;
+      col[oc + 3] = col[oc + 7] = a;
+    }
+    this.posA.needsUpdate = true;
+    this.colA.needsUpdate = true;
+  }
+  dispose() { this.mesh.geometry.dispose(); this.mat.dispose(); this.mesh.removeFromParent(); }
 }
 
 
@@ -1683,7 +1749,7 @@ class EntityManager {
 
   clear() {
     for (const e of this.effects) { if (e.dispose) e.dispose(); if (e.mesh) this.scene.remove(e.mesh); }   // 先归还光源/释放资源
-    for (const t of this.tanks) this.scene.remove(t.group);
+    for (const t of this.tanks) { if (t.dustTrail) { t.dustTrail.dispose(); t.dustTrail = null; } this.scene.remove(t.group); }
     for (const p of this.planes) this.scene.remove(p.group);
     for (const p of this.projectiles) this.scene.remove(p.mesh);
     this.tanks = []; this.planes = []; this.projectiles = []; this.effects = []; this.smokes = [];
@@ -2239,23 +2305,26 @@ class Tank {
     // 履带差速滚动：左履带=油门-转向、右履带=油门+转向
     if (this.trackMatL) this.trackMatL.map.offset.y += ((this.lastThrottle || 0) * 1.5 - (this._lastTurn || 0) * 1.2) * dt;
     if (this.trackMatR) this.trackMatR.map.offset.y += ((this.lastThrottle || 0) * 1.5 + (this._lastTurn || 0) * 1.2) * dt;
-    // 行驶扬尘：车尾两履带口卷出土黄烟（战雷式战场氛围）。限流：只给相机 160m 内的车+降频，
-    // 全场 20 辆车每秒几百团烟会把 GC 和 draw call 顶爆。
-    if (this.alive && this.em && Math.abs(this.lastThrottle || 0) > 0.25) {
-      this.dustT = (this.dustT || 0) - dt;
-      if (this.dustT <= 0) {
-        const near = !this.em.listener || this.position.distanceTo(this.em.listener.position) < 160;
-        if (near) {
+    // 行驶尘带：身后拖出连续横向尘土带（战雷式履带扬尘）+ 少量横排扁烟点缀升起
+    if (this.alive && this.em && Math.abs(this.lastThrottle || 0) > 0.2) {
+      const near = !this.em.listener || this.position.distanceTo(this.em.listener.position) < 170;
+      if (near) {
+        if (!this.dustTrail) {
+          this.dustTrail = new DustTrail(this);
+          this.em.scene.add(this.dustTrail.mesh);
+        }
+        this.dustT = (this.dustT || 0) - dt;
+        if (this.dustT <= 0) {
           const sh0 = Math.sin(this.heading), ch0 = Math.cos(this.heading);
-          const bx = this.position.x - sh0 * this.hullLen * 0.52, bz = this.position.z - ch0 * this.hullLen * 0.52;
-          for (const sx of [-1, 1]) {
-            const px = bx + ch0 * sx * this.hullWid * 0.42, pz = bz - sh0 * sx * this.hullWid * 0.42;
-            const p = new THREE.Vector3(px, terrainHeight(px, pz) + 0.3, pz);   // 贴地形高度：坡上扬尘不会悬空/埋地
-            this.em.addEffect(new Smoke(p, 0x9a8465, randRange(0.5, 0.9), randRange(1.0, 1.6), 0.8));
-          }
-          this.dustT = 0.22;
-        } else this.dustT = 0.3;   // 远处车：跳过本拍但继续计时
+          const px = this.position.x - sh0 * this.hullLen * 0.62, pz = this.position.z - ch0 * this.hullLen * 0.62;
+          this.em.addEffect(new Smoke(new THREE.Vector3(px, terrainHeight(px, pz) + 0.55, pz), 0x9a8465, randRange(0.5, 0.8), randRange(1.4, 2.0), 0.5, [2.6, 0.5, 1.1]));   // 宽×矮×薄：升起的一字横排
+          this.dustT = 0.42;
+        }
       }
+    }
+    if (this.dustTrail) {
+      this.dustTrail.update(dt);
+      if (!this.dustTrail.alive) { this.dustTrail.dispose(); this.dustTrail = null; }
     }
     // 炮塔反旋转：抵消车体贴坡倾斜，让炮塔在世界系保持水平、按 heading+turretYaw 朝向（瞄准不受地形影响）
     _tankWQ.setFromAxisAngle(_tankY, this.heading + this.turretYaw);
@@ -3754,7 +3823,7 @@ class Game {
     if (!t || !t.alive || this.mode !== 'tank') return;
     this._smokeAmmo = this._smokeAmmo ?? 3;
     this._smokeCd = this._smokeCd ?? 0;
-    if (this._smokeAmmo <= 0) { this.hud.addFeed('💨 烟雾弹已用完', 'info'); return; }
+    if (this._smokeAmmo <= 0) { this.hud.addFeed('💨 烟雾弹装填中…', 'info'); return; }
     if (this._smokeCd > 0) return;
     this._smokeAmmo--; this._smokeCd = 2;
     // 拖行烟幕:烟源挂车,开动时身后拖出一条烟带(原地放也会在车周堆烟)
@@ -4194,6 +4263,14 @@ class Game {
     if (this._consumePress(inp, 'KeyG')) this._launchSmoke();
     if (this._consumePress(inp, 'KeyV')) this._markTarget();   // 侦察标记:队友AI集火
     if (this._smokeCd > 0) this._smokeCd -= dt;
+    // 烟幕弹自动装填：用掉的弹每 18s 回充 1 发（上限 3），不再"一局 3 发用完就没了"
+    if (this._smokeAmmo != null && this._smokeAmmo < 3) {
+      this._smokeReload = (this._smokeReload ?? 18) - dt;
+      if (this._smokeReload <= 0) {
+        this._smokeAmmo++; this._smokeReload = 18;
+        this.hud.addFeed('💨 烟雾弹装填完毕 · 剩余 ' + this._smokeAmmo, 'info');
+      }
+    } else this._smokeReload = 18;
     // 弹种切换（1/2/3）：偏好存 this._shellPref，跨重生/换车保留
     for (let i = 0; i < SHELLS.length; i++) {
       if (this._consumePress(inp, 'Digit' + (i + 1))) {
