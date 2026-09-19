@@ -1591,7 +1591,8 @@ class Tank {
   _build() {
     const g = GEOM[this.type] || GEOM.medium;
     const [hw, hh, hl] = g.hull;
-    const bodyMat = new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.55, metalness: 0.35, map: camoTexture() });
+    const paintBump = makeNoiseTexture().clone(); paintBump.repeat.set(3, 3); paintBump.needsUpdate = true;
+    const bodyMat = new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.55, metalness: 0.35, map: camoTexture(), bumpMap: paintBump, bumpScale: 0.06 });
     const darkMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.9 });
     const metalMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.4, metalness: 0.65 });
 
@@ -1667,6 +1668,28 @@ class Tank {
       brake.position.set(0, 0, bl);
       this.barrelPivot.add(brake);
     }
+    // 炮管热护套（中段加粗段）：现代炮管标志性细节
+    if ((g.brake || tankTypeById(this.type).rank >= 4) && this.type !== 'aa') {
+      const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(br * 1.12, br * 1.12, bl * 0.42, 12), darkMat);
+      sleeve.rotation.x = Math.PI / 2;
+      sleeve.position.set(0, 0, bl * 0.55);
+      this.barrelPivot.add(sleeve);
+    }
+    // 炮塔天线（细长鞭状，随炮塔转动）：远看剪影立刻"像真车"
+    const antennae = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.045, hh * 1.6, 5), darkMat);
+    antennae.position.set(g.turretSize[0] * 0.32, g.turretSize[1] * 0.6 + hh * 0.75, -g.turretSize[0] * 0.28);
+    antennae.rotation.x = -0.12;
+    this.turret.add(antennae);
+    // 车头灯一对（前上装甲两侧）+ 尾部储物箱（行军杂物）
+    for (const lx of [-1, 1]) {
+      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), new THREE.MeshStandardMaterial({ color: 0xfff8e0, roughness: 0.2, metalness: 0.1, emissive: 0x554422 }));
+      lamp.position.set(lx * hw * 0.32, hullY + hh * 0.82, hl / 2 - G * 0.35);
+      this.group.add(lamp);
+    }
+    const stow = new THREE.Mesh(new THREE.BoxGeometry(hw * 0.6, hh * 0.4, 0.42), bodyMat);
+    stow.position.set(0, hullY + hh * 0.25, -hl / 2 - 0.05);
+    stow.castShadow = true;
+    this.group.add(stow);
     this.muzzle = new THREE.Object3D();
     this.muzzle.position.set(0, 0, bl + 0.2);
     this.barrelPivot.add(this.muzzle);
@@ -2151,7 +2174,8 @@ class Plane {
 
   _build() {
     const g = PGEOM[this.type] || PGEOM.fighter;
-    const mat = new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.5, metalness: 0.4, map: camoTexture() });
+    const paintBump = makeNoiseTexture().clone(); paintBump.repeat.set(3, 3); paintBump.needsUpdate = true;
+    const mat = new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.5, metalness: 0.4, map: camoTexture(), bumpMap: paintBump, bumpScale: 0.05 });
     this.bodyMat = mat; // 损伤可视化：起火时把机身材质焦化
     const darkMat = new THREE.MeshStandardMaterial({ color: 0x232323, roughness: 0.7, metalness: 0.3 });
     const glassMat = new THREE.MeshStandardMaterial({ color: 0xb8e0f0, roughness: 0.1, metalness: 0.6, transparent: true, opacity: 0.65 });
@@ -2170,6 +2194,14 @@ class Plane {
     const noseLen = fuseR * 2.6;
     const nose = new THREE.Mesh(new THREE.ConeGeometry(fuseR * 0.96, noseLen, 16), mat);
     nose.rotation.x = Math.PI / 2; nose.position.z = halfL + noseLen / 2; nose.castShadow = true; this.group.add(nose);
+    // 空速管：机头正前方的细长探针（战机剪影的识别特征）
+    const pitot = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, fuseR * 2.2, 6), darkMat);
+    pitot.rotation.x = Math.PI / 2; pitot.position.z = halfL + noseLen + fuseR * 1.05;
+    this.group.add(pitot);
+    // 机背刀片天线（座舱后）：通讯天线
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, fuseR * 0.5, fuseR * 0.85), darkMat);
+    blade.position.set(0, fuseR * 0.95, halfL * 0.02); blade.castShadow = true;
+    this.group.add(blade);
 
     // 流线座舱（拉长水滴形）+ 暗色舱框
     const canopy = new THREE.Mesh(new THREE.SphereGeometry(fuseR * 1.0, 14, 10), glassMat);
@@ -2882,7 +2914,8 @@ function createTerrain(scene, mode, mapId) {
   gpos.needsUpdate = true;
   groundGeo.setAttribute('color', new THREE.Float32BufferAttribute(gcol, 3));
   groundGeo.computeVertexNormals();
-  const groundMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 });
+  const dirtBump = makeNoiseTexture().clone(); dirtBump.repeat.set(64, 64); dirtBump.needsUpdate = true;
+  const groundMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, bumpMap: dirtBump, bumpScale: 0.35 });
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.receiveShadow = true;
   group.add(ground);
