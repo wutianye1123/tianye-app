@@ -448,6 +448,7 @@ class HUD {
       <div id="aim-circle"></div>
       <div id="reload-ring"></div>
       <div id="dmg-dir"></div>
+      <div id="bounce-tip"></div>
       <div id="hitmarker"></div>
       <div id="lead-reticle" style="display:none"></div>
       <div id="stats">
@@ -486,6 +487,25 @@ class HUD {
     this.resultSub = container.querySelector('#result-sub');
     this.reloadRing = container.querySelector('#reload-ring');
     this.dmgDir = container.querySelector('#dmg-dir');
+    this.bounceTip = container.querySelector('#bounce-tip');
+  }
+
+  // 跳弹浮动提示：屏幕中下方独立显示（不进 feed 流，速射炮下 feed 会刷屏看不见），
+  // 1.2s 内连续跳弹聚合计数（×N），超时淡出。
+  flashBounce() {
+    if (!this.bounceTip) this.bounceTip = this.container.querySelector('#bounce-tip');
+    if (!this.bounceTip) return;
+    const now = performance.now();
+    if (now - (this._lastBounceT || 0) > 1200) this._bounceN = 0;
+    this._lastBounceT = now;
+    this._bounceN = (this._bounceN || 0) + 1;
+    this.bounceTip.textContent = this._bounceN > 1 ? `⤺ 跳弹 ×${this._bounceN}` : '⤺ 跳弹';
+    this.bounceTip.style.opacity = '1';
+    this.bounceTip.classList.remove('pop');
+    void this.bounceTip.offsetWidth;   // 强制 reflow 重启动画
+    this.bounceTip.classList.add('pop');
+    clearTimeout(this._bounceFade);
+    this._bounceFade = setTimeout(() => { this.bounceTip.style.opacity = '0'; }, 1100);
   }
 
   // 让准星（与命中标记、装填环）跟随光标。
@@ -1082,10 +1102,14 @@ function acquireExplosionLight() {
 }
 
 class Projectile {
-  constructor({ position, direction, speed, damage, owner = null, ownerTeam, color = 0xffe08a, size = 0.35, gravity = 0, life = 3 }) {
+  // pen/shellDef 必须进构造：装甲判定（跳弹/未击穿/等效装甲）全靠它们。
+  // 曾因解构漏了这两个参数，穿深被静默丢弃 → onHit 装甲判定整个跳过 → 跳弹/未击穿永远为 0。
+  constructor({ position, direction, speed, damage, owner = null, ownerTeam, color = 0xffe08a, size = 0.35, gravity = 0, life = 3, pen = 0, shellDef = null }) {
     this.mesh = new THREE.Mesh(projGeo(size), projMat(color));
     this.mesh.position.copy(position);
     this.radius = size;
+    this.pen = pen;               // 穿深（mm）：无则不走装甲判定（纯伤害弹）
+    this.shellDef = shellDef;     // 弹种（跳弹角/衰减/是否榴弹）
     if (size >= 0.4) { this.stretch = true; this.mesh.scale.z = 7; }   // 主炮曳光:拉长沿弹道定向(机枪/航炮弹不拉)，7 倍=清晰可见的光条
     this.velocity = direction.clone().normalize().multiplyScalar(speed);
     this.launchPos = position.clone();   // 击杀回放：出膛点快照（按真实弹道慢放重演）
