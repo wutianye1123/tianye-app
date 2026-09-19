@@ -3381,26 +3381,15 @@ class TankAI {
     if (!smokeBlind && !losBlocked && !target.isZone && tank.canFire() && dist < 240 && Math.abs(aimDiff) < aimThresh && Math.random() < fireChance) {
       tank.tryFire(em);
     }
-    // 打飞机时额外用机枪（密集火力追着飞机打）；敌方不用（太超模）
-    if (isAirTarget && !isEnemy && dist < 120 && Math.abs(aimDiff) < 0.15) {
+    // 打飞机时额外用机枪（密集火力追着飞机打）；敌方不用（太超模）；视线被挡不打
+    if (isAirTarget && !isEnemy && dist < 120 && Math.abs(aimDiff) < 0.15
+        && !losBlocked(tank.position, target.position, obstacles)) {
       tank.tryFireMG(em);
     }
   }
 
-  // 炮口→目标线段 vs 障碍圆柱(水平近似)：任一障碍的沿线投影在段内且垂距小于半径 → 被挡。
-  _losBlocked(a, b, obstacles) {
-    const dx = b.x - a.x, dz = b.z - a.z;
-    const len = Math.hypot(dx, dz) || 1;
-    const fx = dx / len, fz = dz / len;
-    for (const ob of obstacles || []) {
-      const ox = ob.position.x - a.x, oz = ob.position.z - a.z;
-      const along = ox * fx + oz * fz;
-      if (along <= 0 || along >= len) continue;
-      const side = Math.abs(ox * -fz + oz * fx);
-      if (side < (ob.radius || 3) && (ob.height ?? 30) > 2.2) return true;
-    }
-    return false;
-  }
+  // 炮口→目标视线（转发统一模块函数：障碍高度判定+山脊地形采样）
+  _losBlocked(a, b, obstacles) { return losBlocked(a, b, obstacles); }
 }
 
 
@@ -3667,6 +3656,29 @@ class RainFX {
   dispose() { this.mesh.geometry.dispose(); this.mesh.material.dispose(); this.mesh.removeFromParent(); }
 }
 
+// —— 统一视线检查（AI 开火防浪费）：a→b 线段 vs 障碍圆柱（含高度判定）+ 山脊地形采样 ——
+// 所有 AI 的机炮/主炮开火前都查：被楼/山挡住就不泼弹药。
+function losBlocked(a, b, obstacles) {
+  const dx = b.x - a.x, dz = b.z - a.z;
+  const len = Math.hypot(dx, dz) || 1;
+  const fx = dx / len, fz = dz / len;
+  for (const ob of (obstacles || [])) {
+    const ox = ob.position.x - a.x, oz = ob.position.z - a.z;
+    const along = ox * fx + oz * fz;
+    if (along <= 0 || along >= len) continue;
+    const side = Math.abs(ox * -fz + oz * fx);
+    if (side >= (ob.radius || 3)) continue;
+    const t = along / len;
+    const lineY = a.y + (b.y - a.y) * t;   // 线段在障碍处的近似高度
+    if ((ob.height ?? 30) > lineY - 1) return true;   // 障碍顶高于弹道 → 挡
+  }
+  for (let i = 1; i <= 4; i++) {   // 山脊挡视线：沿线 4 个地形采样点
+    const t = i / 5;
+    if (a.y + (b.y - a.y) * t < terrainHeight(a.x + dx * t, a.z + dz * t) + 1.5) return true;
+  }
+  return false;
+}
+
 // ===== js/ai/PlaneAI.js =====
 
 // 敌方飞机 AI：复用与玩家相同的"飞行教官"接口，把目标方向喂给 aimToward。
@@ -3677,7 +3689,7 @@ class PlaneAI {
   }
 
   update(dt, ctx) {
-    const { target, entityManager: em, smokes = [] } = ctx;
+    const { target, entityManager: em, obstacles = [], smokes = [] } = ctx;
     const plane = this.plane;
     if (!plane.alive) return;
     // 烟幕判定：目标或自己在烟里 → 不开火（与 TankAI 一致,飞机不能无视烟）
@@ -3715,12 +3727,13 @@ class PlaneAI {
     plane.aimToward(aimDir, dt, 0.6); // 敌机用更柔的坡度，便于玩家追瞄
     plane.throttle = dist > 70 ? 1 : 0.7;
 
-    // 对齐且在射程内开火（敌方更不准）
+    // 对齐且在射程内开火（敌方更不准）；视线被楼/山挡住不打（隔楼泼机炮=纯浪费）
     const fwd = plane.forwardVector();
     const isEnemy = plane.team === 'red';
     const dotThresh = isEnemy ? 0.996 : 0.99;
     const fireChance = isEnemy ? CONFIG.plane.enemyFireChance : 0.9;
-    if (!smokeBlind && dist < 280 && fwd.dot(aimDir) > dotThresh && Math.random() < fireChance) {
+    if (!smokeBlind && dist < 280 && fwd.dot(aimDir) > dotThresh && Math.random() < fireChance
+        && !losBlocked(plane.position, target.position, obstacles)) {
       plane.tryFire(em);
     }
   }
@@ -4746,8 +4759,9 @@ class Game {
     let dy = desiredYaw - p.heading;
     dy = Math.atan2(Math.sin(dy), Math.cos(dy));
     p.setYawInput(clamp(dy * 1.6, -1, 1));
-    // 开火：机炮常开（260m 内），火箭 180m 内按节奏齐射
-    if (flatDist < 260 && p.canFire()) p.tryFire(this.em);
+    // 开火：机炮常开（260m 内，视线被楼/山挡住不打——隔楼泼炮纯浪费），火箭 180m 内按节奏齐射
+    const obs = this.terrain ? this.terrain.obstacles : [];
+    if (flatDist < 260 && p.canFire() && !losBlocked(p.position, target.position, obs)) p.tryFire(this.em);
     if (flatDist < 180 && p.missiles > 0 && Math.random() < dt * 0.5) p.tryFireMissile(this.em, this.enemies);
     if (p.type === 'ah64' && flatDist < 160 && Math.random() < dt * 2.5) p.tryFireRockets(this.em, true);   // AI：逐发泼火箭（5发一巢自动装填）
   }
