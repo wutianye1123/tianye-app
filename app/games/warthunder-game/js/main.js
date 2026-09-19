@@ -130,26 +130,27 @@ function applyDifficulty(level) {
 const DIFFICULTY_LABELS = { easy: '简单', normal: '普通', hard: '困难' };
 
 // —— 坦克型号 ——（在难度调整后的基础数值上再乘这些倍率；scale 为体积）
-// armor/tArmor: [前,侧,后]mm 车体/炮塔等效厚度（战雷式分区判定，tArmor 缺省退化用车体甲）。
+// armor/tArmor: [前,侧,后]mm 车体/炮塔"法线入射等效"厚度；slope/tSlope: [前,侧,后] 装甲倾角(自垂直面°)。
+// 倾角参与跳弹与斜入射等效合成（T-34 首上60°/黑豹55°/T-80U 68°/M1 75°——越斜越跳弹，方盒子虎式靠厚度硬吃）。
 const TANK_TYPES = [
   // Rank 1
-  { id:'medium',  name:'T-34-85',     icon:'🇷🇺', scale:1.0,  hp:1.0,  speed:1.0,  turn:1.0,  turret:1.0,  reload:1.0, dmg:1.0,  armor:[90,60,45], tArmor:[90,75,52], pen:135, rank:1, rp:0,    prereq:null,      price:0 },
-  { id:'m4',      name:'M4A3 谢尔曼',  icon:'🇺🇸', scale:1.0,  hp:1.15, speed:0.95, turn:1.0,  turret:1.0,  reload:1.1, dmg:0.95, armor:[100,60,45], tArmor:[90,60,50], pen:110, rank:1, rp:200,  prereq:null,      price:800 },
+  { id:'medium',  name:'T-34-85',     icon:'🇷🇺', scale:1.0,  hp:1.0,  speed:1.0,  turn:1.0,  turret:1.0,  reload:1.0, dmg:1.0,  armor:[90,60,45], tArmor:[90,75,52], slope:[60,0,0], pen:135, rank:1, rp:0,    prereq:null,      price:0 },
+  { id:'m4',      name:'M4A3 谢尔曼',  icon:'🇺🇸', scale:1.0,  hp:1.15, speed:0.95, turn:1.0,  turret:1.0,  reload:1.1, dmg:0.95, armor:[100,60,45], tArmor:[90,60,50], slope:[45,0,0], pen:110, rank:1, rp:200,  prereq:null,      price:800 },
   // Rank 2
-  { id:'panzer2', name:'II 号坦克',    icon:'🇩🇪', scale:0.78, hp:0.6,  speed:1.4,  turn:1.6,  turret:1.6,  reload:0.7, dmg:0.6,  armor:[30,20,15], tArmor:[30,15,15], pen:55, rank:2, rp:300,  prereq:'medium',  price:1000 },
-  { id:'light',   name:'M24 霞飞',     icon:'🇺🇸', scale:0.85, hp:0.75, speed:1.5,  turn:1.5,  turret:1.7,  reload:0.7, dmg:0.8,  armor:[38,25,19], tArmor:[38,25,25], pen:60, rank:2, rp:300,  prereq:'medium',  price:1500 },
-  { id:'scout',   name:'234/2 美洲狮', icon:'🇩🇪', scale:0.8,  hp:0.5,  speed:1.7,  turn:1.8,  turret:1.8,  reload:0.6, dmg:0.5,  armor:[30,20,15], tArmor:[30,20,15], pen:65, rank:2, rp:350,  prereq:'medium',  price:1200 },
+  { id:'panzer2', name:'II 号坦克',    icon:'🇩🇪', scale:0.78, hp:0.6,  speed:1.4,  turn:1.6,  turret:1.6,  reload:0.7, dmg:0.6,  armor:[30,20,15], tArmor:[30,15,15], slope:[10,0,0], pen:55, rank:2, rp:300,  prereq:'medium',  price:1000 },
+  { id:'light',   name:'M24 霞飞',     icon:'🇺🇸', scale:0.85, hp:0.75, speed:1.5,  turn:1.5,  turret:1.7,  reload:0.7, dmg:0.8,  armor:[38,25,19], tArmor:[38,25,25], slope:[55,0,0], pen:60, rank:2, rp:300,  prereq:'medium',  price:1500 },
+  { id:'scout',   name:'234/2 美洲狮', icon:'🇩🇪', scale:0.8,  hp:0.5,  speed:1.7,  turn:1.8,  turret:1.8,  reload:0.6, dmg:0.5,  armor:[30,20,15], tArmor:[30,20,15], slope:[30,0,0], pen:65, rank:2, rp:350,  prereq:'medium',  price:1200 },
   // Rank 3
-  { id:'td',      name:'SU-100',      icon:'🇷🇺', scale:1.05, hp:1.1,  speed:0.9,  turn:0.8,  turret:0.7,  reload:1.4, dmg:2.8,  armor:[75,45,45], tArmor:[100,45,45], pen:185, rank:3, rp:800,  prereq:'light',   price:3500 },
-  { id:'panther', name:'黑豹 V',       icon:'🇩🇪', scale:1.1,  hp:1.3,  speed:1.05, turn:0.85, turret:0.9,  reload:1.1, dmg:1.9,  armor:[120,60,50], tArmor:[110,45,45], pen:160, rank:3, rp:900,  prereq:'td',      price:4200 },
+  { id:'td',      name:'SU-100',      icon:'🇷🇺', scale:1.05, hp:1.1,  speed:0.9,  turn:0.8,  turret:0.7,  reload:1.4, dmg:2.8,  armor:[75,45,45], tArmor:[100,45,45], slope:[50,0,0], pen:185, rank:3, rp:800,  prereq:'light',   price:3500 },
+  { id:'panther', name:'黑豹 V',       icon:'🇩🇪', scale:1.1,  hp:1.3,  speed:1.05, turn:0.85, turret:0.9,  reload:1.1, dmg:1.9,  armor:[120,60,50], tArmor:[110,45,45], slope:[55,25,0], pen:160, rank:3, rp:900,  prereq:'td',      price:4200 },
   // Rank 4
-  { id:'heavy',   name:'虎 I',        icon:'🇩🇪', scale:1.2,  hp:2.0,  speed:0.7,  turn:0.7,  turret:0.9,  reload:1.3, dmg:2.2,  armor:[110,80,80], tArmor:[110,80,80], pen:165, rank:4, rp:1600, prereq:'panther', price:4500 },
-  { id:'is2',     name:'IS-2',        icon:'🇷🇺', scale:1.2,  hp:2.2,  speed:0.65, turn:0.65, turret:0.8,  reload:1.5, dmg:2.6,  armor:[120,90,60], tArmor:[100,90,60], pen:190, rank:4, rp:2000, prereq:'heavy',   price:5500 },
+  { id:'heavy',   name:'虎 I',        icon:'🇩🇪', scale:1.2,  hp:2.0,  speed:0.7,  turn:0.7,  turret:0.9,  reload:1.3, dmg:2.2,  armor:[110,80,80], tArmor:[110,80,80], slope:[10,0,0], pen:165, rank:4, rp:1600, prereq:'panther', price:4500 },
+  { id:'is2',     name:'IS-2',        icon:'🇷🇺', scale:1.2,  hp:2.2,  speed:0.65, turn:0.65, turret:0.8,  reload:1.5, dmg:2.6,  armor:[120,90,60], tArmor:[100,90,60], slope:[60,0,0], pen:190, rank:4, rp:2000, prereq:'heavy',   price:5500 },
   // Rank 5
-  { id:'t80',     name:'T-80U',       icon:'🇷🇺', scale:1.1,  hp:2.4,  speed:1.2,  turn:1.1,  turret:1.3,  reload:0.9, dmg:2.5,  armor:[200,120,70], tArmor:[280,130,80], pen:450, rank:5, rp:3000, prereq:'is2',     price:8800 },
-  { id:'assault', name:'鼠式',        icon:'🇩🇪', scale:1.3,  hp:2.6,  speed:0.6,  turn:0.6,  turret:0.85, reload:1.6, dmg:3.4,  armor:[240,185,160], tArmor:[240,185,160], pen:245, rank:5, rp:3200, prereq:'is2',     price:9500 },
-  { id:'m1a2',    name:'M1A2 艾布拉姆斯', icon:'🇺🇸', scale:1.4,  hp:3.5, speed:1.9, turn:2.0, turret:2.0,  reload:0.5, dmg:3.6, armor:[380,150,90], tArmor:[420,170,90], pen:600, rank:6, rp:6000, prereq:'is2', price:20000 }, // 满级终极坦克：每一项都拉到全场最高
-  { id:'aa',      name:'ZSU-23-4 石勒喀河', icon:'🇷🇺', scale:0.85, hp:0.7, speed:1.2, turn:1.5, turret:2.0, reload:0.1, dmg:0.4, armor:[15,15,15], tArmor:[15,15,15], pen:20, rank:2, rp:400, prereq:'medium', price:1500 }, // 防空坦克：高仰角速射打飞机
+  { id:'t80',     name:'T-80U',       icon:'🇷🇺', scale:1.1,  hp:2.4,  speed:1.2,  turn:1.1,  turret:1.3,  reload:0.9, dmg:2.5,  armor:[200,120,70], tArmor:[280,130,80], slope:[68,0,0], tSlope:[30,0,0], pen:450, rank:5, rp:3000, prereq:'is2',     price:8800 },
+  { id:'assault', name:'鼠式',        icon:'🇩🇪', scale:1.3,  hp:2.6,  speed:0.6,  turn:0.6,  turret:0.85, reload:1.6, dmg:3.4,  armor:[240,185,160], tArmor:[240,185,160], slope:[30,0,20], pen:245, rank:5, rp:3200, prereq:'is2',     price:9500 },
+  { id:'m1a2',    name:'M1A2 艾布拉姆斯', icon:'🇺🇸', scale:1.4,  hp:3.5, speed:1.9, turn:2.0, turret:2.0,  reload:0.5, dmg:3.6, armor:[380,150,90], tArmor:[420,170,90], slope:[75,0,0], tSlope:[25,0,0], pen:600, rank:6, rp:6000, prereq:'is2', price:20000 }, // 满级终极坦克：每一项都拉到全场最高
+  { id:'aa',      name:'ZSU-23-4 石勒喀河', icon:'🇷🇺', scale:0.85, hp:0.7, speed:1.2, turn:1.5, turret:2.0, reload:0.1, dmg:0.4, armor:[15,15,15], tArmor:[15,15,15], slope:[30,0,0], pen:20, rank:2, rp:400, prereq:'medium', price:1500 }, // 防空坦克：高仰角速射打飞机
 ];
 // —— 弹种 ——（战争雷霆式：1/2/3 切换，中文名）
 // penMul:穿深倍率(乘载具 pen)；dmgMul:后效倍率(乘 shellDamage)；bounceDeg:跳弹角(入射角超过即跳)。
@@ -1489,9 +1490,11 @@ class Tank {
     this.turnSpeed = CONFIG.tank.turnSpeed * tt.turn;
     if (!isEnemy && type === 'aa') { this.turretSpeed *= 2.5; this.reloadTime *= 0.3; this.maxSpeed *= 1.8; this.turnSpeed *= 1.5; }   // 玩家防空炮：炮塔更快+射速更快+跑得更快+转向更快（buff 须在赋值之后，否则 *= 被下方赋值覆盖失效）
     this.fireSpread = isEnemy ? CONFIG.tank.enemySpread : (side === 'ally' ? CONFIG.tank.allySpread : 0);
-    // 装甲/穿深（战争雷霆式：armor[前,侧,后]mm 车体甲，tArmor 炮塔甲；pen 穿深 mm；老型号无则退化弱值，行为兜底）
+    // 装甲/穿深（战争雷霆式：armor[前,侧,后]mm 车体甲，tArmor 炮塔甲；slope/tSlope 装甲倾角°；pen 穿深 mm；老型号无则退化弱值，行为兜底）
     this.armor = tt.armor || [30, 20, 15];
     this.tArmor = tt.tArmor || this.armor;
+    this.slope = tt.slope || [0, 0, 0];
+    this.tSlope = tt.tSlope || [0, 0, 0];
     this.pen = tt.pen || 60;
     this.shellKind = 'ap';   // 当前弹种（玩家 1/2/3 切换；AI 用默认穿甲榴弹）
 
@@ -1828,25 +1831,31 @@ class Tank {
           isTurret = ly > 2.4 * (this.radius / 3);
         }
         const plates = isTurret ? this.tArmor : this.armor;
+        const slopes = isTurret ? this.tSlope : this.slope;
         const rel = Math.atan2(-vx, -vz) - this.heading;   // 来弹方位（0=正前）
         const a = Math.abs(Math.atan2(Math.sin(rel), Math.cos(rel)));
         // 0..π：前 60°→前甲；60..120°→侧甲；120..π→后甲
-        const plate = a < Math.PI / 3 ? plates[0] : (a < 2 * Math.PI / 3 ? plates[1] : plates[2]);
-        // —— 3D 入射角：来弹方向与装甲法线的完整夹角（含俯冲/爬升分量，斜穿等效并入） ——
-        const plateAz = a < Math.PI / 3 ? 0 : (a < 2 * Math.PI / 3 ? Math.PI / 2 : Math.PI);
+        const zone = a < Math.PI / 3 ? 0 : (a < 2 * Math.PI / 3 ? 1 : 2);
+        const plate = plates[zone];
+        // —— 3D 入射角：来弹方向与(未倾斜)装甲法线的完整夹角（含俯冲/爬升分量） ——
+        const plateAz = zone === 0 ? 0 : (zone === 1 ? Math.PI / 2 : Math.PI);
         const nx = Math.sin(this.heading + plateAz), nz = Math.cos(this.heading + plateAz);
         const cosInc = clamp(Math.abs(vx * nx + vz * nz), 0, 1);
-        const incDeg = Math.acos(cosInc) * 180 / Math.PI;
-        // 跳弹：入射角超过弹种跳弹角（榴弹 noBounce 不跳）
-        if (!sh.noBounce && incDeg > sh.bounceDeg) {
+        // —— 板倾角合成（战雷跳弹的物理来源）：斜装甲法线后仰，方位入射与倾角绕正交轴旋转，
+        // cos(总入射角) = cos(方位入射)·cos(倾角)。T-34 首上60°被斜着打：60°+方位 → 轻松过 70° 跳弹线。
+        const sRad = ((slopes && slopes[zone]) || 0) * Math.PI / 180;
+        const cosTotal = clamp(cosInc * Math.cos(sRad), 0.02, 1);
+        const totalDeg = Math.acos(cosTotal) * 180 / Math.PI;
+        // 跳弹：总入射角超过弹种跳弹角（榴弹 noBounce 不跳；硬芯 62° 比穿甲榴弹 70° 更易跳）
+        if (!sh.noBounce && totalDeg > sh.bounceDeg) {
           this.lastCrit = null;
           return 'bounce';
         }
         // 穿深距离衰减（战雷规律：次口径硬芯存速差衰减快，榴弹不衰；40% 封底）
         const trav = hitPoint ? hitPoint.distanceTo(projectile.launchPos) : 0;
         const penEff = projectile.pen * Math.max(0.4, 1 - (sh.penDrop || 0) * Math.min(1, trav / 1000));
-        // 等效装甲 = 厚度 / cos(入射角)（cos 0.18 封底防除零，最坏 ×5.7）
-        const eff = plate / Math.max(0.18, cosInc);
+        // 等效装甲：armor 值=法线入射等效（倾角摊薄已含），斜入射增量按 cos(倾角)/cos(总入射)（cos 0.18 封底防除零）
+        const eff = plate * Math.cos(sRad) / Math.max(0.18, cosTotal);
         if (penEff < eff) {
           // 未击穿：榴弹改走「范围爆炸」(见 checkCollisions 的 needSplash 分支,波及附近敌坦克)，
           // 这里不再单点扣 25%——范围伤害里命中者自己按中心满衰减拿。
