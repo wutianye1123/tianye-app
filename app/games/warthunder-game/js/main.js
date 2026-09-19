@@ -136,24 +136,48 @@ const DIFFICULTY_LABELS = { easy: '简单', normal: '普通', hard: '困难' };
 // armor/tArmor: [前,侧,后]mm 车体/炮塔"法线入射等效"厚度；slope/tSlope: [前,侧,后] 装甲倾角(自垂直面°)。
 // 倾角参与跳弹与斜入射等效合成（T-34 首上60°/黑豹55°/T-80U 68°/M1 75°——越斜越跳弹，方盒子虎式靠厚度硬吃）。
 const TANK_TYPES = [
+  // ===== 二战早期（1939-1941）=====
   // Rank 1
   { id:'medium',  name:'T-34-85',     icon:'🇷🇺', scale:1.0,  hp:1.0,  speed:1.0,  turn:1.0,  turret:1.0,  reload:1.0, dmg:1.0,  armor:[90,60,45], tArmor:[90,75,52], slope:[60,0,0], pen:135, rank:1, rp:0,    prereq:null,      price:0 },
   { id:'m4',      name:'M4A3 谢尔曼',  icon:'🇺🇸', scale:1.0,  hp:1.15, speed:0.95, turn:1.0,  turret:1.0,  reload:1.1, dmg:0.95, armor:[100,60,45], tArmor:[90,60,50], slope:[45,0,0], pen:110, rank:1, rp:200,  prereq:null,      price:800 },
+  { id:'t26',     name:'T-26',        icon:'🇷🇺', scale:0.75, hp:0.55, speed:1.15, turn:1.5,  turret:1.5,  reload:0.6, dmg:0.5,  armor:[15,15,12], tArmor:[15,12,12], slope:[15,0,0], pen:35,  rank:1, rp:100,  prereq:null,      price:500 },
+  { id:'pz38t',   name:'38(t)',       icon:'🇩🇪', scale:0.75, hp:0.55, speed:1.3,  turn:1.45, turret:1.4,  reload:0.65,dmg:0.5,  armor:[25,15,15], tArmor:[25,15,15], slope:[15,0,0], pen:45,  rank:1, rp:150,  prereq:null,      price:700 },
+  { id:'matilda', name:'玛蒂尔达 II', icon:'🇬🇧', scale:1.0,  hp:1.1,  speed:0.55, turn:0.75, turret:0.9,  reload:1.0, dmg:0.75, armor:[78,65,55], tArmor:[75,70,60], slope:[15,0,0], pen:70,  rank:1, rp:150,  prereq:null,      price:900 },
+  { id:'b1bis',   name:'B1 bis',      icon:'🇫🇷', scale:1.05, hp:1.2,  speed:0.5,  turn:0.6,  turret:0.7,  reload:1.2, dmg:1.0,  armor:[60,55,50], tArmor:[45,40,40], slope:[30,0,0], pen:60,  rank:1, rp:200,  prereq:null,      price:1000 },
+  { id:'m3stuart',name:'M3 斯图亚特', icon:'🇺🇸', scale:0.72, hp:0.5,  speed:1.6,  turn:1.6,  turret:1.6,  reload:0.55,dmg:0.45, armor:[38,25,20], tArmor:[32,25,25], slope:[22,0,0], pen:50,  rank:1, rp:150,  prereq:null,      price:800 },
   // Rank 2
-  { id:'panzer2', name:'II 号坦克',    icon:'🇩🇪', scale:0.78, hp:0.6,  speed:1.4,  turn:1.6,  turret:1.6,  reload:0.7, dmg:0.6,  armor:[30,20,15], tArmor:[30,15,15], slope:[10,0,0], pen:55, rank:2, rp:300,  prereq:'medium',  price:1000 },
-  { id:'light',   name:'M24 霞飞',     icon:'🇺🇸', scale:0.85, hp:0.75, speed:1.5,  turn:1.5,  turret:1.7,  reload:0.7, dmg:0.8,  armor:[38,25,19], tArmor:[38,25,25], slope:[55,0,0], pen:60, rank:2, rp:300,  prereq:'medium',  price:1500 },
-  { id:'scout',   name:'234/2 美洲狮', icon:'🇩🇪', scale:0.8,  hp:0.5,  speed:1.7,  turn:1.8,  turret:1.8,  reload:0.6, dmg:0.5,  armor:[30,20,15], tArmor:[30,20,15], slope:[30,0,0], pen:65, rank:2, rp:350,  prereq:'medium',  price:1200 },
+  { id:'panzer2', name:'II 号坦克',    icon:'🇩🇪', scale:0.78, hp:0.6,  speed:1.4,  turn:1.6,  turret:1.6,  reload:0.7, dmg:0.6,  armor:[30,20,15], tArmor:[30,15,15], slope:[10,0,0], pen:55,  rank:2, rp:300,  prereq:'medium',  price:1000 },
+  { id:'light',   name:'M24 霞飞',     icon:'🇺🇸', scale:0.85, hp:0.75, speed:1.5,  turn:1.5,  turret:1.7,  reload:0.7, dmg:0.8,  armor:[38,25,19], tArmor:[38,25,25], slope:[55,0,0], pen:60,  rank:2, rp:300,  prereq:'medium',  price:1500 },
+  { id:'scout',   name:'234/2 美洲狮', icon:'🇩🇪', scale:0.8,  hp:0.5,  speed:1.7,  turn:1.8,  turret:1.8,  reload:0.6, dmg:0.5,  armor:[30,20,15], tArmor:[30,20,15], slope:[30,0,0], pen:65,  rank:2, rp:350,  prereq:'medium',  price:1200 },
+  { id:'aa',      name:'ZSU-23-4 石勒喀河', icon:'🇷🇺', scale:0.85, hp:0.7, speed:1.2, turn:1.5, turret:2.0, reload:0.1, dmg:0.4, armor:[15,15,15], tArmor:[15,15,15], slope:[30,0,0], pen:20, rank:2, rp:400, prereq:'medium', price:1500 }, // 防空坦克：高仰角速射打飞机
+  // ===== 二战中后期（1942-1945）=====
   // Rank 3
+  { id:'pz4',     name:'四号 F2',      icon:'🇩🇪', scale:1.0,  hp:1.05, speed:1.0,  turn:1.0,  turret:1.0,  reload:1.05,dmg:1.3,  armor:[50,30,30], tArmor:[50,30,30], slope:[12,0,0], pen:130, rank:3, rp:700,  prereq:'panzer2', price:3000 },
+  { id:'cromwell',name:'克伦威尔',     icon:'🇬🇧', scale:1.0,  hp:1.0,  speed:1.45, turn:1.2,  turret:1.1,  reload:0.85,dmg:0.9,  armor:[64,42,32], tArmor:[76,50,40], slope:[25,0,0], pen:120, rank:3, rp:750,  prereq:'matilda', price:3300 },
   { id:'td',      name:'SU-100',      icon:'🇷🇺', scale:1.05, hp:1.1,  speed:0.9,  turn:0.8,  turret:0.7,  reload:1.4, dmg:2.8,  armor:[75,45,45], tArmor:[100,45,45], slope:[50,0,0], pen:185, rank:3, rp:800,  prereq:'light',   price:3500 },
   { id:'panther', name:'黑豹 V',       icon:'🇩🇪', scale:1.1,  hp:1.3,  speed:1.05, turn:0.85, turret:0.9,  reload:1.1, dmg:1.9,  armor:[120,60,50], tArmor:[110,45,45], slope:[55,25,0], pen:160, rank:3, rp:900,  prereq:'td',      price:4200 },
   // Rank 4
   { id:'heavy',   name:'虎 I',        icon:'🇩🇪', scale:1.2,  hp:2.0,  speed:0.7,  turn:0.7,  turret:0.9,  reload:1.3, dmg:2.2,  armor:[110,80,80], tArmor:[110,80,80], slope:[10,0,0], pen:165, rank:4, rp:1600, prereq:'panther', price:4500 },
   { id:'is2',     name:'IS-2',        icon:'🇷🇺', scale:1.2,  hp:2.2,  speed:0.65, turn:0.65, turret:0.8,  reload:1.5, dmg:2.6,  armor:[120,90,60], tArmor:[100,90,60], slope:[60,0,0], pen:190, rank:4, rp:2000, prereq:'heavy',   price:5500 },
+  { id:'m26',     name:'M26 潘兴',     icon:'🇺🇸', scale:1.1,  hp:1.7,  speed:1.05, turn:0.95, turret:0.95, reload:1.15,dmg:1.8,  armor:[110,80,60], tArmor:[110,85,60], slope:[47,0,0], pen:200, rank:4, rp:1800, prereq:'light',   price:5200 },
+  // ===== 战后第一代（1945-1960）=====
+  // Rank 4
+  { id:'t54',     name:'T-54',        icon:'🇷🇺', scale:1.05, hp:1.9,  speed:1.15, turn:1.05, turret:1.1,  reload:1.0, dmg:1.9,  armor:[120,90,60], tArmor:[200,120,80], slope:[60,0,0], tSlope:[35,0,0], pen:240, rank:4, rp:2400, prereq:'is2',      price:6800 },
+  { id:'centurion', name:'百夫长 Mk.3', icon:'🇬🇧', scale:1.1, hp:1.8,  speed:0.95, turn:0.9,  turret:0.95, reload:1.1, dmg:1.85, armor:[118,60,50], tArmor:[150,90,60], slope:[57,0,0], tSlope:[10,0,0], pen:230, rank:4, rp:2200, prereq:'cromwell', price:6500 },
+  { id:'type59',  name:'59 式',        icon:'🇨🇳', scale:1.05, hp:1.85, speed:1.05, turn:1.0,  turret:1.05, reload:1.05,dmg:1.85, armor:[110,80,55], tArmor:[190,110,75], slope:[60,0,0], tSlope:[30,0,0], pen:225, rank:4, rp:2200, prereq:null,      price:6600 }, // 中国线起点：无需前置直接攒钱买
   // Rank 5
   { id:'t80',     name:'T-80U',       icon:'🇷🇺', scale:1.1,  hp:2.4,  speed:1.2,  turn:1.1,  turret:1.3,  reload:0.9, dmg:2.5,  armor:[200,120,70], tArmor:[280,130,80], slope:[68,0,0], tSlope:[30,0,0], pen:450, rank:5, rp:3000, prereq:'is2',     price:8800 },
   { id:'assault', name:'鼠式',        icon:'🇩🇪', scale:1.3,  hp:2.6,  speed:0.6,  turn:0.6,  turret:0.85, reload:1.6, dmg:3.4,  armor:[240,185,160], tArmor:[240,185,160], slope:[30,0,20], pen:245, rank:5, rp:3200, prereq:'is2',     price:9500 },
-  { id:'m1a2',    name:'M1A2 艾布拉姆斯', icon:'🇺🇸', scale:1.4,  hp:3.5, speed:1.9, turn:2.0, turret:2.0,  reload:0.5, dmg:3.6, armor:[380,150,90], tArmor:[420,170,90], slope:[75,0,0], tSlope:[25,0,0], pen:600, rank:6, rp:6000, prereq:'is2', price:20000 }, // 满级终极坦克：每一项都拉到全场最高
-  { id:'aa',      name:'ZSU-23-4 石勒喀河', icon:'🇷🇺', scale:0.85, hp:0.7, speed:1.2, turn:1.5, turret:2.0, reload:0.1, dmg:0.4, armor:[15,15,15], tArmor:[15,15,15], slope:[30,0,0], pen:20, rank:2, rp:400, prereq:'medium', price:1500 }, // 防空坦克：高仰角速射打飞机
+  { id:'tiger2',  name:'虎王',        icon:'🇩🇪', scale:1.25, hp:2.3,  speed:0.65, turn:0.65, turret:0.75, reload:1.4, dmg:2.6,  armor:[185,80,80], tArmor:[185,90,80], slope:[50,0,0], tSlope:[15,0,0], pen:260, rank:5, rp:3400, prereq:'heavy',   price:9800 },
+  // ===== 现代（1990-今）=====
+  // Rank 6
+  { id:'m1a2',    name:'M1A2 艾布拉姆斯', icon:'🇺🇸', scale:1.4, hp:3.5, speed:1.9, turn:2.0, turret:2.0, reload:0.5, dmg:3.6, armor:[380,150,90], tArmor:[420,170,90], slope:[75,0,0], tSlope:[25,0,0], pen:600, rank:6, rp:6000, prereq:'is2', price:20000 },
+  { id:'t90m',    name:'T-90M',       icon:'🇷🇺', scale:1.15, hp:2.7,  speed:1.3,  turn:1.15, turret:1.25, reload:0.85,dmg:2.7,  armor:[260,160,90], tArmor:[340,180,100], slope:[68,0,0], tSlope:[40,0,0], pen:560, rank:6, rp:5500, prereq:'t80',     price:19000 },
+  { id:'leo2',    name:'豹 2A7',       icon:'🇩🇪', scale:1.3,  hp:3.2,  speed:1.7,  turn:1.9,  turret:1.9,  reload:0.55,dmg:3.3,  armor:[400,160,90], tArmor:[430,180,100], slope:[74,0,0], tSlope:[30,0,0], pen:620, rank:6, rp:6500, prereq:'tiger2',  price:22000 },
+  { id:'type99',  name:'ZTZ-99A',     icon:'🇨🇳', scale:1.3,  hp:3.3,  speed:1.75, turn:1.95, turret:1.95, reload:0.52,dmg:3.4,  armor:[410,165,95], tArmor:[440,185,105], slope:[75,0,0], tSlope:[32,0,0], pen:640, rank:6, rp:6800, prereq:'type59',  price:24000 },
+  { id:'challenger2', name:'挑战者 2', icon:'🇬🇧', scale:1.3, hp:3.3,  speed:1.55, turn:1.7,  turret:1.8,  reload:0.6, dmg:3.3,  armor:[420,170,95], tArmor:[430,180,100], slope:[72,0,0], tSlope:[25,0,0], pen:600, rank:6, rp:6000, prereq:'centurion', price:21000 },
+  { id:'leclerc', name:'勒克莱尔',     icon:'🇫🇷', scale:1.25, hp:3.1,  speed:1.8,  turn:1.9,  turret:1.95, reload:0.5, dmg:3.2,  armor:[400,160,90], tArmor:[420,175,100], slope:[73,0,0], tSlope:[28,0,0], pen:610, rank:6, rp:6200, prereq:'b1bis',   price:21500 },
+  { id:'type90',  name:'90 式',        icon:'🇯🇵', scale:1.2,  hp:3.0,  speed:1.75, turn:1.85, turret:1.9,  reload:0.55,dmg:3.1,  armor:[380,155,90], tArmor:[400,170,95], slope:[72,0,0], tSlope:[25,0,0], pen:590, rank:6, rp:6000, prereq:null,      price:20500 },
 ];
 // —— 弹种 ——（战争雷霆式：1/2/3 切换，中文名）
 // penMul:穿深倍率(乘载具 pen)；dmgMul:后效倍率(乘 shellDamage)；bounceDeg:跳弹角(入射角超过即跳)。
@@ -170,10 +194,11 @@ function shellById(id) { return SHELLS.find((s) => s.id === id) || SHELLS[0]; }
 
 function tankTypeById(id) { return TANK_TYPES.find((t) => t.id === id) || TANK_TYPES[0]; }
 
-// 国家归属（坦克/飞机共用，按国旗 icon）：德/美/中/俄 → 各自迷彩色板
+// 国家归属（坦克/飞机共用，按国旗 icon）：德/美/中/英/法/日/俄 → 各自迷彩色板
+const NATION_BY_ICON = { '🇩🇪': 'ger', '🇺🇸': 'usa', '🇨🇳': 'chn', '🇬🇧': 'gbr', '🇫🇷': 'fra', '🇯🇵': 'jpn' };
 function nationOf(type) {
   const t = TANK_TYPES.find((x) => x.id === type) || PLANE_TYPES.find((x) => x.id === type) || {};
-  return t.icon === '🇩🇪' ? 'ger' : (t.icon === '🇺🇸' ? 'usa' : (t.icon === '🇨🇳' ? 'chn' : 'rus'));
+  return NATION_BY_ICON[t.icon] || 'rus';
 }
 
 // 共享噪声凹凸纹理缓存：漆面一份(3,3)、地面一份(64,64)。每车各克隆一份会浪费纹理内存+绑定切换
@@ -187,7 +212,10 @@ function sharedBump(rx, ry) {
   }
   return _bumpCache[k];
 }
-function randomTankType() { return TANK_TYPES[Math.floor(Math.random() * TANK_TYPES.length)]; }
+function randomTankType(maxRank = 6) {
+  const pool = TANK_TYPES.filter((t) => t.rank <= maxRank && t.id !== 'aa');
+  return pool[Math.floor(Math.random() * pool.length)];
+}
 
 // AI 车组代号池（战绩板/击杀日志用）：打乱后按序取，不重名
 const AI_NAMES = [
@@ -1679,17 +1707,35 @@ class EntityManager {
 const GEOM = {
   medium:  { hull:[3.4, 1.0, 5.4], turret:'dome',     turretSize:[2.3, 1.0 ], barrel:[0.17, 3.6], wheels:5, brake:false, slope:0.85, susp:'christie' }, // T-34-85
   m4:      { hull:[3.2, 1.5, 5.2], turret:'dome',     turretSize:[2.2, 1.1 ], barrel:[0.16, 3.0], wheels:6, brake:false, slope:0.45, susp:'vvss', hullMg:true }, // M4A3 谢尔曼（高）
+  t26:     { hull:[2.6, 0.9, 4.2], turret:'cyl',      turretSize:[1.3, 0.55], barrel:[0.07, 2.0], wheels:4, brake:false, slope:0.35, susp:'std' }, // T-26（双炮塔时代的单塔改型）
+  pz38t:   { hull:[2.5, 0.95,4.2], turret:'cyl',      turretSize:[1.4, 0.6 ], barrel:[0.07, 2.1], wheels:4, brake:false, slope:0.35, susp:'std' }, // 38(t)
+  matilda: { hull:[2.9, 1.35,5.0], turret:'dome',     turretSize:[1.7, 0.9 ], barrel:[0.09, 2.2], wheels:6, brake:false, slope:0.25, susp:'std', skirt:true }, // 玛蒂尔达 II（侧裙罩小侧轮）
+  b1bis:   { hull:[2.8, 1.5, 5.2], turret:'cyl',      turretSize:[1.2, 0.55], barrel:[0.08, 1.8], wheels:5, brake:false, slope:0.40, susp:'std' }, // B1 bis（小塔+车体炮）
+  m3stuart:{ hull:[2.7, 1.0, 4.2], turret:'cyl',      turretSize:[1.5, 0.65], barrel:[0.08, 2.1], wheels:4, brake:false, slope:0.40, susp:'vvss' }, // M3 斯图亚特（VVSS 转向架）
   panzer2: { hull:[2.6, 0.95,4.0], turret:'box',      turretSize:[1.6, 0.7 ], barrel:[0.08, 1.8], wheels:5, brake:false, slope:0.40, susp:'std' }, // II 号（小）
   light:   { hull:[2.9, 1.0, 4.6], turret:'dome',     turretSize:[1.9, 0.9 ], barrel:[0.14, 2.6], wheels:5, brake:false, slope:0.60, susp:'christie' }, // M24 霞飞
   scout:   { hull:[2.6, 0.9, 4.0], turret:'box',      turretSize:[1.5, 0.6 ], barrel:[0.12, 2.2], wheels:4, brake:false, slope:0.50, susp:'road' }, // 234/2 美洲狮（8 轮轮式）
+  aa:      { hull:[3.0, 1.0, 5.0], turret:'box',      turretSize:[2.2, 1.0], barrel:[0.06, 2.0], wheels:6, brake:false, slope:0.50, susp:'std', radar:true }, // 防空坦克
+  pz4:     { hull:[3.1, 1.15,5.0], turret:'box',      turretSize:[2.0, 0.85], barrel:[0.12, 3.4], wheels:6, brake:false, slope:0.40, susp:'std' }, // 四号 F2（长 75）
+  cromwell:{ hull:[3.1, 1.15,5.2], turret:'box',      turretSize:[2.1, 0.9 ], barrel:[0.12, 3.2], wheels:6, brake:false, slope:0.45, susp:'christie' }, // 克伦威尔（克里斯蒂悬挂飞车）
   td:      { hull:[3.6, 1.1, 6.2], turret:'casemate', turretSize:[3.0, 1.0 ], barrel:[0.26, 4.8], wheels:6, brake:true,  slope:0.70, susp:'std' }, // SU-100
   panther: { hull:[3.6, 1.2, 6.0], turret:'box',      turretSize:[2.6, 1.1 ], barrel:[0.18, 5.0], wheels:7, brake:true,  slope:0.95, susp:'interleave', skirt:true }, // 黑豹 V（长炮管、陡前装甲）
   heavy:   { hull:[3.9, 1.5, 6.4], turret:'box',      turretSize:[3.0, 1.25], barrel:[0.24, 3.8], wheels:8, brake:true,  slope:0.40, susp:'interleave', twoPiece:true, hullMg:true }, // 虎 I（方正高大）
   is2:     { hull:[3.6, 1.3, 6.0], turret:'dome',     turretSize:[2.8, 1.15], barrel:[0.30, 4.2], wheels:6, brake:true,  slope:0.85, susp:'christie', hullMg:true }, // IS-2（122mm 粗管）
+  m26:     { hull:[3.5, 1.3, 5.8], turret:'dome',     turretSize:[2.4, 1.0 ], barrel:[0.17, 4.2], wheels:6, brake:true,  slope:0.65, susp:'std' }, // M26 潘兴
+  t54:     { hull:[3.5, 1.15,6.0], turret:'dome',     turretSize:[2.5, 1.0 ], barrel:[0.17, 4.5], wheels:5, brake:true,  slope:0.85, susp:'christie', fume:true }, // T-54（半球炮塔）
+  centurion:{hull:[3.5, 1.3, 6.2], turret:'dome',     turretSize:[2.6, 1.05], barrel:[0.17, 4.6], wheels:6, brake:true,  slope:0.70, susp:'std' }, // 百夫长 Mk.3
+  type59:  { hull:[3.5, 1.15,6.0], turret:'dome',     turretSize:[2.5, 1.0 ], barrel:[0.17, 4.5], wheels:5, brake:true,  slope:0.85, susp:'christie', fume:true }, // 59 式（T-54A 血统）
   t80:     { hull:[3.6, 1.1, 6.0], turret:'flat',     turretSize:[3.0, 0.9 ], barrel:[0.22, 4.4], wheels:6, brake:false, slope:0.90, susp:'std', skirt:true, smoke:true, fume:true }, // T-80U（现代低矮）
   assault: { hull:[4.6, 1.8, 7.4], turret:'massive',  turretSize:[3.6, 1.6 ], barrel:[0.34, 3.8], wheels:8, brake:true,  slope:0.50, susp:'interleave', hullMg:true, hullStyle:'box' }, // 鼠式（方正盒车体骑宽履带）
+  tiger2:  { hull:[4.0, 1.5, 6.8], turret:'box',      turretSize:[2.9, 1.2 ], barrel:[0.20, 5.2], wheels:8, brake:true,  slope:0.75, susp:'interleave', skirt:true }, // 虎王（长 88）
   m1a2:    { hull:[4.2, 1.4, 6.8], turret:'flat',     turretSize:[3.2, 1.0], barrel:[0.30, 4.6], wheels:7, brake:true,  slope:0.85, susp:'std', skirt:true, smoke:true, fume:true, hullMg:true }, // M1A2 现代主战坦克
-  aa:      { hull:[3.0, 1.0, 5.0], turret:'box',      turretSize:[2.2, 1.0], barrel:[0.06, 2.0], wheels:6, brake:false, slope:0.50, susp:'std', radar:true }, // 防空坦克
+  t90m:    { hull:[3.7, 1.15,6.2], turret:'flat',     turretSize:[3.1, 0.95], barrel:[0.22, 4.8], wheels:6, brake:false, slope:0.90, susp:'std', skirt:true, smoke:true, fume:true }, // T-90M
+  leo2:    { hull:[4.2, 1.4, 7.0], turret:'flat',     turretSize:[3.3, 1.0 ], barrel:[0.28, 5.0], wheels:7, brake:false, slope:0.85, susp:'std', skirt:true, smoke:true, fume:true }, // 豹 2A7（楔形塔）
+  type99:  { hull:[4.2, 1.45,7.0], turret:'flat',     turretSize:[3.3, 1.05], barrel:[0.28, 5.0], wheels:6, brake:false, slope:0.85, susp:'std', skirt:true, smoke:true, fume:true }, // ZTZ-99A（楔形塔带尾舱）
+  challenger2:{ hull:[4.3,1.4, 7.0], turret:'flat',   turretSize:[3.4, 1.1 ], barrel:[0.26, 5.2], wheels:6, brake:false, slope:0.85, susp:'std', skirt:true, smoke:true, fume:true }, // 挑战者 2（线膛长炮）
+  leclerc: { hull:[4.1, 1.35,6.8], turret:'flat',     turretSize:[3.2, 1.0 ], barrel:[0.27, 4.9], wheels:6, brake:false, slope:0.85, susp:'std', skirt:true, smoke:true, fume:true }, // 勒克莱尔
+  type90:  { hull:[4.0, 1.3, 6.7], turret:'flat',     turretSize:[3.2, 1.0 ], barrel:[0.26, 4.8], wheels:6, brake:false, slope:0.85, susp:'std', skirt:true, smoke:true, fume:true }, // 90 式
 };
 class Tank {
   constructor({ side = 'player', team = 'blue', color = 0x4a6b3a, type = 'medium' } = {}) {
@@ -3975,7 +4021,7 @@ class Game {
   _spawnEnemy() {
     const asTank = this.worldwar ? Math.random() < 0.5 : (this.mode === 'tank');
     if (asTank) {
-      const e = new Tank({ side: 'enemy', team: 'red', color: 0x9a7b3e, type: randomTankType().id });
+      const e = new Tank({ side: 'enemy', team: 'red', color: 0x9a7b3e, type: randomTankType(Math.min(6, tankTypeById(this.tankType).rank + 1)).id });   // AI 出车随玩家进度（最多高一档）
       const h = CONFIG.tank.worldSize;
       // 红方一律从地图北侧边缘出生（和蓝方南北对角）
       e.group.position.set(randRange(-h * 0.4, h * 0.4), 0, randRange(h * 0.55, h - 45));
@@ -4020,7 +4066,7 @@ class Game {
   _spawnAlly() {
     const asTank = this.worldwar ? Math.random() < 0.5 : (this.mode === 'tank');
     if (asTank) {
-      const e = new Tank({ side: 'ally', team: 'blue', color: 0x3a6b8a, type: randomTankType().id });
+      const e = new Tank({ side: 'ally', team: 'blue', color: 0x3a6b8a, type: randomTankType(Math.min(6, tankTypeById(this.tankType).rank + 1)).id });   // 队友同难度池
       const h = CONFIG.tank.worldSize;
       // 蓝方(玩家队)从南侧边缘出生，和玩家一起
       e.group.position.set(randRange(-40, 40), 0, randRange(-(h - 45), -(h * 0.55)));

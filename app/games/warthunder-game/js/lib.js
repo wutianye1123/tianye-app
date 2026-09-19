@@ -49,6 +49,9 @@ const CAMO_PALETTES = {
   ger: { base: '#967f4f', blobs: ['#6b4a35', '#4a5334', '#7a6a45'] },
   usa: { base: '#6b6b52', blobs: ['#575740', '#7a7a5e', '#4a4a38'] },
   chn: { base: '#5f6a60', blobs: ['#4d574e', '#6e7a6e', '#3f4840'] },
+  gbr: { base: '#55604a', blobs: ['#414b38', '#66725a', '#333b2c'] },   // 英军青铜绿
+  fra: { base: '#6b6e55', blobs: ['#565a44', '#7c8066', '#464938'] },   // 法军绿灰
+  jpn: { base: '#8a8256', blobs: ['#6e6844', '#9c9468', '#5c5738'] },   // 日军黄土
 };
 export function camoTexture(nation = 'rus') {
   if (_camoTex[nation]) return _camoTex[nation];
