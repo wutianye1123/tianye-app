@@ -2407,6 +2407,13 @@ class Tank {
     this.group.position.x = clamp(this.group.position.x, -lim, lim);
     this.group.position.z = clamp(this.group.position.z, -lim, lim);
     this.group.position.y = terrainHeight(this.group.position.x, this.group.position.z); // 贴地
+    // 真实位移速度（上帧位置差分）：AI 提前量用它——转向/蠕动走弧线时，"朝向×油门"的外推方向会错，
+    // 差分速度是弧线切向，低速小半径打转也准。
+    if (this._px !== undefined && dt > 1e-4) {
+      this.velX = (this.group.position.x - this._px) / dt;
+      this.velZ = (this.group.position.z - this._pz) / dt;
+    }
+    this._px = this.group.position.x; this._pz = this.group.position.z;
     // 车体姿态：按地形法线倾斜（爬坡时俯仰、侧坡时侧倾）。航向 + 贴坡一起进 group.quaternion。
     const px = this.group.position.x, pz = this.group.position.z, dd = 1.2;
     _tankN.set(terrainHeight(px - dd, pz) - terrainHeight(px + dd, pz), 2 * dd, terrainHeight(px, pz - dd) - terrainHeight(px, pz + dd)).normalize();
@@ -3393,14 +3400,14 @@ class TankAI {
     const isAir = typeof target.forwardVector === 'function';
     if (isAir) _aimPt.addScaledVector(target.forwardVector(), target.speed * dist / tankShellSpeed(tank.shellKind));
     else {
-      // 地面坦克：前向速度 × 弹丸飞行时间的提前量（迭代 2 次：按预测点距离修正飞行时间）。
-      // 坦克没提前量的话：移动目标 8~15m/s × 飞行 0.3~0.5s = 该提前 3~7m，全打在屁股后面。
-      const tvx = Math.sin(target.heading), tvz = Math.cos(target.heading);
-      const spd = Math.abs(target.lastThrottle || 0) * (target.maxSpeed || 10);
+      // 地面坦克提前量（迭代 2 次修正飞行时间）：优先用差分真实速度（velX/velZ，弧线切向，
+      // 蠕动/原地打转也准）；无则退回"朝向×油门"近似。
+      let tvx = Math.sin(target.heading), tvz = Math.cos(target.heading), tspd = Math.abs(target.lastThrottle || 0) * (target.maxSpeed || 10);
+      if (target.velX !== undefined) { tvx = target.velX; tvz = target.velZ; tspd = Math.hypot(tvx, tvz); }
       for (let li = 0; li < 2; li++) {
         const fly = tank.position.distanceTo(_aimPt) / tankShellSpeed(tank.shellKind);
-        _aimPt.x = target.position.x + tvx * spd * fly;
-        _aimPt.z = target.position.z + tvz * spd * fly;
+        _aimPt.x = target.position.x + tvx * fly;
+        _aimPt.z = target.position.z + tvz * fly;
       }
       _aimPt.y += 1.2;
     }
@@ -3770,14 +3777,22 @@ class HeliAI {
     }
     const to = _tmpV3.copy(target.position).sub(p.position);
     const flatDist = Math.hypot(to.x, to.z) || 1;
-    // 瞄准：迭代提前量（2 次：估飞行时间→预测点→按预测点实际距离修正）
-    const tv = target.forwardVector ? target.forwardVector() : _tankFwd.set(Math.sin(target.heading), 0, Math.cos(target.heading));
-    const spd = target.speed != null ? target.speed : ((target.lastThrottle || 0) * (target.maxSpeed || 10));
+    // 瞄准：迭代提前量（2 次）。地面目标优先用差分真实速度（velX/velZ 弧线切向——低速蠕动/原地
+    // 打转时"朝向×油门"外推方向会错，差分速度永远指向真实运动方向）。
     const muzzle = p.getMuzzleWorld(_p2);
     let aimPt = target.position.clone();
-    for (let i = 0; i < 2; i++) {
-      const flyT = muzzle.distanceTo(aimPt) / 320;
-      aimPt = target.position.clone().addScaledVector(tv, spd * flyT);
+    if (target.velX !== undefined) {
+      for (let i = 0; i < 2; i++) {
+        const flyT = muzzle.distanceTo(aimPt) / 320;
+        aimPt = target.position.clone().add(new THREE.Vector3(target.velX * flyT, 0, target.velZ * flyT));
+      }
+    } else {
+      const tv = target.forwardVector ? target.forwardVector() : _tankFwd.set(Math.sin(target.heading), 0, Math.cos(target.heading));
+      const spd = target.speed != null ? target.speed : ((target.lastThrottle || 0) * (target.maxSpeed || 10));
+      for (let i = 0; i < 2; i++) {
+        const flyT = muzzle.distanceTo(aimPt) / 320;
+        aimPt = target.position.clone().addScaledVector(tv, spd * flyT);
+      }
     }
     p.setAimPoint(aimPt);
     // 被锁定规避（带 3s 冷却+贴地禁俯冲，防"永远规避"死锁）
@@ -4038,10 +4053,12 @@ class PlaneAI {
     const dirFlat = new THREE.Vector3(toT.x / flatDist, 0, toT.z / flatDist);
     const sideFlat = new THREE.Vector3(-dirFlat.z, 0, dirFlat.x).multiplyScalar(this._orbit);
     // 目标提前量（地面坦克：前向速度×弹丸飞行时间）
-    const tgtFwd = new THREE.Vector3(Math.sin(target.heading || 0), 0, Math.cos(target.heading || 0));
-    const spd = Math.abs(target.lastThrottle || 0) * (target.maxSpeed || 10);
+    // 目标提前量：优先差分真实速度（弧线切向，蠕动/打转也准），退回朝向×油门近似
+    let tgtVel;
+    if (target.velX !== undefined) tgtVel = new THREE.Vector3(target.velX, 0, target.velZ);
+    else tgtVel = new THREE.Vector3(Math.sin(target.heading || 0), 0, Math.cos(target.heading || 0)).multiplyScalar(Math.abs(target.lastThrottle || 0) * (target.maxSpeed || 10));
     const flyT = dist / 350;
-    const aimPt = target.position.clone().addScaledVector(tgtFwd, spd * flyT);
+    const aimPt = target.position.clone().addScaledVector(tgtVel, flyT);
     let aimDir;
 
     this._diveCd -= dt;
