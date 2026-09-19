@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTexture, camoTexture, makeTrackTexture, makeNoiseTexture, makeShadowTexture, makeGrassTexture, makeSmokeTexture, makeCraterTexture, terrainHeight, setTerrainScale } from './lib.js';
+import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTexture, camoTexture, makeTrackTexture, makeNoiseTexture, makeShadowTexture, makeGrassTexture, makeSmokeTexture, makeCraterTexture, terrainHeight, setTerrainScale, setTerrainMode } from './lib.js';
 
 // 坦克贴地姿态用的临时对象（避免每帧分配）
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
@@ -4274,6 +4274,8 @@ const MAPS = [
   { id:'snow',    name:'雪原',     urban:false, towns:1, density:1.1, fog:0xd6dfe6, bg:0xe8eef2, gLow:[0.80,0.84,0.88], gHigh:[0.92,0.94,0.97], leaf:0x3a5a40, wall:0x6a6a6a, height:1.1, wallColor:0xc0d0e0 },
   { id:'night',   name:'夜战',     urban:false, towns:1, density:0.9, fog:0x0a1020, bg:0x05080f, gLow:[0.05,0.06,0.09], gHigh:[0.09,0.12,0.17], leaf:0x081408, wall:0x101820, height:0.8, wallColor:0x30405a, night:true },
   { id:'rain',    name:'雨天',     urban:false, towns:1, density:1.0, fog:0x8a949e, bg:0x99a3ad, gLow:[0.22,0.26,0.24], gHigh:[0.34,0.38,0.34], leaf:0x2a4228, wall:0x555a50, height:0.9, wallColor:0x7a8a99, rain:true },
+  { id:'canyon',  name:'峡谷',     urban:false, towns:1, density:0.8, fog:0xc4b89e, bg:0xc9bda6, gLow:[0.55,0.44,0.30], gHigh:[0.72,0.62,0.46], leaf:0x5a5a30, wall:0x8a7a5a, height:0.5, wallColor:0xd0b890, canyon:true },
+  { id:'island',  name:'海岛',     urban:false, towns:1, density:0.9, fog:0xa8c8d4, bg:0xb8d4de, gLow:[0.72,0.66,0.46], gHigh:[0.42,0.55,0.30], leaf:0x3a6b35, wall:0x9a8a62, height:0.8, wallColor:0x70c0d8, island:true },
 ];
 
 // 创建地面 + 障碍物 + 边界，返回 { group, obstacles, half }。mapId 决定地形主题。
@@ -4284,6 +4286,7 @@ function createTerrain(scene, mode, mapId) {
   const half = (mode === 'plane' ? CONFIG.plane.worldSize : CONFIG.tank.worldSize);
   const theme = MAPS.find((m) => m.id === mapId) || MAPS[1];
   if (theme.height != null) setTerrainScale(theme.height);   // 按地图调整起伏
+  setTerrainMode(theme.canyon ? 'canyon' : (theme.island ? 'island' : 'normal'));   // 地形模式（跨局必须显式重置）
   if (mode === 'tank') {                                     // 仅陆战按地图覆盖天空/雾（空战保留蓝色天空）
     scene.background = new THREE.Color(theme.bg);
     scene.fog = new THREE.Fog(theme.fog, theme.night ? 60 : 120, theme.night ? 300 : 450);
@@ -4314,6 +4317,17 @@ function createTerrain(scene, mode, mapId) {
   ground.receiveShadow = true;
   group.add(ground);
 
+  // 海岛水面：半透明蓝（湿面反光），地形 r>330 沉到水下 → 边缘浅滩效果
+  if (theme.island) {
+    const water = new THREE.Mesh(
+      new THREE.PlaneGeometry(groundSize, groundSize),
+      new THREE.MeshStandardMaterial({ color: 0x2a6a8a, roughness: 0.22, metalness: 0.3, transparent: true, opacity: 0.82 })
+    );
+    water.rotation.x = -Math.PI / 2;
+    water.position.y = 2;
+    water.receiveShadow = true;
+    group.add(water);
+  }
   // 活动区域边框线
   const edgeGeo = new THREE.BufferGeometry();
   const pts = [];
@@ -5322,6 +5336,12 @@ class Game {
     if (inp.mouseDown) t.tryFire(this.em);
     if (inp.isDown('Space')) t.tryFireMG(this.em);
     if (this._consumePress(inp, 'KeyF')) this._extinguish(t);
+    // 驾驶员第一人称（X 键）：坐车体前部看车头；准星随视角显隐
+    if (this._consumePress(inp, 'KeyX')) {
+      this.driverView = !this.driverView;
+      this.hud.addFeed(this.driverView ? '🚗 驾驶员视角' : '第三人称视角', 'info');
+      this._snapCam = true;
+    }
     if (this._consumePress(inp, 'KeyG')) this._launchSmoke();
     if (this._consumePress(inp, 'KeyV')) this._markTarget();   // 侦察标记:队友AI集火
     if (this._smokeCd > 0) this._smokeCd -= dt;
@@ -5514,6 +5534,16 @@ class Game {
 
   _updateCameraTank(dt) {
     const t = this.player;
+    if (this.driverView && t.alive) {
+      // —— 驾驶员第一人称（X 键切换）：坐在车体前部朝车头方向看，跟车体贴坡俯仰 ——
+      const fx = Math.sin(t.heading), fz = Math.cos(t.heading);
+      const desired = t.position.clone().add(new THREE.Vector3(fx * 2.6, 2.5, fz * 2.6));
+      if (this._snapCam) { this.camera.position.copy(desired); this._snapCam = false; }
+      else this.camera.position.lerp(desired, 0.55);
+      this.camera.lookAt(t.position.clone().add(new THREE.Vector3(fx * 50, 1.2, fz * 50)));
+      this._setFov(72, dt);
+      return;
+    }
     if (this.gunnerView) {
       const muzzle = t.getMuzzleWorld();
       const dir = t.getBarrelDir();
