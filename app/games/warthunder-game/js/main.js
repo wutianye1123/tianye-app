@@ -3176,7 +3176,7 @@ class TankAI {
       const _aimPt = target.position.clone();
       if (typeof target.forwardVector !== 'function') _aimPt.y += 1.2;   // 瞄车体高度(部位判定命中模块更多)
       tank.aimTurretAt(_aimPt, dt);
-      if (!smokeBlind && tank.canFire() && dist < 180 && Math.random() < 0.25) tank.tryFire(em);   // 撤退时开火更保守（原 0.5 比正常 enemyFireChance 0.4 还高，反直觉）
+      if (!smokeBlind && !this._losBlocked(tank.position, target.position, obstacles) && tank.canFire() && dist < 180 && Math.random() < 0.25) tank.tryFire(em);   // 撤退时开火更保守（原 0.5 比正常 enemyFireChance 0.4 还高，反直觉）；掩体挡住不打
       return;
     }
 
@@ -3220,12 +3220,12 @@ class TankAI {
       const d = new THREE.Vector3().subVectors(ob.position, tank.position);
       d.y = 0;
       const dd = d.length();
-      if (dd < 22) {   // 提前拐弯,远时轻推变线,近时满舵+减速
+      if (dd < 30) {   // 提前拐弯,远时轻推变线,近时满舵+减速（30m：AI代打极速更快，22m 来不及）
         const dotFwd = d.dot(fwd);
         if (dotFwd > 0) {
           const sideDist = d.dot(right);
           if (Math.abs(sideDist) < (ob.radius || 3) + 3.5) {
-            const urgency = (22 - dd) / 22;
+            const urgency = (30 - dd) / 30;
             turn += (sideDist >= 0 ? -1 : 1) * (0.35 + urgency * 0.65);
             throttle *= 1 - urgency * 0.6;
           }
@@ -3283,13 +3283,30 @@ class TankAI {
     const aimThresh = isEnemy ? 0.045 : 0.10;
     const fireChance = isEnemy ? CONFIG.tank.enemyFireChance : 0.85;
     const isAirTarget = isAir;   // 目标是飞机
-    if (!smokeBlind && !target.isZone && tank.canFire() && dist < 240 && Math.abs(aimDiff) < aimThresh && Math.random() < fireChance) {
+    // 视线检查：炮口到目标连线被建筑/岩石挡住 → 不开火（炮弹会拍墙上白装填；掩体后目标先机动绕出再打）
+    const losBlocked = !isAir && this._losBlocked(tank.position, target.position, obstacles);
+    if (!smokeBlind && !losBlocked && !target.isZone && tank.canFire() && dist < 240 && Math.abs(aimDiff) < aimThresh && Math.random() < fireChance) {
       tank.tryFire(em);
     }
     // 打飞机时额外用机枪（密集火力追着飞机打）；敌方不用（太超模）
     if (isAirTarget && !isEnemy && dist < 120 && Math.abs(aimDiff) < 0.15) {
       tank.tryFireMG(em);
     }
+  }
+
+  // 炮口→目标线段 vs 障碍圆柱(水平近似)：任一障碍的沿线投影在段内且垂距小于半径 → 被挡。
+  _losBlocked(a, b, obstacles) {
+    const dx = b.x - a.x, dz = b.z - a.z;
+    const len = Math.hypot(dx, dz) || 1;
+    const fx = dx / len, fz = dz / len;
+    for (const ob of obstacles || []) {
+      const ox = ob.position.x - a.x, oz = ob.position.z - a.z;
+      const along = ox * fx + oz * fz;
+      if (along <= 0 || along >= len) continue;
+      const side = Math.abs(ox * -fz + oz * fx);
+      if (side < (ob.radius || 3) && (ob.height ?? 30) > 2.2) return true;
+    }
+    return false;
   }
 }
 
