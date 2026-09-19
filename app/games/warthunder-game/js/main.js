@@ -1907,7 +1907,12 @@ class EntityManager {
       return true;
     });
     this.planes = this.planes.filter((p) => {
-      if (!p.alive) { _dispose(p.group); this.scene.remove(p.group); removed.push(p); return false; }
+      if (!p.alive) {
+        // 坠机（战雷式）：不再原地消失——尾冒火坠落/螺旋解体，资源移交给 CrashFall 销毁
+        this.addEffect(new CrashFall(p, this));
+        removed.push(p);
+        return false;
+      }
       return true;
     });
     return removed;
@@ -3709,6 +3714,200 @@ function losBlocked(a, b, obstacles) {
   return false;
 }
 
+// ===== 直升机 AI（敌我通用）：盘旋悬停 + 迭代预测瞄准 + 被锁规避（带冷却防死锁）+ 视线开火 =====
+// 玩家 AI 代打与敌方直升机共用同一套脑子；threats=会打我的人（敌方视角=蓝方，玩家视角=红方）。
+class HeliAI {
+  constructor(heli) {
+    this.heli = heli;
+    this._evadeT = 0; this._evadeCd = 0;
+  }
+  update(dt, ctx) {
+    const { target, threats = [], entityManager: em, obstacles = [], enemies = [] } = ctx;
+    const p = this.heli;
+    const gy = terrainHeight(p.position.x, p.position.z);
+    if (!target) {   // 无目标：巡逻高度悬停慢转
+      p.setClimb(p.position.y < gy + 55 ? 0.5 : 0);
+      p.setPitchInput(0.12);
+      p.setYawInput(0.25);
+      return;
+    }
+    const to = _tmpV3.copy(target.position).sub(p.position);
+    const flatDist = Math.hypot(to.x, to.z) || 1;
+    // 瞄准：迭代提前量（2 次：估飞行时间→预测点→按预测点实际距离修正）
+    const tv = target.forwardVector ? target.forwardVector() : _tankFwd.set(Math.sin(target.heading), 0, Math.cos(target.heading));
+    const spd = target.speed != null ? target.speed : ((target.lastThrottle || 0) * (target.maxSpeed || 10));
+    const muzzle = p.getMuzzleWorld(_p2);
+    let aimPt = target.position.clone();
+    for (let i = 0; i < 2; i++) {
+      const flyT = muzzle.distanceTo(aimPt) / 320;
+      aimPt = target.position.clone().addScaledVector(tv, spd * flyT);
+    }
+    p.setAimPoint(aimPt);
+    // 被锁定规避（带 3s 冷却+贴地禁俯冲，防"永远规避"死锁）
+    let locked = false;
+    for (const pr of em.projectiles) {
+      if (pr.alive && pr.homing && pr.target === p) { locked = true; break; }
+    }
+    if (!locked && this._evadeCd <= 0) {
+      for (const e of threats) {
+        if (!e.alive || e.turretYaw === undefined || e.position.distanceTo(p.position) > 120) continue;
+        const wy = e.heading + e.turretYaw;
+        const dxa = p.position.x - e.position.x, dza = p.position.z - e.position.z;
+        let da = Math.atan2(dxa, dza) - wy;
+        da = Math.atan2(Math.sin(da), Math.cos(da));
+        if (Math.abs(da) < 0.06) { locked = true; break; }
+      }
+    }
+    if (this._evadeCd > 0) this._evadeCd -= dt;
+    if (locked && this._evadeCd <= 0) {
+      this._evadeT = 1.2; this._evadeCd = 3;
+      this._evadeDir = Math.random() < 0.5 ? 1 : -1;
+      this._evadeVert = (p.position.y - gy) < 20 ? 1 : (Math.random() < 0.5 ? 1 : -1);
+    }
+    if (this._evadeT > 0) {
+      this._evadeT -= dt;
+      p.setYawInput(this._evadeDir);
+      p.setPitchInput(0.35 * this._evadeDir);
+      p.setClimb(this._evadeVert);
+    } else {
+      p.setClimb(clamp((gy + 48 - p.position.y) * 0.08, -1, 1));
+      p.setPitchInput(flatDist > 110 ? 0.75 : (flatDist < 60 ? -0.55 : 0.06));
+      const desiredYaw = Math.atan2(to.x, to.z);
+      let dy = desiredYaw - p.heading;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      p.setYawInput(clamp(dy * 1.8, -1, 1));
+    }
+    // 开火（规避中也打）
+    if (flatDist < 260 && p.canFire() && !losBlocked(p.position, target.position, obstacles)) p.tryFire(em);
+    if (p.type === 'ah64') {
+      if (flatDist < 200 && p.missiles > 0 && Math.random() < dt * 0.7) p.tryFireMissile(em, enemies);
+      if (flatDist < 150 && Math.random() < dt * 3) p.tryFireRockets(em, true);
+    } else if (flatDist < 180 && p.missiles > 0 && Math.random() < dt * 0.8) {
+      p.tryFireMissile(em, enemies);
+    }
+  }
+}
+
+// ===== 坠机碎块：随机爆散的小块残骸（弹跳一次后趴地，随宿主 CrashFall 一起销毁） =====
+class Debris {
+  constructor(pos, em, vel) {
+    const s = randRange(0.4, 1.4);
+    this.mesh = new THREE.Mesh(new THREE.BoxGeometry(s, s * randRange(0.4, 1), s * randRange(0.6, 1.6)), new THREE.MeshStandardMaterial({ color: 0x2a2723, roughness: 1 }));
+    this.mesh.position.copy(pos);
+    this.mesh.castShadow = true;
+    this.vel = vel.clone();
+    this.spin = new THREE.Vector3(randRange(-6, 6), randRange(-6, 6), randRange(-6, 6));
+    this.alive = true; this.bounced = false;
+  }
+  update(dt) {
+    this.vel.y -= 18 * dt;
+    this.mesh.position.addScaledVector(this.vel, dt);
+    this.mesh.rotation.x += this.spin.x * dt;
+    this.mesh.rotation.y += this.spin.y * dt;
+    this.mesh.rotation.z += this.spin.z * dt;
+    const g = terrainHeight(this.mesh.position.x, this.mesh.position.z) + 0.2;
+    if (this.mesh.position.y <= g) {
+      if (!this.bounced && this.vel.y < -6) {   // 首次触地弹跳
+        this.bounced = true;
+        this.mesh.position.y = g;
+        this.vel.y = -this.vel.y * 0.35;
+        this.vel.x *= 0.5; this.vel.z *= 0.5;
+        this.spin.multiplyScalar(0.4);
+      } else {
+        this.mesh.position.y = g;
+        this.vel.set(0, 0, 0); this.spin.set(0, 0, 0);   // 趴住
+      }
+    }
+  }
+  dispose() { this.mesh.geometry.dispose(); this.mesh.material.dispose(); this.mesh.removeFromParent(); }
+}
+
+// ===== 坠机（战雷式）：飞机尾冒火坠落 / 直升机螺旋下坠空中解体 =====
+// 飞机：保持前冲+重力下坠+缓慢滚转，尾部火球+黑烟拖行；触地爆炸+焦黑残骸+碎块。
+// 直升机：旋翼停转、机身快速自旋下坠，坠落途中不断甩出碎块（一边掉一边碎），
+// 触地大爆炸+整机焦黑+满地碎块，残骸冒烟 6s 后销毁。
+class CrashFall {
+  constructor(plane, em) {
+    this.plane = plane;
+    this.em = em;
+    this.isHeli = !!plane.isHeli;
+    this.mesh = plane.group;
+    const fwd = plane.forwardVector();
+    this.vel = fwd.clone().multiplyScalar(this.isHeli ? (plane.speed || 8) * 0.5 : (plane.speed || 60) * 0.8);
+    this.vel.y = this.isHeli ? -4 : -3;
+    this.spin = this.isHeli ? randRange(4.5, 7) * (Math.random() < 0.5 ? 1 : -1) : randRange(0.8, 1.6);   // 直升机快螺旋/飞机慢滚
+    this.roll = 0;
+    this.t = 0; this.smokeT = 0; this.debrisT = 0.25;
+    this.alive = true;
+    this.landed = false;
+    this.wreckT = 6;
+    // 尾部火球（常亮，Bloom 发光）+ 拖烟
+    this.fire = new THREE.Mesh(new THREE.SphereGeometry(this.isHeli ? 1.0 : 0.9, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff7a20, transparent: true, opacity: 0.95 }));
+    this.fire.position.set(0, 0.4, this.isHeli ? -5.2 : -4.5);
+    this.mesh.add(this.fire);
+    if (plane.blobWrap) plane.blobWrap.visible = false;
+    if (this.isHeli && plane.rotorHub) plane.rotorHub.rotation.y = 0;   // 旋翼停转
+  }
+  update(dt) {
+    this.t += dt;
+    if (this.landed) {   // 触地后：焦黑残骸冒烟倒计时
+      this.wreckT -= dt;
+      this.smokeT -= dt;
+      if (this.smokeT <= 0) {
+        this.smokeT = 0.16;
+        this.em.addEffect(new Smoke(this.mesh.position.clone().add(new THREE.Vector3(randRange(-1.5, 1.5), 1.5, randRange(-1.5, 1.5))), 0x201a14, randRange(0.9, 1.5), randRange(1.6, 2.4), 1.6));
+      }
+      if (this.wreckT <= 0) this.alive = false;
+      return;
+    }
+    // 坠落
+    this.vel.y -= (this.isHeli ? 10 : 13) * dt;
+    this.mesh.position.addScaledVector(this.vel, dt);
+    if (this.isHeli) { this.mesh.rotation.y += this.spin * dt; this.roll += 0.55 * dt; this.mesh.rotation.z = Math.min(this.roll, 0.6) * Math.sign(this.spin); }
+    else { this.roll += this.spin * dt; this.mesh.rotation.z = this.roll; this.mesh.rotation.x += 0.12 * dt; }
+    this.fire.material.opacity = 0.7 + Math.random() * 0.3;
+    // 拖烟
+    this.smokeT -= dt;
+    if (this.smokeT <= 0) {
+      this.smokeT = 0.07;
+      this.em.addEffect(new Smoke(this.mesh.position.clone().add(new THREE.Vector3(randRange(-0.6, 0.6), randRange(0, 1), randRange(-0.6, 0.6))), this.isHeli ? 0x1a1613 : 0x231e18, randRange(0.5, 0.9), randRange(1.0, 1.6), 1.2));
+    }
+    // 直升机：空中解体——一边掉一边甩碎块
+    if (this.isHeli && this.t > 0.6) {
+      this.debrisT -= dt;
+      if (this.debrisT <= 0) {
+        this.debrisT = randRange(0.18, 0.4);
+        const v = new THREE.Vector3(randRange(-9, 9), randRange(2, 8), randRange(-9, 9));
+        this.em.addEffect(new Debris(this.mesh.position.clone().add(new THREE.Vector3(randRange(-2, 2), randRange(-1, 1), randRange(-2, 2))), this.em, v));
+      }
+    }
+    // 触地：爆炸+焦黑+碎块四散
+    const g = terrainHeight(this.mesh.position.x, this.mesh.position.z) + 1.2;
+    if (this.mesh.position.y <= g) {
+      this.mesh.position.y = g;
+      this.landed = true;
+      this.em.addEffect(new Explosion(this.mesh.position.clone(), this.isHeli ? 5 : 4, 0xff8030));
+      this.mesh.traverse((c) => {
+        if (c.material && c.material.color) {
+          (Array.isArray(c.material) ? c.material : [c.material]).forEach((m) => { if (m.color) { m.color.multiplyScalar(0.18); m.roughness = 1; m.metalness = 0; } });
+        }
+      });
+      if (this.fire) { this.fire.visible = false; }
+      const n = this.isHeli ? 7 : 5;
+      for (let i = 0; i < n; i++) {
+        const v = new THREE.Vector3(randRange(-14, 14), randRange(5, 14), randRange(-14, 14));
+        this.em.addEffect(new Debris(this.mesh.position.clone(), this.em, v));
+      }
+    }
+  }
+  dispose() {
+    if (this.fire) { this.fire.geometry.dispose(); this.fire.material.dispose(); }
+    if (this.plane.blobWrap) this.plane.blobWrap.removeFromParent();
+    this.mesh.traverse((c) => { if (c.geometry) c.geometry.dispose(); if (c.material) { Array.isArray(c.material) ? c.material.forEach((m) => m.dispose()) : c.material.dispose(); } });
+    this.mesh.removeFromParent();
+  }
+}
+
 // ===== js/ai/PlaneAI.js =====
 
 // 敌方飞机 AI：复用与玩家相同的"飞行教官"接口，把目标方向喂给 aimToward。
@@ -4675,15 +4874,27 @@ class Game {
     } else {
       const ang = randRange(0, Math.PI * 2);
       const dist = randRange(150, 220);
-      const e = new Plane({ side: 'enemy', team: 'red', color: 0xb5462e, type: randomPlaneType().id });
-      e.displayName = this._nextName();
-      e.group.position.set(Math.sin(ang) * dist, CONFIG.plane.spawnAltitude + randRange(-10, 12), Math.cos(ang) * dist);
-      const toCenter = this._playerBasePos().clone().sub(e.group.position).normalize();
-      e.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), toCenter);
-      e.ai = new PlaneAI(e);
-      this.em.addPlane(e);
-      if (this.worldwar) e.worldSize = CONFIG.tank.worldSize;   // 世界大战：飞机用坦克地图大小，不飞出地图
-      this.enemies.push(e);
+      // 敌方空中单位：25% 概率出直升机（HeliAI 驾驶：盘旋+机炮+火箭），其余喷气机
+      if (Math.random() < 0.25) {
+        const heliTypes = PLANE_TYPES.filter((x) => x.heli);
+        const e = new Heli({ side: 'enemy', team: 'red', color: 0x8a5a42, type: heliTypes[Math.floor(Math.random() * heliTypes.length)].id });
+        e.displayName = this._nextName();
+        e.group.position.set(Math.sin(ang) * dist, CONFIG.plane.spawnAltitude + randRange(-5, 8), Math.cos(ang) * dist);
+        e.ai = new HeliAI(e);
+        this.em.addPlane(e);
+        if (this.worldwar) e.worldSize = CONFIG.tank.worldSize;
+        this.enemies.push(e);
+      } else {
+        const e = new Plane({ side: 'enemy', team: 'red', color: 0xb5462e, type: randomPlaneType().id });
+        e.displayName = this._nextName();
+        e.group.position.set(Math.sin(ang) * dist, CONFIG.plane.spawnAltitude + randRange(-10, 12), Math.cos(ang) * dist);
+        const toCenter = this._playerBasePos().clone().sub(e.group.position).normalize();
+        e.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), toCenter);
+        e.ai = new PlaneAI(e);
+        this.em.addPlane(e);
+        if (this.worldwar) e.worldSize = CONFIG.tank.worldSize;   // 世界大战：飞机用坦克地图大小，不飞出地图
+        this.enemies.push(e);
+      }
     }
     // 无尽模式：随击杀数提升敌方血量（递增难度）
     if (this.endless) {
@@ -4768,75 +4979,13 @@ class Game {
     }
   }
   // —— 直升机 AI 代打：保持 60~110m 距离盘旋悬停，机炮/火箭沿预测命中点打 ——
+  // —— 直升机 AI（玩家代打入口）：转发到通用 HeliAI（敌方直升机共用同一套脑子） ——
   _heliPilotTick(p, target, dt) {
-    const gy = terrainHeight(p.position.x, p.position.z);
-    if (!target) {   // 无目标：巡逻高度悬停慢转
-      p.setClimb(p.position.y < gy + 55 ? 0.5 : 0);
-      p.setPitchInput(0.12);
-      p.setYawInput(0.25);
-      return;
-    }
-    const to = _tmpV3.copy(target.position).sub(p.position);
-    const flatDist = Math.hypot(to.x, to.z) || 1;
-    // 瞄准：迭代提前量解（2 次：先估飞行时间→预测点→按预测点实际距离修正时间→再预测）。
-    // 原一次外推用平距/300（弹速还写错），坦克转向时误差好几米——AI"总是打偏"的主因。
-    const tv = target.forwardVector ? target.forwardVector() : _tankFwd.set(Math.sin(target.heading), 0, Math.cos(target.heading));
-    const spd = target.speed != null ? target.speed : ((target.lastThrottle || 0) * (target.maxSpeed || 10));
-    const muzzle = p.getMuzzleWorld(_p2);
-    let aimPt = target.position.clone();
-    for (let i = 0; i < 2; i++) {
-      const flyT = muzzle.distanceTo(aimPt) / 320;   // 真弹速 320
-      aimPt = target.position.clone().addScaledVector(tv, spd * flyT);
-    }
-    p.setAimPoint(aimPt);
-    // —— 被锁定规避：追踪导弹咬我（真危险）才触发；260m 内敌坦克炮口正对我也触发但更宽松 ——
-    // 规避带 3s 冷却+贴地禁俯冲：多方向敌人总有人瞄着你，无冷却会陷入"永远规避"死锁
-    // （表现为直升机原地急转圈/俯冲托底蹭地，完全不受控）。
-    let locked = false;
-    for (const pr of this.em.projectiles) {
-      if (pr.alive && pr.homing && pr.target === p) { locked = true; break; }
-    }
-    if (!locked && (this._evadeCd || 0) <= 0) {
-      for (const e of this.enemies) {
-        // 炮口威胁只算 120m 内（真危险射程；260m 外被瞄是常态，躲不过来也不用躲——盘旋本身就在防瞄）
-        if (!e.alive || e.turretYaw === undefined || e.position.distanceTo(p.position) > 120) continue;
-        const wy = e.heading + e.turretYaw;
-        const dxa = p.position.x - e.position.x, dza = p.position.z - e.position.z;
-        let da = Math.atan2(dxa, dza) - wy;
-        da = Math.atan2(Math.sin(da), Math.cos(da));
-        if (Math.abs(da) < 0.06) { locked = true; break; }   // 炮口几乎正对着我（锥角收紧防频繁误触发）
-      }
-    }
-    if (this._evadeCd > 0) this._evadeCd -= dt;
-    if (locked && (this._evadeCd || 0) <= 0) {
-      this._evadeT = 1.2; this._evadeCd = 3;   // 规避 1.2s，之后至少 3s 不再触发（防死锁循环）
-      this._evadeDir = Math.random() < 0.5 ? 1 : -1;
-      this._evadeVert = (p.position.y - gy) < 20 ? 1 : (Math.random() < 0.5 ? 1 : -1);   // 低空禁俯冲（防托底蹭地转圈）
-    }
-    if ((this._evadeT || 0) > 0) {
-      this._evadeT -= dt;
-      p.setYawInput(this._evadeDir);
-      p.setPitchInput(0.35 * this._evadeDir);   // 急转带前冲侧滑（幅度收敛防贴地）
-      p.setClimb(this._evadeVert);
-    } else {
-      // 机头正对目标（迎敌观感）：偏航直接对准，距离用前后倾控制
-      p.setClimb(clamp((gy + 48 - p.position.y) * 0.08, -1, 1));
-      p.setPitchInput(flatDist > 110 ? 0.75 : (flatDist < 60 ? -0.55 : 0.06));
-      const desiredYaw = Math.atan2(to.x, to.z);
-      let dy = desiredYaw - p.heading;
-      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-      p.setYawInput(clamp(dy * 1.8, -1, 1));
-    }
-    // 开火（规避中也打：瞄准点每帧已更新，边躲边咬）：
-    // 机炮常开（260m 内，视线被楼/山挡住不打——隔楼泼炮纯浪费），火箭/导弹积极使用
-    const obs = this.terrain ? this.terrain.obstacles : [];
-    if (flatDist < 260 && p.canFire() && !losBlocked(p.position, target.position, obs)) p.tryFire(this.em);
-    if (p.type === 'ah64') {
-      if (flatDist < 200 && p.missiles > 0 && Math.random() < dt * 0.7) p.tryFireMissile(this.em, this.enemies);   // 地狱火
-      if (flatDist < 150 && Math.random() < dt * 3) p.tryFireRockets(this.em, true);   // 火箭泼射（5发一巢自动装填）
-    } else if (flatDist < 180 && p.missiles > 0 && Math.random() < dt * 0.8) {
-      p.tryFireMissile(this.em, this.enemies);   // Mi-24/直-10：火箭巢（导弹位）
-    }
+    if (!this._pilotHeliAI || this._pilotHeliAI.heli !== p) this._pilotHeliAI = new HeliAI(p);
+    const threats = this.mode === 'tank' ? this.enemies : this.allies.concat([this.player]).filter((x) => x && x.alive);
+    this._pilotHeliAI.update(dt, {
+      target, threats, entityManager: this.em, obstacles: this.terrain ? this.terrain.obstacles : [], enemies: this.enemies,
+    });
   }
   _stopPilot() {
     const s = this._pilotSaved;
@@ -5375,7 +5524,9 @@ class Game {
         let t = this._nearest(e.position, blueAlive);
         const zoneT = this._zoneTargetFor(e.position, 'red');   // 没附近敌人就抢点
         if (zoneT && (!t || e.position.distanceTo(t.position) > 75)) t = zoneT;
-        e.ai.update(dt, { target: t, entityManager: this.em, obstacles, smokes: this.em.smokes });
+        e.ai.update(dt, e.isHeli
+          ? { target: t, threats: [this.player, ...this.allies].filter((x) => x && x.alive), entityManager: this.em, obstacles, enemies: this.enemies }   // 敌直升机：威胁=蓝方
+          : { target: t, entityManager: this.em, obstacles, smokes: this.em.smokes });
       }
       for (const a of this.allies) {
         if (!a.ai) continue;
