@@ -169,6 +169,18 @@ function tankShellSpeed(kind) { return CONFIG.tank.shellSpeed * (shellById(kind)
 function shellById(id) { return SHELLS.find((s) => s.id === id) || SHELLS[0]; }
 
 function tankTypeById(id) { return TANK_TYPES.find((t) => t.id === id) || TANK_TYPES[0]; }
+
+// 共享噪声凹凸纹理缓存：漆面一份(3,3)、地面一份(64,64)。每车各克隆一份会浪费纹理内存+绑定切换
+const _bumpCache = {};
+function sharedBump(rx, ry) {
+  const k = rx + 'x' + ry;
+  if (!_bumpCache[k]) {
+    const t = makeNoiseTexture().clone();
+    t.repeat.set(rx, ry); t.needsUpdate = true;
+    _bumpCache[k] = t;
+  }
+  return _bumpCache[k];
+}
 function randomTankType() { return TANK_TYPES[Math.floor(Math.random() * TANK_TYPES.length)]; }
 
 // AI 车组代号池（战绩板/击杀日志用）：打乱后按序取，不重名
@@ -1591,8 +1603,7 @@ class Tank {
   _build() {
     const g = GEOM[this.type] || GEOM.medium;
     const [hw, hh, hl] = g.hull;
-    const paintBump = makeNoiseTexture().clone(); paintBump.repeat.set(3, 3); paintBump.needsUpdate = true;
-    const bodyMat = new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.55, metalness: 0.35, map: camoTexture(), bumpMap: paintBump, bumpScale: 0.06 });
+    const bodyMat = new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.55, metalness: 0.35, map: camoTexture(), bumpMap: sharedBump(3, 3), bumpScale: 0.06 });
     const darkMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.9 });
     const metalMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.4, metalness: 0.65 });
 
@@ -1628,7 +1639,7 @@ class Tank {
         const wheel = new THREE.Mesh(new THREE.CylinderGeometry(wheelR, wheelR, 0.5, 12), darkMat);
         wheel.rotation.z = Math.PI / 2;
         wheel.position.set(sx * (hw / 2 + 0.35), wheelR, z);
-        wheel.castShadow = true; this.group.add(wheel);
+        this.group.add(wheel);   // 负重轮在履带内部，影子被履带整体盖住——不进阴影 pass（省 draw call）
       }
       const sprocket = new THREE.Mesh(new THREE.CylinderGeometry(wheelR * 1.3, wheelR * 1.3, 0.5, 10), darkMat);  // 主动轮（车头）
       sprocket.rotation.z = Math.PI / 2; sprocket.position.set(sx * (hw / 2 + 0.35), wheelR * 1.05, span / 2 + 0.5); this.group.add(sprocket);
@@ -1688,7 +1699,6 @@ class Tank {
     }
     const stow = new THREE.Mesh(new THREE.BoxGeometry(hw * 0.6, hh * 0.4, 0.42), bodyMat);
     stow.position.set(0, hullY + hh * 0.25, -hl / 2 - 0.05);
-    stow.castShadow = true;
     this.group.add(stow);
     this.muzzle = new THREE.Object3D();
     this.muzzle.position.set(0, 0, bl + 0.2);
@@ -2174,8 +2184,7 @@ class Plane {
 
   _build() {
     const g = PGEOM[this.type] || PGEOM.fighter;
-    const paintBump = makeNoiseTexture().clone(); paintBump.repeat.set(3, 3); paintBump.needsUpdate = true;
-    const mat = new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.5, metalness: 0.4, map: camoTexture(), bumpMap: paintBump, bumpScale: 0.05 });
+    const mat = new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.5, metalness: 0.4, map: camoTexture(), bumpMap: sharedBump(3, 3), bumpScale: 0.05 });
     this.bodyMat = mat; // 损伤可视化：起火时把机身材质焦化
     const darkMat = new THREE.MeshStandardMaterial({ color: 0x232323, roughness: 0.7, metalness: 0.3 });
     const glassMat = new THREE.MeshStandardMaterial({ color: 0xb8e0f0, roughness: 0.1, metalness: 0.6, transparent: true, opacity: 0.65 });
@@ -2200,7 +2209,7 @@ class Plane {
     this.group.add(pitot);
     // 机背刀片天线（座舱后）：通讯天线
     const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, fuseR * 0.5, fuseR * 0.85), darkMat);
-    blade.position.set(0, fuseR * 0.95, halfL * 0.02); blade.castShadow = true;
+    blade.position.set(0, fuseR * 0.95, halfL * 0.02);
     this.group.add(blade);
 
     // 流线座舱（拉长水滴形）+ 暗色舱框
@@ -2816,7 +2825,7 @@ function setupEnvironment(scene, mode, renderer) {
   const sun = new THREE.DirectionalLight(0xfff2d6, 1.1);
   sun.position.set(80, 140, 60);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(4096, 4096);
+  sun.shadow.mapSize.set(2048, 2048);   // 4096 在集成显卡上代价过高；2048 在 120m 视景内 texel≈12cm，肉眼难辨
   sun.shadow.camera.near = 10;
   sun.shadow.camera.far = 400;
   const s = 120;
@@ -2914,8 +2923,7 @@ function createTerrain(scene, mode, mapId) {
   gpos.needsUpdate = true;
   groundGeo.setAttribute('color', new THREE.Float32BufferAttribute(gcol, 3));
   groundGeo.computeVertexNormals();
-  const dirtBump = makeNoiseTexture().clone(); dirtBump.repeat.set(64, 64); dirtBump.needsUpdate = true;
-  const groundMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, bumpMap: dirtBump, bumpScale: 0.35 });
+  const groundMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, bumpMap: sharedBump(64, 64), bumpScale: 0.35 });
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.receiveShadow = true;
   group.add(ground);
@@ -3205,7 +3213,8 @@ class Game {
     this.settings = loadSettings();
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // 1.5 封顶：Retina 2.0 的填充率开销近乎翻倍（卡顿主因），1.5 肉眼难辨
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = this.settings.shadows;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
