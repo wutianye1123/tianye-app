@@ -4948,6 +4948,9 @@ class Game {
       const fv = p.isHeli ? (p._aimDir || p.forwardVector()) : p.forwardVector();
       const pp = _tmpV3.copy(p.position).addScaledVector(fv, 80).project(this.camera);
       this._planeAimNDC = { x: pp.x, y: pp.y };
+      // AI 副驾驶：起火自动灭火 + 边飞边修（血量<95% 持续回血，R 键同款速率）
+      if (p.burning) { const ext = p.tryExtinguish(); if (ext) this.hud.addFeed('🤖 AI：已灭火', 'info'); }
+      if (p.health < p.maxHealth * 0.95) p.health = Math.min(p.maxHealth, p.health + 12 * dt);
       return;
     }
     // 指针锁定时用"虚拟瞄准点"（累积鼠标移动，光标不会飞出窗口）；未锁定时用光标绝对位置。
