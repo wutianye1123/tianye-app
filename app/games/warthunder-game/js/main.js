@@ -3536,8 +3536,8 @@ class Heli {
     em.addProjectile(new Projectile({
       position: muzzle, direction: dir, speed: 320, damage: 16 * (planeTypeById(this.type).dmg || 1),
       owner: this, ownerTeam: this.team, gravity: 4, life: 2.5,
-      color: 0xffe08a, size: 0.3, pen: 115,
-      shellDef: { id: 'cannon', name: '航炮弹', penMul: 1, dmgMul: 1, bounceDeg: 74, noBounce: false },
+      color: 0xffe08a, size: 0.3, pen: 700,
+      shellDef: { id: 'cannon', name: '航炮弹', penMul: 1, dmgMul: 1, bounceDeg: 85, noBounce: false },   // 穿深拉满(什么都能穿)+跳弹角放宽：靠低伤害+速射平衡
     }));
     this.reloadTimer = this.fireCooldown;
     return true;
