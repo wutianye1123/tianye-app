@@ -1548,7 +1548,7 @@ const GEOM = {
   heavy:   { hull:[3.9, 1.5, 6.4], turret:'box',      turretSize:[3.0, 1.25], barrel:[0.24, 3.8], wheels:8, brake:true,  slope:0.40, susp:'interleave', twoPiece:true, hullMg:true }, // 虎 I（方正高大）
   is2:     { hull:[3.6, 1.3, 6.0], turret:'dome',     turretSize:[2.8, 1.15], barrel:[0.30, 4.2], wheels:6, brake:true,  slope:0.85, susp:'christie', hullMg:true }, // IS-2（122mm 粗管）
   t80:     { hull:[3.6, 1.1, 6.0], turret:'flat',     turretSize:[3.0, 0.9 ], barrel:[0.22, 4.4], wheels:6, brake:false, slope:0.90, susp:'std', skirt:true, smoke:true, fume:true }, // T-80U（现代低矮）
-  assault: { hull:[4.6, 1.8, 7.4], turret:'massive',  turretSize:[3.6, 1.6 ], barrel:[0.34, 3.8], wheels:8, brake:true,  slope:0.50, susp:'interleave', hullMg:true }, // 鼠式（巨大）
+  assault: { hull:[4.6, 1.8, 7.4], turret:'massive',  turretSize:[3.6, 1.6 ], barrel:[0.34, 3.8], wheels:8, brake:true,  slope:0.50, susp:'interleave', hullMg:true, hullStyle:'box' }, // 鼠式（方正盒车体骑宽履带）
   m1a2:    { hull:[4.2, 1.4, 6.8], turret:'flat',     turretSize:[3.2, 1.0], barrel:[0.30, 4.6], wheels:7, brake:true,  slope:0.85, susp:'std', skirt:true, smoke:true, fume:true, hullMg:true }, // M1A2 现代主战坦克
   aa:      { hull:[3.0, 1.0, 5.0], turret:'box',      turretSize:[2.2, 1.0], barrel:[0.06, 2.0], wheels:6, brake:false, slope:0.50, susp:'std', radar:true }, // 防空坦克
 };
@@ -1609,22 +1609,42 @@ class Tank {
     const darkMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.9 });
     const metalMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.4, metalness: 0.65 });
 
-    // 车体：按真实侧影挤出（倾斜前装甲 + 平车顶 + 倾斜车尾），不再是方块
+    // 车体：默认按真实侧影挤出（倾斜前装甲 + 平车顶 + 倾斜车尾）；
+    // hullStyle:'box'（鼠式）走方正盒车体：近乎垂直的首上/侧装甲，车体窄、骑在超宽履带组上。
     const hullY = hh * 0.5 + 0.4;
     const slope = g.slope ?? 0.5;
-    const G = clamp(slope * hl * 0.5, hl * 0.15, hl * 0.55);   // 前装甲水平投影（越陡越长）
-    const R = hl * 0.18;                                        // 车尾斜面投影
-    const prof = new THREE.Shape();
-    prof.moveTo(-hl / 2, 0); prof.lineTo(hl / 2, 0); prof.lineTo(hl / 2, hh * 0.35);
-    prof.lineTo(hl / 2 - G, hh); prof.lineTo(-hl / 2 + R, hh); prof.lineTo(-hl / 2, hh * 0.55);
-    prof.closePath();
-    const hullGeo = new THREE.ExtrudeGeometry(prof, { depth: hw, bevelEnabled: false, steps: 1 });
-    hullGeo.translate(0, 0, -hw / 2);   // 宽度居中
-    hullGeo.rotateY(-Math.PI / 2);       // length→+Z(朝前)，宽度→X
-    this.hull = new THREE.Mesh(hullGeo, bodyMat);
-    this.hull.position.y = 0.4;          // 底贴履带
-    this.hull.castShadow = true; this.hull.receiveShadow = true;
-    this.group.add(this.hull);
+    let G = clamp(slope * hl * 0.5, hl * 0.15, hl * 0.55);   // 前装甲水平投影（越陡越长）
+    let R = hl * 0.18;                                        // 车尾斜面投影
+    if (g.hullStyle === 'box') {
+      // —— 鼠式方正盒车体：近垂直首上，仅留极短斜角接履带 ——
+      G = hl * 0.1; R = hl * 0.1;
+      const box = new THREE.BoxGeometry(hw * 0.74, hh, hl * 0.96);
+      this.hull = new THREE.Mesh(box, bodyMat);
+      this.hull.position.y = hh * 0.5 + 0.55;   // 抬高：车体底离地，坐进宽履带之间
+      this.hull.castShadow = true; this.hull.receiveShadow = true;
+      this.group.add(this.hull);
+      // 首上短斜角（垂直脸下缘的一小段过渡）+ 车体侧面储物架（鼠式标志性的外挂框）
+      const glacis = new THREE.Mesh(new THREE.BoxGeometry(hw * 0.74, hh * 0.3, hl * 0.1), bodyMat);
+      glacis.position.set(0, 0.7, hl * 0.5);
+      glacis.rotation.x = 0.5; this.group.add(glacis);
+      for (const sx of [-1, 1]) {
+        const rack = new THREE.Mesh(new THREE.BoxGeometry(0.18, hh * 0.55, hl * 0.5), darkMat);
+        rack.position.set(sx * hw * 0.38, hh * 0.75, -hl * 0.15);
+        this.group.add(rack);
+      }
+    } else {
+      const prof = new THREE.Shape();
+      prof.moveTo(-hl / 2, 0); prof.lineTo(hl / 2, 0); prof.lineTo(hl / 2, hh * 0.35);
+      prof.lineTo(hl / 2 - G, hh); prof.lineTo(-hl / 2 + R, hh); prof.lineTo(-hl / 2, hh * 0.55);
+      prof.closePath();
+      const hullGeo = new THREE.ExtrudeGeometry(prof, { depth: hw, bevelEnabled: false, steps: 1 });
+      hullGeo.translate(0, 0, -hw / 2);   // 宽度居中
+      hullGeo.rotateY(-Math.PI / 2);       // length→+Z(朝前)，宽度→X
+      this.hull = new THREE.Mesh(hullGeo, bodyMat);
+      this.hull.position.y = 0.4;          // 底贴履带
+      this.hull.castShadow = true; this.hull.receiveShadow = true;
+      this.group.add(this.hull);
+    }
 
     // 行走机构（按型号悬挂样式差异化）+ 翼子板/侧裙
     const ts = clamp(hh / 1.1, 0.72, 1.05);   // 行走机构尺寸系数：小车(II号/霞飞/美洲狮)缩小
@@ -1655,13 +1675,18 @@ class Tank {
       // —— 履带式：履带盒 + 按悬挂样式排布负重轮 ——
       const tmat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 1, map: makeTrackTexture() });
       if (sx < 0) this.trackMatL = tmat; else this.trackMatR = tmat;
-      const track = new THREE.Mesh(new THREE.BoxGeometry(0.85, wheelR * 2.2, hl * 1.05), tmat);
-      track.position.set(sx * tx, wheelR, 0);
+      // 盒车体（鼠式）：履带超宽+加高+外移——车体骑在宽履带组上，履带上缘齐车体中线
+      const isBox = g.hullStyle === 'box';
+      const trackW = isBox ? 1.5 : 0.85;
+      const trackH = isBox ? wheelR * 3.1 : wheelR * 2.2;
+      const trackX = isBox ? hw / 2 + 0.62 : tx;
+      const track = new THREE.Mesh(new THREE.BoxGeometry(trackW, trackH, hl * 1.05), tmat);
+      track.position.set(sx * trackX, trackH / 2 * (isBox ? 1.15 : 1), 0);
       track.castShadow = true; this.group.add(track);
       const mkWheel = (r, w, z, y, mat) => {
         const wheel = new THREE.Mesh(new THREE.CylinderGeometry(r, r, w, 14), mat || darkMat);
         wheel.rotation.z = Math.PI / 2;
-        wheel.position.set(sx * tx, y !== undefined ? y : wheelR, z);
+        wheel.position.set(sx * trackX, y !== undefined ? y : wheelR, z);
         this.group.add(wheel);   // 轮子在履带内部，影子被履带盖住——不进阴影 pass（省 draw call）
         return wheel;
       };
@@ -1702,13 +1727,19 @@ class Tank {
         }
       }
       const sprocket = new THREE.Mesh(new THREE.CylinderGeometry(wheelR * 1.3, wheelR * 1.3, 0.5, 10), darkMat);  // 主动轮（车头）
-      sprocket.rotation.z = Math.PI / 2; sprocket.position.set(sx * tx, wheelR * 1.05, span / 2 + 0.5); this.group.add(sprocket);
-      if (g.susp !== 'christie') {
+      sprocket.rotation.z = Math.PI / 2; sprocket.position.set(sx * trackX, isBox ? trackH * 0.62 : wheelR * 1.05, span / 2 + 0.5); this.group.add(sprocket);
+      if (g.susp !== 'christie' && !isBox) {
         const roller = new THREE.Mesh(new THREE.CylinderGeometry(wheelR * 0.35, wheelR * 0.35, 0.5, 8), darkMat);   // 托带轮（车顶）
-        roller.rotation.z = Math.PI / 2; roller.position.set(sx * tx, wheelR * 2.0, 0); this.group.add(roller);
+        roller.rotation.z = Math.PI / 2; roller.position.set(sx * trackX, wheelR * 2.0, 0); this.group.add(roller);
       }
       // 翼子板（挡泥板）；侧裙车型（黑豹/T-80/M1）改整片侧裙遮上半履带——现代车主战剪影
-      if (g.skirt) {
+      if (isBox) {
+        // 鼠式：全宽一体翼子板，从车体侧面一直延伸到履带外缘
+        const inner = hw * 0.37, outer = hw / 2 + 0.62 + trackW / 2;
+        const deck = new THREE.Mesh(new THREE.BoxGeometry(outer - inner, 0.14, hl * 1.0), bodyMat);
+        deck.position.set(sx * (inner + outer) / 2, trackH * 1.16, 0);
+        this.group.add(deck);
+      } else if (g.skirt) {
         const skirt = new THREE.Mesh(new THREE.BoxGeometry(0.16, wheelR * 1.5, hl * 0.95), bodyMat);
         skirt.position.set(sx * (hw / 2 + 0.62), wheelR * 1.35, 0);
         skirt.castShadow = true;
@@ -1722,7 +1753,7 @@ class Tank {
 
     // 炮塔（按型号）+ 炮管
     this.turret = new THREE.Group();
-    const turretBaseY = hullY + hh * 0.5;
+    const turretBaseY = hullY + hh * 0.5 + (g.hullStyle === 'box' ? 0.15 : 0);   // 盒车体抬高 0.15，炮塔坐回车顶
     this.turret.position.y = turretBaseY;
     this._buildTurret(g, bodyMat);
     this.turretTopY = turretBaseY + g.turretSize[1];
@@ -1817,11 +1848,12 @@ class Tank {
       hmg.position.set(hw * 0.28, hullY + hh * 0.3, hl / 2 - G * 0.55 + 0.35);
       this.group.add(hmg);
     }
-    // 备用履带块挂首上（履带式都带几块——战场急救件）
+    // 备用履带块挂首上（履带式都带几块——战场急救件）；盒车体（鼠式）首上件统一贴盒顶面
+    const noseTopY = g.hullStyle === 'box' ? hh + 0.55 : hullY + hh * 0.6;
     if (g.susp !== 'road') {
       for (let i = 0; i < 3; i++) {
         const spare = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.35, 0.1), darkMat);
-        spare.position.set(-hw * 0.28 + i * 0.56, hullY + hh * 0.62, hl / 2 - G * 0.3);
+        spare.position.set(-hw * 0.28 + i * 0.56, g.hullStyle === 'box' ? noseTopY - 0.1 : hullY + hh * 0.62, hl / 2 - G * 0.3);
         spare.rotation.x = 0.15;
         this.group.add(spare);
       }
@@ -1829,7 +1861,7 @@ class Tank {
     // 车头灯一对（前上装甲两侧）+ 尾部储物箱（行军杂物）
     for (const lx of [-1, 1]) {
       const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), new THREE.MeshStandardMaterial({ color: 0xfff8e0, roughness: 0.2, metalness: 0.1, emissive: 0x554422 }));
-      lamp.position.set(lx * hw * 0.32, hullY + hh * 0.82, hl / 2 - G * 0.35);
+      lamp.position.set(lx * hw * 0.32, g.hullStyle === 'box' ? noseTopY - 0.25 : hullY + hh * 0.82, hl / 2 - G * 0.35);
       this.group.add(lamp);
     }
     const stow = new THREE.Mesh(new THREE.BoxGeometry(hw * 0.6, hh * 0.4, 0.42), bodyMat);
