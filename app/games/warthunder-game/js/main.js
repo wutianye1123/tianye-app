@@ -3,6 +3,7 @@ import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTe
 
 // 坦克贴地姿态用的临时对象（避免每帧分配）
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
+const _tmpV3 = new THREE.Vector3();   // 通用临时向量（受击方向计算等，避免每帧分配）
 const _kcTmp = new THREE.Vector3();   // X 光回放临时量（免每帧 new）
 const _scLook = new THREE.Vector3();   // 回放相机平滑视线
 const _projFwd = new THREE.Vector3(0, 0, 1);   // 曳光定向基准
@@ -138,8 +139,8 @@ const DIFFICULTY_LABELS = { easy: '简单', normal: '普通', hard: '困难' };
 const TANK_TYPES = [
   // ===== 二战早期（1939-1941）=====
   // Rank 1
-  { id:'medium',  name:'T-34-85',     icon:'🇷🇺', scale:1.0,  hp:1.0,  speed:1.0,  turn:1.0,  turret:1.0,  reload:1.0, dmg:1.0,  armor:[90,60,45], tArmor:[90,75,52], slope:[60,0,0], pen:135, rank:1, rp:0,    prereq:null,      price:0 },
-  { id:'m4',      name:'M4A3 谢尔曼',  icon:'🇺🇸', scale:1.0,  hp:1.15, speed:0.95, turn:1.0,  turret:1.0,  reload:1.1, dmg:0.95, armor:[100,60,45], tArmor:[90,60,50], slope:[45,0,0], pen:110, rank:1, rp:200,  prereq:null,      price:800 },
+  { id:'medium',  name:'T-34-85',     icon:'🇷🇺', scale:1.0,  hp:1.0,  speed:1.0,  turn:1.0,  turret:1.0,  reload:1.0, dmg:1.0,  armor:[90,60,45], tArmor:[90,75,52], slope:[60,40,50], pen:135, rank:1, rp:0,    prereq:null,      price:0 },
+  { id:'m4',      name:'M4A3 谢尔曼',  icon:'🇺🇸', scale:1.0,  hp:1.15, speed:0.95, turn:1.0,  turret:1.0,  reload:1.1, dmg:0.95, armor:[100,60,45], tArmor:[90,60,50], slope:[45,10,30], pen:110, rank:1, rp:200,  prereq:null,      price:800 },
   { id:'t26',     name:'T-26',        icon:'🇷🇺', scale:0.75, hp:0.55, speed:1.15, turn:1.5,  turret:1.5,  reload:0.6, dmg:0.5,  armor:[15,15,12], tArmor:[15,12,12], slope:[15,0,0], pen:35,  rank:1, rp:100,  prereq:null,      price:500 },
   { id:'pz38t',   name:'38(t)',       icon:'🇩🇪', scale:0.75, hp:0.55, speed:1.3,  turn:1.45, turret:1.4,  reload:0.65,dmg:0.5,  armor:[25,15,15], tArmor:[25,15,15], slope:[15,0,0], pen:45,  rank:1, rp:150,  prereq:null,      price:700 },
   { id:'matilda', name:'玛蒂尔达 II', icon:'🇬🇧', scale:1.0,  hp:1.1,  speed:0.55, turn:0.75, turret:0.9,  reload:1.0, dmg:0.75, armor:[78,65,55], tArmor:[75,70,60], slope:[15,0,0], pen:70,  rank:1, rp:150,  prereq:null,      price:900 },
@@ -152,27 +153,27 @@ const TANK_TYPES = [
   { id:'aa',      name:'ZSU-23-4 石勒喀河', icon:'🇷🇺', scale:0.85, hp:0.7, speed:1.2, turn:1.5, turret:2.0, reload:0.1, dmg:0.4, armor:[15,15,15], tArmor:[15,15,15], slope:[30,0,0], pen:20, rank:2, rp:400, prereq:'medium', price:1500 }, // 防空坦克：高仰角速射打飞机
   // ===== 二战中后期（1942-1945）=====
   // Rank 3
-  { id:'pz4',     name:'四号 F2',      icon:'🇩🇪', scale:1.0,  hp:1.05, speed:1.0,  turn:1.0,  turret:1.0,  reload:1.05,dmg:1.3,  armor:[50,30,30], tArmor:[50,30,30], slope:[12,0,0], pen:130, rank:3, rp:700,  prereq:'panzer2', price:3000 },
-  { id:'cromwell',name:'克伦威尔',     icon:'🇬🇧', scale:1.0,  hp:1.0,  speed:1.45, turn:1.2,  turret:1.1,  reload:0.85,dmg:0.9,  armor:[64,42,32], tArmor:[76,50,40], slope:[25,0,0], pen:120, rank:3, rp:750,  prereq:'matilda', price:3300 },
+  { id:'pz4',     name:'四号 F2',      icon:'🇩🇪', scale:1.0,  hp:1.05, speed:1.0,  turn:1.0,  turret:1.0,  reload:1.05,dmg:1.3,  armor:[50,30,30], tArmor:[50,30,30], slope:[12,0,15], pen:130, rank:3, rp:700,  prereq:'panzer2', price:3000 },
+  { id:'cromwell',name:'克伦威尔',     icon:'🇬🇧', scale:1.0,  hp:1.0,  speed:1.45, turn:1.2,  turret:1.1,  reload:0.85,dmg:0.9,  armor:[64,42,32], tArmor:[76,50,40], slope:[25,10,25], pen:120, rank:3, rp:750,  prereq:'matilda', price:3300 },
   { id:'td',      name:'SU-100',      icon:'🇷🇺', scale:1.05, hp:1.1,  speed:0.9,  turn:0.8,  turret:0.7,  reload:1.4, dmg:2.8,  armor:[75,45,45], tArmor:[100,45,45], slope:[50,0,0], pen:185, rank:3, rp:800,  prereq:'light',   price:3500 },
-  { id:'panther', name:'黑豹 V',       icon:'🇩🇪', scale:1.1,  hp:1.3,  speed:1.05, turn:0.85, turret:0.9,  reload:1.1, dmg:1.9,  armor:[120,60,50], tArmor:[110,45,45], slope:[55,25,0], pen:160, rank:3, rp:900,  prereq:'td',      price:4200 },
+  { id:'panther', name:'黑豹 V',       icon:'🇩🇪', scale:1.1,  hp:1.3,  speed:1.05, turn:0.85, turret:0.9,  reload:1.1, dmg:1.9,  armor:[120,60,50], tArmor:[110,45,45], slope:[55,25,35], pen:160, rank:3, rp:900,  prereq:'td',      price:4200 },
   // Rank 4
   { id:'heavy',   name:'虎 I',        icon:'🇩🇪', scale:1.2,  hp:2.0,  speed:0.7,  turn:0.7,  turret:0.9,  reload:1.3, dmg:2.2,  armor:[110,80,80], tArmor:[110,80,80], slope:[10,0,0], pen:165, rank:4, rp:1600, prereq:'panther', price:4500 },
-  { id:'is2',     name:'IS-2',        icon:'🇷🇺', scale:1.2,  hp:2.2,  speed:0.65, turn:0.65, turret:0.8,  reload:1.5, dmg:2.6,  armor:[120,90,60], tArmor:[100,90,60], slope:[60,0,0], pen:190, rank:4, rp:2000, prereq:'heavy',   price:5500 },
+  { id:'is2',     name:'IS-2',        icon:'🇷🇺', scale:1.2,  hp:2.2,  speed:0.65, turn:0.65, turret:0.8,  reload:1.5, dmg:2.6,  armor:[120,90,60], tArmor:[100,90,60], slope:[60,20,45], pen:190, rank:4, rp:2000, prereq:'heavy',   price:5500 },
   { id:'m26',     name:'M26 潘兴',     icon:'🇺🇸', scale:1.1,  hp:1.7,  speed:1.05, turn:0.95, turret:0.95, reload:1.15,dmg:1.8,  armor:[110,80,60], tArmor:[110,85,60], slope:[47,0,0], pen:200, rank:4, rp:1800, prereq:'light',   price:5200 },
   // ===== 战后第一代（1945-1960）=====
   // Rank 4
-  { id:'t54',     name:'T-54',        icon:'🇷🇺', scale:1.05, hp:1.9,  speed:1.15, turn:1.05, turret:1.1,  reload:1.0, dmg:1.9,  armor:[120,90,60], tArmor:[200,120,80], slope:[60,0,0], tSlope:[35,0,0], pen:240, rank:4, rp:2400, prereq:'is2',      price:6800 },
+  { id:'t54',     name:'T-54',        icon:'🇷🇺', scale:1.05, hp:1.9,  speed:1.15, turn:1.05, turret:1.1,  reload:1.0, dmg:1.9,  armor:[120,90,60], tArmor:[200,120,80], slope:[60,30,45], tSlope:[35,0,0], pen:240, rank:4, rp:2400, prereq:'is2',      price:6800 },
   { id:'centurion', name:'百夫长 Mk.3', icon:'🇬🇧', scale:1.1, hp:1.8,  speed:0.95, turn:0.9,  turret:0.95, reload:1.1, dmg:1.85, armor:[118,60,50], tArmor:[150,90,60], slope:[57,0,0], tSlope:[10,0,0], pen:230, rank:4, rp:2200, prereq:'cromwell', price:6500 },
-  { id:'type59',  name:'59 式',        icon:'🇨🇳', scale:1.05, hp:1.85, speed:1.05, turn:1.0,  turret:1.05, reload:1.05,dmg:1.85, armor:[110,80,55], tArmor:[190,110,75], slope:[60,0,0], tSlope:[30,0,0], pen:225, rank:4, rp:2200, prereq:null,      price:6600 }, // 中国线起点：无需前置直接攒钱买
+  { id:'type59',  name:'59 式',        icon:'🇨🇳', scale:1.05, hp:1.85, speed:1.05, turn:1.0,  turret:1.05, reload:1.05,dmg:1.85, armor:[110,80,55], tArmor:[190,110,75], slope:[60,30,45], tSlope:[30,0,0], pen:225, rank:4, rp:2200, prereq:null,      price:6600 }, // 中国线起点：无需前置直接攒钱买
   // Rank 5
-  { id:'t80',     name:'T-80U',       icon:'🇷🇺', scale:1.1,  hp:2.4,  speed:1.2,  turn:1.1,  turret:1.3,  reload:0.9, dmg:2.5,  armor:[200,120,70], tArmor:[280,130,80], slope:[68,0,0], tSlope:[30,0,0], pen:450, rank:5, rp:3000, prereq:'is2',     price:8800 },
+  { id:'t80',     name:'T-80U',       icon:'🇷🇺', scale:1.1,  hp:2.4,  speed:1.2,  turn:1.1,  turret:1.3,  reload:0.9, dmg:2.5,  armor:[200,120,70], tArmor:[280,130,80], slope:[68,30,45], tSlope:[30,0,0], pen:450, rank:5, rp:3000, prereq:'is2',     price:8800 },
   { id:'assault', name:'鼠式',        icon:'🇩🇪', scale:1.3,  hp:2.6,  speed:0.6,  turn:0.6,  turret:0.85, reload:1.6, dmg:3.4,  armor:[240,185,160], tArmor:[240,185,160], slope:[30,0,20], pen:245, rank:5, rp:3200, prereq:'is2',     price:9500 },
-  { id:'tiger2',  name:'虎王',        icon:'🇩🇪', scale:1.25, hp:2.3,  speed:0.65, turn:0.65, turret:0.75, reload:1.4, dmg:2.6,  armor:[185,80,80], tArmor:[185,90,80], slope:[50,0,0], tSlope:[15,0,0], pen:260, rank:5, rp:3400, prereq:'heavy',   price:9800 },
+  { id:'tiger2',  name:'虎王',        icon:'🇩🇪', scale:1.25, hp:2.3,  speed:0.65, turn:0.65, turret:0.75, reload:1.4, dmg:2.6,  armor:[185,80,80], tArmor:[185,90,80], slope:[50,25,35], tSlope:[15,0,0], pen:260, rank:5, rp:3400, prereq:'heavy',   price:9800 },
   // ===== 现代（1990-今）=====
   // Rank 6
   { id:'m1a2',    name:'M1A2 艾布拉姆斯', icon:'🇺🇸', scale:1.4, hp:3.5, speed:1.9, turn:2.0, turret:2.0, reload:0.5, dmg:3.6, armor:[380,150,90], tArmor:[420,170,90], slope:[75,0,0], tSlope:[25,0,0], pen:600, rank:6, rp:6000, prereq:'is2', price:20000 },
-  { id:'t90m',    name:'T-90M',       icon:'🇷🇺', scale:1.15, hp:2.7,  speed:1.3,  turn:1.15, turret:1.25, reload:0.85,dmg:2.7,  armor:[260,160,90], tArmor:[340,180,100], slope:[68,0,0], tSlope:[40,0,0], pen:560, rank:6, rp:5500, prereq:'t80',     price:19000 },
+  { id:'t90m',    name:'T-90M',       icon:'🇷🇺', scale:1.15, hp:2.7,  speed:1.3,  turn:1.15, turret:1.25, reload:0.85,dmg:2.7,  armor:[260,160,90], tArmor:[340,180,100], slope:[68,30,45], tSlope:[40,0,0], pen:560, rank:6, rp:5500, prereq:'t80',     price:19000 },
   { id:'leo2',    name:'豹 2A7',       icon:'🇩🇪', scale:1.3,  hp:3.2,  speed:1.7,  turn:1.9,  turret:1.9,  reload:0.55,dmg:3.3,  armor:[400,160,90], tArmor:[430,180,100], slope:[74,0,0], tSlope:[30,0,0], pen:620, rank:6, rp:6500, prereq:'tiger2',  price:22000 },
   { id:'type99',  name:'ZTZ-99A',     icon:'🇨🇳', scale:1.3,  hp:3.3,  speed:1.75, turn:1.95, turret:1.95, reload:0.52,dmg:3.4,  armor:[410,165,95], tArmor:[440,185,105], slope:[75,0,0], tSlope:[32,0,0], pen:640, rank:6, rp:6800, prereq:'type59',  price:24000 },
   { id:'challenger2', name:'挑战者 2', icon:'🇬🇧', scale:1.3, hp:3.3,  speed:1.55, turn:1.7,  turret:1.8,  reload:0.6, dmg:3.3,  armor:[420,170,95], tArmor:[430,180,100], slope:[72,0,0], tSlope:[25,0,0], pen:600, rank:6, rp:6000, prereq:'centurion', price:21000 },
@@ -212,8 +213,16 @@ function sharedBump(rx, ry) {
   }
   return _bumpCache[k];
 }
-function randomTankType(maxRank = 6) {
-  const pool = TANK_TYPES.filter((t) => t.rank <= maxRank && t.id !== 'aa');
+// AI 出车三档分布（战雷式分房）：同级为主(55%) + 高一档(30%) + 高两档硬骨头(15%)。
+// 只按 rank+1 均匀过滤时 rank1 房全是薄皮，玩家穿深碾压"永远击穿"——跳弹/未击穿反馈被分房饿死。
+function randomTankType(playerRank = 6) {
+  const cap = Math.min(6, playerRank + 2);
+  const r = Math.random();
+  let lo = 1, hi = playerRank;
+  if (r >= 0.55 && r < 0.85) { lo = hi = Math.min(6, playerRank + 1); }   // 高一档
+  else if (r >= 0.85) { lo = Math.min(6, playerRank + 2); hi = lo; }     // 班长车：硬骨头，正面打不动才见跳弹/未击穿
+  let pool = TANK_TYPES.filter((t) => t.rank >= lo && t.rank <= hi && t.id !== 'aa');
+  if (!pool.length) pool = TANK_TYPES.filter((t) => t.rank <= cap && t.id !== 'aa');
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
@@ -254,13 +263,20 @@ const PLANE_TYPES = [
   { id:'rafale',    name:'阵风 Rafale',   icon:'🇫🇷', hp:1.1,  speed:1.1,  agi:1.15, dmg:1.1,  rank:3, rp:1000, prereq:'j10',     price:4200 },
   { id:'heavy',     name:'F-15 鹰',       icon:'🇺🇸', hp:1.4,  speed:1.05, agi:0.85, dmg:1.25, rank:3, rp:1100, prereq:'mig29',   price:4500 },
   { id:'attacker',  name:'A-10 雷电II',   icon:'🇺🇸', hp:1.8,  speed:0.7,  agi:0.6,  dmg:1.7,  rank:4, rp:1600, prereq:'heavy',   price:6000 },
+  { id:'tornado',  name:'狂风 IDS',       icon:'🇩🇪', hp:1.2,  speed:1.25, agi:0.95, dmg:1.25, rank:3, rp:1000, prereq:'mig29',   price:4300 }, // 德国线起点
+  { id:'harrier',  name:'鹞 GR.9',        icon:'🇬🇧', hp:1.05, speed:0.95, agi:1.25, dmg:1.05, rank:3, rp:950,  prereq:'fighter',  price:4000 }, // 英国线起点：垂直起降高机动
   // Rank 4
   { id:'su35',      name:'Su-35 侧卫',    icon:'🇷🇺', hp:1.5,  speed:1.25, agi:1.05, dmg:1.35, rank:4, rp:2200, prereq:'heavy',   price:7500 },
   { id:'typhoon',   name:'台风 Typhoon',  icon:'🇪🇺', hp:1.25, speed:1.2,  agi:1.2,  dmg:1.2,  rank:4, rp:2400, prereq:'rafale',  price:8000 },
+  { id:'f2',       name:'F-2A',           icon:'🇯🇵', hp:1.2,  speed:1.15, agi:1.1,  dmg:1.2,  rank:4, rp:2300, prereq:'harrier', price:7800 }, // 日本线：F-16 深改
+  { id:'ef2000',   name:'台风 FGR.4',     icon:'🇬🇧', hp:1.3,  speed:1.22, agi:1.2,  dmg:1.25, rank:4, rp:2500, prereq:'harrier', price:8200 }, // 英国版台风
   { id:'bomber',    name:'Tu-22M 逆火',   icon:'🇷🇺', hp:1.5, speed:0.9,  agi:0.8,  dmg:2.5, missiles:true, fastMissile:true, rank:4, rp:2000, prereq:'heavy', price:7000 }, // 轰炸机：导弹+炸弹，转向快，血量适中
   // Rank 5（顶）
   { id:'jet',       name:'F-22 猛禽',     icon:'🇺🇸', hp:1.3,  speed:1.45, agi:1.3,  dmg:1.4, missiles:true, rank:5, rp:3200, prereq:'su35',    price:10000 },
   { id:'j20',       name:'歼-20 威龙',    icon:'🇨🇳', hp:1.3,  speed:1.5,  agi:1.25, dmg:1.4,  rank:5, rp:3500, prereq:'typhoon', price:11000 },
+  { id:'j16',       name:'歼-16',         icon:'🇨🇳', hp:1.6,  speed:1.3,  agi:1.0,  dmg:1.5,  rank:5, rp:3000, prereq:'su35',    price:9500 }, // 重型多用途
+  { id:'su57',      name:'Su-57',         icon:'🇷🇺', hp:1.35, speed:1.45, agi:1.28, dmg:1.42, rank:5, rp:3600, prereq:'su35',    price:11500 }, // 俄五代
+  { id:'f15ex',     name:'F-15EX 鹰II',   icon:'🇺🇸', hp:1.7,  speed:1.35, agi:1.05, dmg:1.5,  rank:5, rp:3100, prereq:'su35',    price:9800 },
   { id:'f35',       name:'F-35 闪电II',   icon:'🇺🇸', hp:2.0,  speed:1.6,  agi:1.5,  dmg:1.8, missiles:true, fastMissile:true, rank:6, rp:6000, prereq:'j20', price:20000 }, // 满级终极战机：每一项都拉到全场最高+导弹
   { id:'f35b',      name:'B-21 突袭者',   icon:'🇺🇸', hp:2.2,  speed:1.65, agi:1.55, dmg:1.85, missiles:true, fastMissile:true, bombs:true, rank:6, rp:8000, prereq:'f35', price:28000 }, // 满级隐身轰炸机：全满+导弹+炸弹，极贵
 ];
@@ -430,6 +446,8 @@ class HUD {
     container.innerHTML = `
       <div id="crosshair"></div>
       <div id="aim-circle"></div>
+      <div id="reload-ring"></div>
+      <div id="dmg-dir"></div>
       <div id="hitmarker"></div>
       <div id="lead-reticle" style="display:none"></div>
       <div id="stats">
@@ -466,12 +484,36 @@ class HUD {
     this.result = container.querySelector('#result');
     this.resultTitle = container.querySelector('#result-title');
     this.resultSub = container.querySelector('#result-sub');
+    this.reloadRing = container.querySelector('#reload-ring');
+    this.dmgDir = container.querySelector('#dmg-dir');
   }
 
-  // 让准星（与命中标记）跟随光标。
+  // 让准星（与命中标记、装填环）跟随光标。
   positionCrosshair(x, y) {
     if (this.crosshair) { this.crosshair.style.left = `${x}px`; this.crosshair.style.top = `${y}px`; }
     if (this.hitmarker) { this.hitmarker.style.left = `${x}px`; this.hitmarker.style.top = `${y}px`; }
+    if (this.reloadRing) { this.reloadRing.style.left = `${x}px`; this.reloadRing.style.top = `${y}px`; }
+  }
+
+  // 装填环进度（frac 0→1，装填中显示/充满隐藏）。
+  setReloadRing(frac) {
+    if (!this.reloadRing) this.reloadRing = this.container.querySelector('#reload-ring');
+    if (!this.reloadRing) return;
+    if (frac >= 1 || frac < 0) { this.reloadRing.style.display = 'none'; return; }
+    this.reloadRing.style.display = 'block';
+    this.reloadRing.style.setProperty('--p', String(Math.round(frac * 100)));
+  }
+
+  // 受击方向指示：屏幕角度（0=正上方，顺时针 deg），红色弧块闪现后自动淡出移除。
+  showDmgDir(deg) {
+    if (!this.dmgDir) this.dmgDir = this.container.querySelector('#dmg-dir');
+    if (!this.dmgDir) return;
+    while (this.dmgDir.children.length >= 5) this.dmgDir.removeChild(this.dmgDir.firstChild);   // 同屏最多 5 个
+    const a = document.createElement('div');
+    a.className = 'dmg-arrow';
+    a.style.transform = `rotate(${deg}deg) translateY(-170px)`;
+    this.dmgDir.appendChild(a);
+    setTimeout(() => { if (a.parentNode) a.parentNode.removeChild(a); }, 1450);
   }
 
   // 显隐准星+命中标记：阵亡/一局结束时隐藏，避免死后准星留在屏上误导。
@@ -852,6 +894,7 @@ class HUD {
   update({ health = 100, maxHealth = 100, reloadFraction = 1, kills = 0, tickets = 0, lives = 0 } = {}) {
     this.hpFg.style.width = `${Math.max(0, (health / maxHealth) * 100)}%`;
     this.rlFg.style.width = `${reloadFraction * 100}%`;
+    this.setReloadRing(reloadFraction);   // 准星装填环与左下条同步
     this.scoreEl.textContent = isFinite(tickets)
       ? `击毁 ${kills}/${tickets}　命数 ${lives}`
       : tickets === null
@@ -2589,6 +2632,13 @@ const PGEOM = {
   attacker:  { fuse:[6.5, 0.8 ], wing:11.0, sweep:0.1,  prop:false, engines:2 },  // A-10
   su35:      { fuse:[9.5, 0.55], wing:11.5, sweep:0.3,  prop:false, engines:2 },  // Su-35
   typhoon:   { fuse:[8.0, 0.5 ], wing:10.0, sweep:0.4,  prop:false, engines:2 },  // 台风
+  tornado:   { fuse:[8.5, 0.55], wing:10.5, sweep:0.5,  prop:false, engines:2 },  // 狂风 IDS（变后掠翼）
+  harrier:   { fuse:[7.0, 0.55], wing:8.0,  sweep:0.25, prop:false, engines:2 },  // 鹞 GR.9
+  f2:        { fuse:[7.5, 0.5 ], wing:9.5,  sweep:0.35, prop:false, engines:1 },  // F-2A
+  ef2000:    { fuse:[8.0, 0.5 ], wing:10.0, sweep:0.4,  prop:false, engines:2 },  // 台风 FGR.4
+  j16:       { fuse:[9.8, 0.6 ], wing:12.0, sweep:0.32, prop:false, engines:2 },  // 歼-16
+  su57:      { fuse:[9.5, 0.5 ], wing:10.5, sweep:0.55, prop:false, engines:2 },  // Su-57
+  f15ex:     { fuse:[9.2, 0.65], wing:13.0, sweep:0.28, prop:false, engines:2 },  // F-15EX
   jet:       { fuse:[9.0, 0.5 ], wing:10.0, sweep:0.6,  prop:false, engines:2 },  // F-22
   j20:       { fuse:[10.0,0.55], wing:11.0, sweep:0.55, prop:false, engines:2 },  // 歼-20
   f35:       { fuse:[9.0, 0.6 ], wing:9.5,  sweep:0.5,  prop:false, engines:1 },  // F-35
@@ -4093,7 +4143,7 @@ class Game {
   _spawnEnemy() {
     const asTank = this.worldwar ? Math.random() < 0.5 : (this.mode === 'tank');
     if (asTank) {
-      const e = new Tank({ side: 'enemy', team: 'red', color: 0x9a7b3e, type: randomTankType(Math.min(6, tankTypeById(this.tankType).rank + 1)).id });   // AI 出车随玩家进度（最多高一档）
+      const e = new Tank({ side: 'enemy', team: 'red', color: 0x9a7b3e, type: randomTankType(tankTypeById(this.tankType).rank).id });   // 三档分房：同级为主+高一档+少量高两档硬骨头
       const h = CONFIG.tank.worldSize;
       // 红方一律从地图北侧边缘出生（和蓝方南北对角）
       e.group.position.set(randRange(-h * 0.4, h * 0.4), 0, randRange(h * 0.55, h - 45));
@@ -4138,7 +4188,7 @@ class Game {
   _spawnAlly() {
     const asTank = this.worldwar ? Math.random() < 0.5 : (this.mode === 'tank');
     if (asTank) {
-      const e = new Tank({ side: 'ally', team: 'blue', color: 0x3a6b8a, type: randomTankType(Math.min(6, tankTypeById(this.tankType).rank + 1)).id });   // 队友同难度池
+      const e = new Tank({ side: 'ally', team: 'blue', color: 0x3a6b8a, type: randomTankType(tankTypeById(this.tankType).rank).id });   // 队友同难度池
       const h = CONFIG.tank.worldSize;
       // 蓝方(玩家队)从南侧边缘出生，和玩家一起
       e.group.position.set(randRange(-40, 40), 0, randRange(-(h - 45), -(h * 0.55)));
@@ -4622,6 +4672,15 @@ class Game {
 
       const targets = this.worldwar ? [...this.em.tanks, ...this.em.planes] : (this.mode === 'tank' ? this.em.tanks : this.em.planes);
       const hits = this.em.checkCollisions(targets);
+      // 受击方向指示：被打中时屏幕边缘红色弧块指向攻击者（战雷式受击反馈）
+      for (const h of hits) {
+        if (h.target === this.player && h.owner && h.owner !== this.player && this.player.alive) {
+          const dx = h.owner.position.x - this.player.position.x, dz = h.owner.position.z - this.player.position.z;
+          this.camera.getWorldDirection(_tmpV3);
+          const rel = Math.atan2(dx, dz) - Math.atan2(_tmpV3.x, _tmpV3.z);
+          this.hud.showDmgDir(rel * 180 / Math.PI);
+        }
+      }
       for (const h of hits) {
         if (h.owner === this.player) {
           // 结算统计:命中分类(跳弹/未击穿/溅射/击穿)与殉爆数
