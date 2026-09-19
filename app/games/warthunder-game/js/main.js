@@ -3382,8 +3382,8 @@ class TankAI {
       tank.tryFire(em);
     }
     // 打飞机时额外用机枪（密集火力追着飞机打）；敌方不用（太超模）；视线被挡不打
-    if (isAirTarget && !isEnemy && dist < 120 && Math.abs(aimDiff) < 0.15
-        && !losBlocked(tank.position, target.position, obstacles)) {
+    // （losBlocked 是上面主炮段算好的布尔——曾误写成函数调用，每帧抛异常中断整个逻辑循环=“打一会儿就卡住”的根因）
+    if (isAirTarget && !isEnemy && dist < 120 && Math.abs(aimDiff) < 0.15 && !losBlocked) {
       tank.tryFireMG(em);
     }
   }
@@ -3843,7 +3843,7 @@ function setupEnvironment(scene, mode, renderer, isNight = false, isRain = false
     );
     sunBall.position.set(30, 13, 20);   // 与低角度太阳方向一致（金属反射高光位匹配）
     envScene.add(sunBall);
-    scene.environment = pmrem.fromScene(envScene, 0.06).texture;
+    scene.environment = pmrem.fromScene(envScene, 0.04).texture;   // sigma 0.04：0.06 会超采样上限(20)报 clip 警告
     pmrem.dispose();
   } catch (e) { /* 环境反射失败不影响游戏 */ }
 
