@@ -5,6 +5,7 @@ import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTe
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
 const _tmpV3 = new THREE.Vector3();   // 通用临时向量（受击方向计算等，避免每帧分配）
 const _sfxDir = new THREE.Vector3();  // 音效声像：相机朝向临时向量
+const _aimNdc2 = new THREE.Vector2(); // 直升机准星：鼠标 NDC → 世界射线（raycaster 用）
 const _kcTmp = new THREE.Vector3();   // X 光回放临时量（免每帧 new）
 const _scLook = new THREE.Vector3();   // 回放相机平滑视线
 const _projFwd = new THREE.Vector3(0, 0, 1);   // 曳光定向基准
@@ -3433,13 +3434,12 @@ class Heli {
     this.blobWrap = new THREE.Group(); this.blobWrap.add(this.blob);
   }
 
-  mouseAim(nx, ny, dt) {
-    this._yawRate = clamp(nx * 1.35, -1, 1);          // 光标左右=偏航速率
-    this._aimPitch = clamp(-ny * 1.25, -1, 1);        // 光标上推=前倾加速
-  }
-  // 准星方向（相机射线）：直升机俯仰=速度控制、机头≠准星，机炮/火箭必须沿准星打才打得中
+  mouseAim(nx, ny, dt) { /* 鼠标纯瞄准（方向走 setAimDir 的准星射线）；飞行全靠键盘，不与鼠标耦合 */ }
+  setYawInput(v) { this._yawRate = clamp(v, -1, 1); }               // A/D：偏航
+  setPitchInput(v) { this._throttleIn = clamp(v, -1, 1); }          // W/S：前倾/后倾
+  // 准星方向（鼠标位置反投影的世界射线）：机炮/火箭沿准星打——十字对哪打哪
   setAimDir(dir) { this._aimDir = dir.clone().normalize(); }
-  setThrottleInput(td, dt) { this._throttleIn = td; } // W/S 与光标上下叠加
+  setThrottleInput(td, dt) { this._throttleIn = clamp(td, -1, 1); } // W/S 前后倾（键盘飞行）
   setClimb(v) { this._climb = v; }                    // Shift(+1)/Space(-1)：垂直速度目标
   get throttle() { return Math.abs(this.speed) / this.maxSpeed; }   // HUD 兼容
 
@@ -4801,12 +4801,13 @@ class Game {
     p.mouseAim(-ndc.x * this.settings.planeGain, ny * this.settings.planeGain, dt); // 水平方向校准：光标左移→左转
 
     if (p.isHeli) {
-      // 直升机：准星方向（相机射线）喂给武器——机炮/火箭沿准星打；Shift 爬升 / Space 下降（悬停物理，油门由俯仰承担）
-      p.setAimDir(this.camera.getWorldDirection(_tmpV3));
+      // 直升机：鼠标=纯瞄准（机炮/火箭沿准星世界射线），WASD=飞行（W/S 前后倾、A/D 偏航），Shift 爬升 / Space 下降
+      _aimNdc2.set(ndc.x, ndc.y);
+      this.raycaster.setFromCamera(_aimNdc2, this.camera);
+      p.setAimDir(this.raycaster.ray.direction);
       p.setClimb((inp.isDown('ShiftLeft') || inp.isDown('ShiftRight') ? 1 : 0) + (inp.isDown('Space') ? -1 : 0));
-      if (inp.isDown('KeyW')) p.setThrottleInput(1, dt);
-      else if (inp.isDown('KeyS')) p.setThrottleInput(-1, dt);
-      else p.setThrottleInput(0, dt);
+      p.setYawInput((inp.isDown('KeyA') ? 1 : 0) - (inp.isDown('KeyD') ? 1 : 0));
+      p.setPitchInput((inp.isDown('KeyW') ? 1 : 0) - (inp.isDown('KeyS') ? 1 : 0));
     } else if (inp.isDown('ShiftLeft') || inp.isDown('ShiftRight')) {
       p.throttle = 1;
     } else {
