@@ -3350,7 +3350,18 @@ class TankAI {
     const _aimPt = target.position.clone();
     const isAir = typeof target.forwardVector === 'function';
     if (isAir) _aimPt.addScaledVector(target.forwardVector(), target.speed * dist / tankShellSpeed(tank.shellKind));
-    else _aimPt.y += 1.2;
+    else {
+      // 地面坦克：前向速度 × 弹丸飞行时间的提前量（迭代 2 次：按预测点距离修正飞行时间）。
+      // 坦克没提前量的话：移动目标 8~15m/s × 飞行 0.3~0.5s = 该提前 3~7m，全打在屁股后面。
+      const tvx = Math.sin(target.heading), tvz = Math.cos(target.heading);
+      const spd = Math.abs(target.lastThrottle || 0) * (target.maxSpeed || 10);
+      for (let li = 0; li < 2; li++) {
+        const fly = tank.position.distanceTo(_aimPt) / tankShellSpeed(tank.shellKind);
+        _aimPt.x = target.position.x + tvx * spd * fly;
+        _aimPt.z = target.position.z + tvz * spd * fly;
+      }
+      _aimPt.y += 1.2;
+    }
     _aimPt.y += 0.5 * CONFIG.tank.shellGravity * Math.pow(dist / tankShellSpeed(tank.shellKind), 2);
     tank.aimTurretAt(_aimPt, dt);
 
