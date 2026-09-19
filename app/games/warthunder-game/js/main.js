@@ -3939,10 +3939,15 @@ class PlaneAI {
     const aggr = this.aggr || 0.6;
 
     if (isAirTarget) {
-      // —— 空战：保持原追踪逻辑（互相咬尾），俯冲循环只用于打地面坦克 ——
-      const desired = toT.clone().multiplyScalar(1 / dist);
-      const lead = target.forwardVector().multiplyScalar(Math.min(dist * 0.15, 20));
-      const aimDir = target.position.clone().add(lead).sub(plane.position).normalize();
+      // —— 空战：前置拦截（lead pursuit）——瞄敌机的预测相遇点，抄近路堵住它。
+      // 纯尾随追踪（瞄当前位置）在敌机转弯时永远追不上，只会跟着绕圈"卡着"。
+      const tv = target.forwardVector().multiplyScalar(target.speed || 60);
+      let meet = dist / 320, aimPt2;
+      for (let i = 0; i < 2; i++) {   // 迭代解相遇时间：t* = |预测点距离| / 弹速
+        aimPt2 = target.position.clone().addScaledVector(tv, meet);
+        meet = aimPt2.distanceTo(plane.position) / 320;
+      }
+      const aimDir = aimPt2.sub(plane.position).normalize();
       if (plane.health / plane.maxHealth < 0.4) {   // 低血 jink 侧滑
         this._jink = (this._jink || 0) + dt * 2.2;
         const side = new THREE.Vector3().crossVectors(aimDir, new THREE.Vector3(0, 1, 0)).normalize();
@@ -5043,6 +5048,18 @@ class Game {
     }
   }
 
+  // 目标粘性：AI 当前目标还活着且在 450m 内就保持（玩家 V 标记的集火目标优先），新目标要近一半以上才换。
+  // 否则两个等距目标之间来回切换，AI 谁都打不死，看起来"总是换目标/卡着绕圈"。
+  _stickyTarget(unit, fresh, marked) {
+    const cur = unit.ai && unit.ai._sticky;
+    if (marked && marked.alive) return marked;   // 集火指令最高优先
+    if (cur && cur.alive && unit.position.distanceTo(cur.position) < 450) {
+      if (!fresh || unit.position.distanceTo(fresh.position) > unit.position.distanceTo(cur.position) * 0.5) return cur;
+    }
+    if (unit.ai) unit.ai._sticky = fresh;
+    return fresh;
+  }
+
   // AI 目标选择（战雷式优先级）：被标记目标 > 可收割残血(35%以下且120m内) > 最近。
   // 敌我两侧 AI 共用;玩家 V 标记时全队集火。
   _nearest(pos, list, marked) {
@@ -5627,6 +5644,7 @@ class Game {
         let t = this._nearest(e.position, blueAlive);
         const zoneT = this._zoneTargetFor(e.position, 'red');   // 没附近敌人就抢点
         if (zoneT && (!t || e.position.distanceTo(t.position) > 75)) t = zoneT;
+        t = this._stickyTarget(e, t, this._markedTarget);   // 目标粘性：别追两下就换人
         e.ai.update(dt, e.isHeli
           ? { target: t, threats: [this.player, ...this.allies].filter((x) => x && x.alive), entityManager: this.em, obstacles, enemies: this.enemies }   // 敌直升机：威胁=蓝方
           : { target: t, entityManager: this.em, obstacles, smokes: this.em.smokes });
@@ -5636,6 +5654,7 @@ class Game {
         let t = this._nearest(a.position, redAlive, this._markedTarget);   // 标记目标全队集火
         const zoneT = this._zoneTargetFor(a.position, 'blue');
         if (zoneT && (!t || a.position.distanceTo(t.position) > 75)) t = zoneT;
+        t = this._stickyTarget(a, t, this._markedTarget);   // 目标粘性
         a.ai.update(dt, a.isHeli
           ? { target: t, threats: redAlive, entityManager: this.em, obstacles, enemies: this.enemies }   // 友直升机：威胁=红方
           : { target: t, entityManager: this.em, obstacles, smokes: this.em.smokes });
