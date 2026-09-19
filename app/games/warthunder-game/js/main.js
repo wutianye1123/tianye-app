@@ -5718,16 +5718,28 @@ function techTreeCard(t, isTank) {
     <div class="tt-rank">R${t.rank}</div><div class="g-icon">${t.icon}</div>
     <div class="g-name">${t.name}</div><div class="tt-action">${action}</div></div>`;
 }
+// 车库分国家分栏：坦克按 🇷🇺苏 / 🇩🇪德 / 🇺🇸美 / 🇨🇳中 / 🇬🇧英 / 🇫🇷法 / 🇯🇵日 分线，飞机按 🇨🇳🇺🇸🇷🇺🇫🇷🇪🇺 归组
+const NATION_ORDER = ['🇷🇺', '🇩🇪', '🇺🇸', '🇨🇳', '🇬🇧', '🇫🇷', '🇯🇵', '🇪🇺'];
 function renderTechTree() {
   if (!techtreeEl) return;
   const sec = (title, types, isTank) =>
     `<div class="tt-section"><div class="tt-title">${title}</div><div class="tt-row">${types.map((t) => techTreeCard(t, isTank)).join('')}</div></div>`;
+  const byNation = (types, isTank) => NATION_ORDER
+    .map((ic) => {
+      const group = types.filter((t) => t.icon === ic);
+      return group.length ? sec(`${ic} ${tanksNationName(ic)}`, group, isTank) : '';
+    })
+    .join('');
   techtreeEl.innerHTML =
     `<div class="tt-head"><h2>🔬 科技树</h2><button id="tt-close" class="lo-btn">返回</button></div>` +
-    sec('🛠 坦克', TANK_TYPES, true) + sec('✈️ 飞机', PLANE_TYPES, false) +
+    `<div class="tt-kind">🛠 坦克</div>` + byNation(TANK_TYPES, true) +
+    `<div class="tt-kind">✈️ 飞机</div>` + byNation(PLANE_TYPES, false) +
     `<p class="tip">打仗赚 🔬研发点 与 💰金币 → 研发（解锁购买权）→ 购买 → 出战选用</p>`;
   const close = document.getElementById('tt-close');
   if (close) close.addEventListener('click', closeTechTree);
+}
+function tanksNationName(icon) {
+  return { '🇷🇺': '苏联', '🇩🇪': '德国', '🇺🇸': '美国', '🇨🇳': '中国', '🇬🇧': '英国', '🇫🇷': '法国', '🇯🇵': '日本', '🇪🇺': '欧洲' }[icon] || '';
 }
 function techTreeClick(isTank, id) {
   const types = isTank ? TANK_TYPES : PLANE_TYPES;
