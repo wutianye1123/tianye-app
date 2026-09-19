@@ -26,14 +26,14 @@ const CONFIG = {
     turretSpeed: 0.8,
     reloadTime: 3.0,      // 玩家主炮装填
     enemyReloadTime: 5.0, // 敌方装填更长
-    enemySpread: 0.06,    // 敌方炮弹散布（越大越不准）
+    enemySpread: 0.032,   // 敌方炮弹散布（弹速真实化后命中大增，散布收紧回平衡）
     allySpread: 0.03,     // 友军炮弹散布（独立于难度，固定；原硬编码在 Tank 构造里）
     enemyFireChance: 0.4, // 敌方瞄准后单次开火概率
-    shellSpeed: 150,           // 炮弹更快（世界大战打飞机时追得上）
+    shellSpeed: 750,           // 炮口速基础值 m/s（真实量级；弹种再乘 vMul：APCR ~915 / HE ~615）
     shellDamage: 35,      // 玩家炮弹伤害
     enemyShellDamage: 14, // 敌方炮弹伤害较低
-    shellGravity: 6,
-    shellLife: 3.5,
+    shellGravity: 9.81,   // 真实重力
+    shellLife: 2.5,
     radius: 3.0,
     captureRadius: 22,    // 占领模式据点半径（_setupObjective 与 inZ 判定共用，改一处即可，原两处硬编码 22）
     worldSize: 450,
@@ -130,34 +130,38 @@ function applyDifficulty(level) {
 const DIFFICULTY_LABELS = { easy: '简单', normal: '普通', hard: '困难' };
 
 // —— 坦克型号 ——（在难度调整后的基础数值上再乘这些倍率；scale 为体积）
+// armor/tArmor: [前,侧,后]mm 车体/炮塔等效厚度（战雷式分区判定，tArmor 缺省退化用车体甲）。
 const TANK_TYPES = [
   // Rank 1
-  { id:'medium',  name:'T-34-85',     icon:'🇷🇺', scale:1.0,  hp:1.0,  speed:1.0,  turn:1.0,  turret:1.0,  reload:1.0, dmg:1.0,  armor:[90,60,45], pen:135, rank:1, rp:0,    prereq:null,      price:0 },
-  { id:'m4',      name:'M4A3 谢尔曼',  icon:'🇺🇸', scale:1.0,  hp:1.15, speed:0.95, turn:1.0,  turret:1.0,  reload:1.1, dmg:0.95, armor:[100,60,45], pen:110, rank:1, rp:200,  prereq:null,      price:800 },
+  { id:'medium',  name:'T-34-85',     icon:'🇷🇺', scale:1.0,  hp:1.0,  speed:1.0,  turn:1.0,  turret:1.0,  reload:1.0, dmg:1.0,  armor:[90,60,45], tArmor:[90,75,52], pen:135, rank:1, rp:0,    prereq:null,      price:0 },
+  { id:'m4',      name:'M4A3 谢尔曼',  icon:'🇺🇸', scale:1.0,  hp:1.15, speed:0.95, turn:1.0,  turret:1.0,  reload:1.1, dmg:0.95, armor:[100,60,45], tArmor:[90,60,50], pen:110, rank:1, rp:200,  prereq:null,      price:800 },
   // Rank 2
-  { id:'panzer2', name:'II 号坦克',    icon:'🇩🇪', scale:0.78, hp:0.6,  speed:1.4,  turn:1.6,  turret:1.6,  reload:0.7, dmg:0.6,  armor:[30,20,15], pen:55, rank:2, rp:300,  prereq:'medium',  price:1000 },
-  { id:'light',   name:'M24 霞飞',     icon:'🇺🇸', scale:0.85, hp:0.75, speed:1.5,  turn:1.5,  turret:1.7,  reload:0.7, dmg:0.8,  armor:[38,25,19], pen:60, rank:2, rp:300,  prereq:'medium',  price:1500 },
-  { id:'scout',   name:'234/2 美洲狮', icon:'🇩🇪', scale:0.8,  hp:0.5,  speed:1.7,  turn:1.8,  turret:1.8,  reload:0.6, dmg:0.5,  armor:[30,20,15], pen:65, rank:2, rp:350,  prereq:'medium',  price:1200 },
+  { id:'panzer2', name:'II 号坦克',    icon:'🇩🇪', scale:0.78, hp:0.6,  speed:1.4,  turn:1.6,  turret:1.6,  reload:0.7, dmg:0.6,  armor:[30,20,15], tArmor:[30,15,15], pen:55, rank:2, rp:300,  prereq:'medium',  price:1000 },
+  { id:'light',   name:'M24 霞飞',     icon:'🇺🇸', scale:0.85, hp:0.75, speed:1.5,  turn:1.5,  turret:1.7,  reload:0.7, dmg:0.8,  armor:[38,25,19], tArmor:[38,25,25], pen:60, rank:2, rp:300,  prereq:'medium',  price:1500 },
+  { id:'scout',   name:'234/2 美洲狮', icon:'🇩🇪', scale:0.8,  hp:0.5,  speed:1.7,  turn:1.8,  turret:1.8,  reload:0.6, dmg:0.5,  armor:[30,20,15], tArmor:[30,20,15], pen:65, rank:2, rp:350,  prereq:'medium',  price:1200 },
   // Rank 3
-  { id:'td',      name:'SU-100',      icon:'🇷🇺', scale:1.05, hp:1.1,  speed:0.9,  turn:0.8,  turret:0.7,  reload:1.4, dmg:2.8,  armor:[75,45,45], pen:185, rank:3, rp:800,  prereq:'light',   price:3500 },
-  { id:'panther', name:'黑豹 V',       icon:'🇩🇪', scale:1.1,  hp:1.3,  speed:1.05, turn:0.85, turret:0.9,  reload:1.1, dmg:1.9,  armor:[120,60,50], pen:160, rank:3, rp:900,  prereq:'td',      price:4200 },
+  { id:'td',      name:'SU-100',      icon:'🇷🇺', scale:1.05, hp:1.1,  speed:0.9,  turn:0.8,  turret:0.7,  reload:1.4, dmg:2.8,  armor:[75,45,45], tArmor:[100,45,45], pen:185, rank:3, rp:800,  prereq:'light',   price:3500 },
+  { id:'panther', name:'黑豹 V',       icon:'🇩🇪', scale:1.1,  hp:1.3,  speed:1.05, turn:0.85, turret:0.9,  reload:1.1, dmg:1.9,  armor:[120,60,50], tArmor:[110,45,45], pen:160, rank:3, rp:900,  prereq:'td',      price:4200 },
   // Rank 4
-  { id:'heavy',   name:'虎 I',        icon:'🇩🇪', scale:1.2,  hp:2.0,  speed:0.7,  turn:0.7,  turret:0.9,  reload:1.3, dmg:2.2,  armor:[110,80,80], pen:165, rank:4, rp:1600, prereq:'panther', price:4500 },
-  { id:'is2',     name:'IS-2',        icon:'🇷🇺', scale:1.2,  hp:2.2,  speed:0.65, turn:0.65, turret:0.8,  reload:1.5, dmg:2.6,  armor:[120,90,60], pen:190, rank:4, rp:2000, prereq:'heavy',   price:5500 },
+  { id:'heavy',   name:'虎 I',        icon:'🇩🇪', scale:1.2,  hp:2.0,  speed:0.7,  turn:0.7,  turret:0.9,  reload:1.3, dmg:2.2,  armor:[110,80,80], tArmor:[110,80,80], pen:165, rank:4, rp:1600, prereq:'panther', price:4500 },
+  { id:'is2',     name:'IS-2',        icon:'🇷🇺', scale:1.2,  hp:2.2,  speed:0.65, turn:0.65, turret:0.8,  reload:1.5, dmg:2.6,  armor:[120,90,60], tArmor:[100,90,60], pen:190, rank:4, rp:2000, prereq:'heavy',   price:5500 },
   // Rank 5
-  { id:'t80',     name:'T-80U',       icon:'🇷🇺', scale:1.1,  hp:2.4,  speed:1.2,  turn:1.1,  turret:1.3,  reload:0.9, dmg:2.5,  armor:[200,120,70], pen:450, rank:5, rp:3000, prereq:'is2',     price:8800 },
-  { id:'assault', name:'鼠式',        icon:'🇩🇪', scale:1.3,  hp:2.6,  speed:0.6,  turn:0.6,  turret:0.85, reload:1.6, dmg:3.4,  armor:[240,185,160], pen:245, rank:5, rp:3200, prereq:'is2',     price:9500 },
-  { id:'m1a2',    name:'M1A2 艾布拉姆斯', icon:'🇺🇸', scale:1.4,  hp:3.5, speed:1.9, turn:2.0, turret:2.0,  reload:0.5, dmg:3.6, armor:[380,150,90], pen:600, rank:6, rp:6000, prereq:'is2', price:20000 }, // 满级终极坦克：每一项都拉到全场最高
-  { id:'aa',      name:'ZSU-23-4 石勒喀河', icon:'🇷🇺', scale:0.85, hp:0.7, speed:1.2, turn:1.5, turret:2.0, reload:0.1, dmg:0.4, armor:[15,15,15], pen:20, rank:2, rp:400, prereq:'medium', price:1500 }, // 防空坦克：高仰角速射打飞机
+  { id:'t80',     name:'T-80U',       icon:'🇷🇺', scale:1.1,  hp:2.4,  speed:1.2,  turn:1.1,  turret:1.3,  reload:0.9, dmg:2.5,  armor:[200,120,70], tArmor:[280,130,80], pen:450, rank:5, rp:3000, prereq:'is2',     price:8800 },
+  { id:'assault', name:'鼠式',        icon:'🇩🇪', scale:1.3,  hp:2.6,  speed:0.6,  turn:0.6,  turret:0.85, reload:1.6, dmg:3.4,  armor:[240,185,160], tArmor:[240,185,160], pen:245, rank:5, rp:3200, prereq:'is2',     price:9500 },
+  { id:'m1a2',    name:'M1A2 艾布拉姆斯', icon:'🇺🇸', scale:1.4,  hp:3.5, speed:1.9, turn:2.0, turret:2.0,  reload:0.5, dmg:3.6, armor:[380,150,90], tArmor:[420,170,90], pen:600, rank:6, rp:6000, prereq:'is2', price:20000 }, // 满级终极坦克：每一项都拉到全场最高
+  { id:'aa',      name:'ZSU-23-4 石勒喀河', icon:'🇷🇺', scale:0.85, hp:0.7, speed:1.2, turn:1.5, turret:2.0, reload:0.1, dmg:0.4, armor:[15,15,15], tArmor:[15,15,15], pen:20, rank:2, rp:400, prereq:'medium', price:1500 }, // 防空坦克：高仰角速射打飞机
 ];
 // —— 弹种 ——（战争雷霆式：1/2/3 切换，中文名）
 // penMul:穿深倍率(乘载具 pen)；dmgMul:后效倍率(乘 shellDamage)；bounceDeg:跳弹角(入射角超过即跳)。
+// vMul:炮口速倍率(次口径硬芯更快/榴弹更慢)；penDrop:每 1000m 穿深衰减比例(硬芯存速差,榴弹不衰)。
 // 榴弹不跳弹(0=禁用)，未击穿仍溅射 25% 伤害（打薄皮好用）。
 const SHELLS = [
-  { id:'ap',   name:'穿甲榴弹',   penMul:1.0,  dmgMul:1.0,  bounceDeg: 70 },
-  { id:'apcr', name:'硬芯穿甲弹', penMul:1.45, dmgMul:0.55, bounceDeg: 62 },
-  { id:'he',   name:'榴弹',       penMul:0.35, dmgMul:1.8,  bounceDeg: 0, noBounce: true },
+  { id:'ap',   name:'穿甲榴弹',   penMul:1.0,  dmgMul:1.0,  bounceDeg: 70, vMul:1.0,  penDrop:0.10 },
+  { id:'apcr', name:'硬芯穿甲弹', penMul:1.45, dmgMul:0.55, bounceDeg: 62, vMul:1.22, penDrop:0.32 },
+  { id:'he',   name:'榴弹',       penMul:0.35, dmgMul:1.8,  bounceDeg: 0, noBounce: true, vMul:0.82, penDrop:0 },
 ];
+// 弹种实际炮口速（穿甲榴弹=基准；下坠补偿/AI 提前量与弹速联动，必须按当前弹种取）。
+function tankShellSpeed(kind) { return CONFIG.tank.shellSpeed * (shellById(kind).vMul || 1); }
 function shellById(id) { return SHELLS.find((s) => s.id === id) || SHELLS[0]; }
 
 function tankTypeById(id) { return TANK_TYPES.find((t) => t.id === id) || TANK_TYPES[0]; }
@@ -661,7 +665,7 @@ class HUD {
       this.container.appendChild(el);
       this._shellEl = el;
     }
-    this._shellEl.innerHTML = `${shell.icon}${shell.name} <span style="color:#9fd0ff">${Math.round(pen)}mm</span>` +
+    this._shellEl.innerHTML = `${shell.icon}${shell.name} <span style="color:#9fd0ff">${Math.round(pen)}mm</span><span style="color:#777;font-size:11px">炮口</span>` +
       `<span style="color:#888;font-size:11px"> (1/2/3切换)</span>`;
   }
 
@@ -1485,8 +1489,9 @@ class Tank {
     this.turnSpeed = CONFIG.tank.turnSpeed * tt.turn;
     if (!isEnemy && type === 'aa') { this.turretSpeed *= 2.5; this.reloadTime *= 0.3; this.maxSpeed *= 1.8; this.turnSpeed *= 1.5; }   // 玩家防空炮：炮塔更快+射速更快+跑得更快+转向更快（buff 须在赋值之后，否则 *= 被下方赋值覆盖失效）
     this.fireSpread = isEnemy ? CONFIG.tank.enemySpread : (side === 'ally' ? CONFIG.tank.allySpread : 0);
-    // 装甲/穿深（战争雷霆式：armor[前,侧,后]mm，pen 穿深 mm；老型号无则退化弱值，行为兜底）
+    // 装甲/穿深（战争雷霆式：armor[前,侧,后]mm 车体甲，tArmor 炮塔甲；pen 穿深 mm；老型号无则退化弱值，行为兜底）
     this.armor = tt.armor || [30, 20, 15];
+    this.tArmor = tt.tArmor || this.armor;
     this.pen = tt.pen || 60;
     this.shellKind = 'ap';   // 当前弹种（玩家 1/2/3 切换；AI 用默认穿甲榴弹）
 
@@ -1774,7 +1779,7 @@ class Tank {
     const sh = shellById(this.shellKind);   // 弹种参数随弹丸下发
     em.addProjectile(new Projectile({
       position: muzzleWorld, direction: dir,
-      speed: CONFIG.tank.shellSpeed, damage: this.shellDamage * sh.dmgMul,
+      speed: tankShellSpeed(this.shellKind), damage: this.shellDamage * sh.dmgMul,
       owner: this, ownerTeam: this.team,
       gravity: CONFIG.tank.shellGravity, life: CONFIG.tank.shellLife,
       color: this.team === 'blue' ? 0xffe08a : 0xff7755, size: 0.45,
@@ -1795,8 +1800,8 @@ class Tank {
     const dir = this._spread(this.getBarrelDir(), this.fireSpread);
     em.addProjectile(new Projectile({
       position: muzzleWorld, direction: dir,
-      speed: 160, damage: 4, owner: this, ownerTeam: this.team,
-      gravity: 4, life: 1.2, color: 0xffe9a0, size: 0.18,
+      speed: 460, damage: 4, owner: this, ownerTeam: this.team,
+      gravity: 9.81, life: 1.2, color: 0xffe9a0, size: 0.18,
       pen: 12, shellDef: { id: 'mg', name: '机枪弹', penMul: 1, dmgMul: 1, bounceDeg: 74, noBounce: false },   // 轻弹：走装甲判定(基本打不穿坦克,只能蹭侦察车/防空炮薄皮)
     }));
     this.mgTimer = 0.1;
@@ -1812,36 +1817,45 @@ class Tank {
     let mult = 1;
     if (projectile && projectile.pen) {
       const sh = projectile.shellDef || shellById('ap');
-      // 命中方位：来弹水平方向相对车体朝向的夹角 → 前甲/侧甲/后甲分区
-      // 用弹丸实际飞行方向（velocity）算入射方位——发射者开火后移走不影响（原来用 owner 位置会偏）
       const vlen = projectile.velocity.length();
       if (vlen > 1) {
-        const dx = projectile.velocity.x;
-        const dz = projectile.velocity.z;
-        const rel = Math.atan2(-dx, -dz) - this.heading;   // 来弹方向取反=指向来处；0=正前
+        const vx = projectile.velocity.x / vlen, vz = projectile.velocity.z / vlen;
+        // —— 命中分区：高处=炮塔（用炮塔甲 tArmor），否则车体甲；再按来弹方位定 前/侧/后 ——
+        // 与下方部位判定的炮塔阈值(局部 y > 2.4·sc)保持一致，装甲分区=视觉分区。
+        let isTurret = false;
+        if (hitPoint) {
+          const ly = hitPoint.y - this.group.position.y;
+          isTurret = ly > 2.4 * (this.radius / 3);
+        }
+        const plates = isTurret ? this.tArmor : this.armor;
+        const rel = Math.atan2(-vx, -vz) - this.heading;   // 来弹方位（0=正前）
         const a = Math.abs(Math.atan2(Math.sin(rel), Math.cos(rel)));
-        // 0..π：前 60°→前甲；60..120°→侧甲；120..π→后甲（斜穿法线增量并入入射角）
-        const plate = a < Math.PI / 3 ? this.armor[0] : (a < 2 * Math.PI / 3 ? this.armor[1] : this.armor[2]);
-        // 入射角：来弹方位与装甲法线的水平夹角（近似：侧甲/后甲垂直面直接用方位角偏移）
-        let incidence = a < Math.PI / 3 ? a : Math.abs(a - Math.PI / 2) * (a < 2 * Math.PI / 3 ? 1 : 0); // 侧甲以接近法线入射为主
-        if (a >= 2 * Math.PI / 3) incidence = Math.abs(a - Math.PI);  // 后甲
-        const incDeg = Math.min(80, incidence * 180 / Math.PI);
+        // 0..π：前 60°→前甲；60..120°→侧甲；120..π→后甲
+        const plate = a < Math.PI / 3 ? plates[0] : (a < 2 * Math.PI / 3 ? plates[1] : plates[2]);
+        // —— 3D 入射角：来弹方向与装甲法线的完整夹角（含俯冲/爬升分量，斜穿等效并入） ——
+        const plateAz = a < Math.PI / 3 ? 0 : (a < 2 * Math.PI / 3 ? Math.PI / 2 : Math.PI);
+        const nx = Math.sin(this.heading + plateAz), nz = Math.cos(this.heading + plateAz);
+        const cosInc = clamp(Math.abs(vx * nx + vz * nz), 0, 1);
+        const incDeg = Math.acos(cosInc) * 180 / Math.PI;
         // 跳弹：入射角超过弹种跳弹角（榴弹 noBounce 不跳）
         if (!sh.noBounce && incDeg > sh.bounceDeg) {
           this.lastCrit = null;
           return 'bounce';
         }
-        // 等效装甲 = 厚度 / cos(入射角)（80° 封顶防除零，最坏 ×5.7）
-        const eff = plate / Math.max(0.18, Math.cos(incDeg * Math.PI / 180));
-        if (projectile.pen < eff) {
+        // 穿深距离衰减（战雷规律：次口径硬芯存速差衰减快，榴弹不衰；40% 封底）
+        const trav = hitPoint ? hitPoint.distanceTo(projectile.launchPos) : 0;
+        const penEff = projectile.pen * Math.max(0.4, 1 - (sh.penDrop || 0) * Math.min(1, trav / 1000));
+        // 等效装甲 = 厚度 / cos(入射角)（cos 0.18 封底防除零，最坏 ×5.7）
+        const eff = plate / Math.max(0.18, cosInc);
+        if (penEff < eff) {
           // 未击穿：榴弹改走「范围爆炸」(见 checkCollisions 的 needSplash 分支,波及附近敌坦克)，
           // 这里不再单点扣 25%——范围伤害里命中者自己按中心满衰减拿。
-          this.lastPenInfo = '穿深' + Math.round(projectile.pen) + ' < 等效' + Math.round(eff);   // 玩家看得懂为什么打不穿
+          this.lastPenInfo = `穿深${Math.round(penEff)}@${Math.round(trav)}m < 等效${Math.round(eff)}${isTurret ? '炮塔' : ''}`;   // 玩家看得懂为什么打不穿（衰减后穿深@飞行距离）
           this.lastCrit = null;
           return (sh.noBounce ? 'splash' : 'nopen');
         }
         // 击穿：穿深富余越多后效越足（≤1.3 倍封顶）
-        mult = 1 + Math.min(0.3, (projectile.pen / eff - 1) * 0.3);
+        mult = 1 + Math.min(0.3, (penEff / eff - 1) * 0.3);
       }
     }
     // —— 部位判定（战雷式"弹道扫过哪个模块哪个炸"）：弹着点是碰撞球面点(半径~3m),
@@ -2453,7 +2467,7 @@ class TankAI {
       const _aimPt = target.position.clone();
       if (typeof target.forwardVector !== 'function') _aimPt.y += 1.2;   // 瞄车体高度(部位判定命中模块更多)
       tank.aimTurretAt(_aimPt, dt);
-      if (!smokeBlind && tank.canFire() && dist < 130 && Math.random() < 0.25) tank.tryFire(em);   // 撤退时开火更保守（原 0.5 比正常 enemyFireChance 0.4 还高，反直觉）
+      if (!smokeBlind && tank.canFire() && dist < 180 && Math.random() < 0.25) tank.tryFire(em);   // 撤退时开火更保守（原 0.5 比正常 enemyFireChance 0.4 还高，反直觉）
       return;
     }
 
@@ -2527,8 +2541,13 @@ class TankAI {
     } else {
       tank.drive(throttle, turn, dt);
     }
+    // 瞄准：对坦克瞄车体高度(部位判定命中模块更多)；对飞机算提前量拦截解(目标速度×弹丸飞行时间)；
+    // 都叠加弹道下坠补偿（真实弹速下 240m 约 0.5m，小但精确）。
     const _aimPt = target.position.clone();
-    if (typeof target.forwardVector !== 'function') _aimPt.y += 1.2;   // 瞄车体高度(部位判定命中模块更多)
+    const isAir = typeof target.forwardVector === 'function';
+    if (isAir) _aimPt.addScaledVector(target.forwardVector(), target.speed * dist / tankShellSpeed(tank.shellKind));
+    else _aimPt.y += 1.2;
+    _aimPt.y += 0.5 * CONFIG.tank.shellGravity * Math.pow(dist / tankShellSpeed(tank.shellKind), 2);
     tank.aimTurretAt(_aimPt, dt);
 
     // 瞄准差不多了且在射程内则开火（敌方更不准）
@@ -2552,10 +2571,10 @@ class TankAI {
     let aimDiff = desiredHeading - worldHeading;
     aimDiff = Math.atan2(Math.sin(aimDiff), Math.cos(aimDiff));
     const isEnemy = tank.team === 'red';
-    const aimThresh = isEnemy ? 0.06 : 0.10;
+    const aimThresh = isEnemy ? 0.045 : 0.10;
     const fireChance = isEnemy ? CONFIG.tank.enemyFireChance : 0.85;
-    const isAirTarget = typeof target.forwardVector === 'function';   // 目标是飞机
-    if (!smokeBlind && !target.isZone && tank.canFire() && dist < 160 && Math.abs(aimDiff) < aimThresh && Math.random() < fireChance) {
+    const isAirTarget = isAir;   // 目标是飞机
+    if (!smokeBlind && !target.isZone && tank.canFire() && dist < 240 && Math.abs(aimDiff) < aimThresh && Math.random() < fireChance) {
       tank.tryFire(em);
     }
     // 打飞机时额外用机枪（密集火力追着飞机打）；敌方不用（太超模）
@@ -3519,15 +3538,16 @@ class Game {
     const notches = inp.consumeWheel();
     this._dAim = t.position.distanceTo(this._tankAimPt);
     if (this.gunnerView && notches !== 0) {
-      if (this._rangeAuto) { this._rangeAuto = false; this._rangeSet = clamp(Math.round(this._dAim / 10) * 10, 20, 400); }   // 首次滚动：从当前实际距离起装订
-      this._rangeSet = clamp(this._rangeSet + notches * 10, 20, 400);
+      if (this._rangeAuto) { this._rangeAuto = false; this._rangeSet = clamp(Math.round(this._dAim / 10) * 10, 20, 700); }   // 首次滚动：从当前实际距离起装订
+      this._rangeSet = clamp(this._rangeSet + notches * 10, 20, 700);
       if (this.sfx) this.sfx.ui();
     }
     if (this._consumePress(inp, 'KeyZ') && this.gunnerView) { this._scopeMag = (this._scopeMag || 4) === 4 ? 8 : 4; if (this.sfx) this.sfx.ui(); }
     if (this._consumePress(inp, 'KeyC') && this.gunnerView && !this._rangeAuto) { this._rangeAuto = true; this.hud.addFeed('📏 已切回自动测距', 'info'); }
     // 弹道下坠补偿：炮口上抬 0.5·g·(d/v)²（自动=按实际距离实时补偿；手动=按装订射距，装错就打高/打低）
+    // v 按当前弹种实际炮口速取（榴弹慢/硬芯快，速度不同补偿量不同）。
     const dEff = this._rangeAuto ? this._dAim : this._rangeSet;
-    const drop = 0.5 * CONFIG.tank.shellGravity * Math.pow(dEff / CONFIG.tank.shellSpeed, 2);
+    const drop = 0.5 * CONFIG.tank.shellGravity * Math.pow(dEff / tankShellSpeed(t.shellKind), 2);
     const gunPt = this._tankAimPt.clone(); gunPt.y += drop;
     t.aimTurretAt(gunPt, dt, 0);
 
