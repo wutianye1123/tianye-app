@@ -3437,6 +3437,8 @@ class Heli {
     this._yawRate = clamp(nx * 1.35, -1, 1);          // 光标左右=偏航速率
     this._aimPitch = clamp(-ny * 1.25, -1, 1);        // 光标上推=前倾加速
   }
+  // 准星方向（相机射线）：直升机俯仰=速度控制、机头≠准星，机炮/火箭必须沿准星打才打得中
+  setAimDir(dir) { this._aimDir = dir.clone().normalize(); }
   setThrottleInput(td, dt) { this._throttleIn = td; } // W/S 与光标上下叠加
   setClimb(v) { this._climb = v; }                    // Shift(+1)/Space(-1)：垂直速度目标
   get throttle() { return Math.abs(this.speed) / this.maxSpeed; }   // HUD 兼容
@@ -3498,7 +3500,7 @@ class Heli {
   tryFire(em) {
     if (!this.canFire()) return false;
     const muzzle = this.getMuzzleWorld();
-    const dir = this.forwardVector();
+    const dir = (this._aimDir || this.forwardVector()).clone();   // 沿准星（相机射线）：十字对哪打哪
     const s = 0.012;   // 机炮散布
     dir.x += randRange(-s, s); dir.y += randRange(-s, s); dir.z += randRange(-s, s); dir.normalize();
     em.addProjectile(new Projectile({
@@ -3514,7 +3516,7 @@ class Heli {
   tryFireMissile(em, enemies) {
     if (!this.alive || this.missileCooldown > 0 || this.missiles <= 0) return false;
     this.missiles--; this.missileCooldown = 2.4;
-    const fwd = this.forwardVector();
+    const fwd = (this._aimDir || this.forwardVector()).clone();   // 火箭巢也沿准星齐射
     for (let i = 0; i < 4; i++) {
       const dir = fwd.clone();
       const s = 0.02 + i * 0.006;
@@ -4799,7 +4801,8 @@ class Game {
     p.mouseAim(-ndc.x * this.settings.planeGain, ny * this.settings.planeGain, dt); // 水平方向校准：光标左移→左转
 
     if (p.isHeli) {
-      // 直升机：Shift 爬升 / Space 下降（悬停物理，油门由俯仰承担）
+      // 直升机：准星方向（相机射线）喂给武器——机炮/火箭沿准星打；Shift 爬升 / Space 下降（悬停物理，油门由俯仰承担）
+      p.setAimDir(this.camera.getWorldDirection(_tmpV3));
       p.setClimb((inp.isDown('ShiftLeft') || inp.isDown('ShiftRight') ? 1 : 0) + (inp.isDown('Space') ? -1 : 0));
       if (inp.isDown('KeyW')) p.setThrottleInput(1, dt);
       else if (inp.isDown('KeyS')) p.setThrottleInput(-1, dt);
