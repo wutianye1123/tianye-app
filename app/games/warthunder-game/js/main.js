@@ -1844,6 +1844,7 @@ class EntityManager {
         const t = bestTarget;
         const wasAlive = t.alive;
         t._lastAttacker = p.owner; // 记录击杀归属
+        t._lastHitT = performance.now();   // 受击时间戳：AI 规避用（近期被命中=有人在扫我）
         // 弹着点=线段进入命中球面的精确交点（部位判定+回放共用）
         const hitPoint = new THREE.Vector3().lerpVectors(p._prev, p.mesh.position, bestT);
         const verdict = t.onHit(p.damage, p, hitPoint);   // p/hitPoint 供装甲判定+部位判定
@@ -3937,27 +3938,38 @@ class PlaneAI {
     const dist = toT.length() || 1;
     const isAirTarget = typeof target.forwardVector === 'function';
 
-    // —— 导弹规避（蓝方专属：AI 代打/友军；敌机不加——玩家的导弹得打得中）——
-    // 导弹咬我 → 2s 急侧转+蛇形俯仰甩弹道（追踪弹转向速率有限，横向大机动能甩脱），
-    // 规避优先于攻击，3.5s 冷却防连续触发死循环。
+    // —— 规避（蓝方专属：AI 代打/友军；敌机不加——玩家得打得中）——
+    // 触发源：①导弹咬我 ②近 1.5s 被机炮/炮弹命中（有人在扫我且打得中）。
+    // 动作：2s/1.5s 急侧转+蛇形俯仰——甩追踪弹道 / 脱离对方瞄准线，3.5s/2.5s 冷却防死循环。
     if (plane.side !== 'enemy') {
       let msl = null;
       for (const pr of em.projectiles) { if (pr.alive && pr.homing && pr.target === plane) { msl = pr; break; } }
+      let shooter = null;
+      if (!msl && plane._lastHitT && performance.now() - plane._lastHitT < 1500) {
+        const atk = plane._lastAttacker;
+        if (atk && atk.alive && atk.position.distanceTo(plane.position) < 400) shooter = atk;
+      }
       this._evCd = (this._evCd || 0) - dt;
-      if (msl && this._evCd <= 0) { this._evT = 2; this._evCd = 3.5; this._evSide = Math.random() < 0.5 ? 1 : -1; this._evDir = msl.velocity.clone().normalize(); }
+      if ((msl || shooter) && this._evCd <= 0) {
+        this._evT = msl ? 2 : 1.5;
+        this._evCd = msl ? 3.5 : 2.5;
+        this._evSide = Math.random() < 0.5 ? 1 : -1;
+        this._evDir = msl ? msl.velocity.clone().normalize()
+          : plane.position.clone().sub(shooter.position).setY(0).normalize();   // 脱离方向基准=攻击者→我的连线
+      }
       if ((this._evT || 0) > 0) {
         this._evT -= dt;
         const d = this._evDir || plane.forwardVector();
         const perp = new THREE.Vector3(-d.z, 0, d.x).multiplyScalar(this._evSide);
         const aimDir = perp.clone();
-        aimDir.y = Math.sin(this._evT * 5) * 0.35;   // 侧转带蛇形俯仰，破坏追踪弹提前量
+        aimDir.y = Math.sin(this._evT * 5) * 0.35;   // 侧转带蛇形俯仰，破坏瞄准/追踪提前量
         aimDir.normalize();
         // 低空安全：规避不许扎地
         const gy0 = plane.position.y - terrainHeight(plane.position.x, plane.position.z);
         if (gy0 < 25) aimDir.y = Math.max(aimDir.y, 0.4), aimDir.normalize();
         plane.aimToward(aimDir, dt, Math.max(this.aggr || 0.6, 1.2));   // 规避时坡度拉满
         plane.throttle = 1;
-        return;   // 规避优先，暂停攻击 2s
+        return;   // 规避优先，暂停攻击
       }
     }
     const aggr = this.aggr || 0.6;
