@@ -151,7 +151,7 @@ const TANK_TYPES = [
   { id:'panzer2', name:'II 号坦克',    icon:'🇩🇪', scale:0.78, hp:0.6,  speed:1.4,  turn:1.6,  turret:1.6,  reload:0.7, dmg:0.6,  armor:[30,20,15], tArmor:[30,15,15], slope:[10,0,0], pen:55,  rank:2, rp:300,  prereq:'medium',  price:1000 },
   { id:'light',   name:'M24 霞飞',     icon:'🇺🇸', scale:0.85, hp:0.75, speed:1.5,  turn:1.5,  turret:1.7,  reload:0.7, dmg:0.8,  armor:[38,25,19], tArmor:[38,25,25], slope:[55,0,0], pen:60,  rank:2, rp:300,  prereq:'medium',  price:1500 },
   { id:'scout',   name:'234/2 美洲狮', icon:'🇩🇪', scale:0.8,  hp:0.5,  speed:1.7,  turn:1.8,  turret:1.8,  reload:0.6, dmg:0.5,  armor:[30,20,15], tArmor:[30,20,15], slope:[30,0,0], pen:65,  rank:2, rp:350,  prereq:'medium',  price:1200 },
-  { id:'aa',      name:'ZSU-23-4 石勒喀河', icon:'🇷🇺', scale:0.85, hp:0.7, speed:1.2, turn:1.5, turret:2.0, reload:0.1, dmg:0.4, armor:[15,15,15], tArmor:[15,15,15], slope:[30,0,0], pen:20, rank:2, rp:400, prereq:'medium', price:1500 }, // 防空坦克：高仰角速射打飞机
+  { id:'aa',      name:'ZSU-23-4 石勒喀河', icon:'🇷🇺', scale:0.85, hp:0.7, speed:1.2, turn:1.5, turret:2.0, reload:0.1, dmg:0.4, armor:[15,15,15], tArmor:[15,15,15], slope:[30,0,0], pen:520, rank:2, rp:400, prereq:'medium', price:1500 }, // 防空坦克：高仰角速射打飞机；穿深拉满(什么坦克都能穿,靠低伤害+速射平衡——AI 不开此车
   // ===== 二战中后期（1942-1945）=====
   // Rank 3
   { id:'pz4',     name:'四号 F2',      icon:'🇩🇪', scale:1.0,  hp:1.05, speed:1.0,  turn:1.0,  turret:1.0,  reload:1.05,dmg:1.3,  armor:[50,30,30], tArmor:[50,30,30], slope:[12,0,15], pen:130, rank:3, rp:700,  prereq:'panzer2', price:3000 },
@@ -4392,10 +4392,9 @@ class Game {
         this._pilotSmokeT = 22;          // 血量告急：放烟幕墙遮蔽撤离（用玩家的烟幕弹库存/冷却）
         this._launchSmoke();
       }
-      // 边走边修：血量<55% 或模块坏即持续修（战斗中也修，不打断机动/开火——玩家 R 键同款）。
-      // 不加"脱战才修"条件：AI 常年在交战环带里，那种条件等于永远不修。
+      // 边走边修：血量<95% 或模块坏即持续修（相当于 R 键常按——无距离/脱战条件，战斗中照修）。
       const modsBroken = t.modules && (t.modules.track > 0 || t.modules.barrel > 0 || t.modules.engine > 0);
-      if (t.health < t.maxHealth * 0.55 || modsBroken) {
+      if (t.health < t.maxHealth * 0.95 || modsBroken) {
         if (t.health < t.maxHealth) t.health = Math.min(t.maxHealth, t.health + 15 * dt);
         if (t.modules) for (const k of ['track', 'barrel', 'engine']) {
           if (t.modules[k] > 0) t.modules[k] = Math.max(0, t.modules[k] - dt * 6);
