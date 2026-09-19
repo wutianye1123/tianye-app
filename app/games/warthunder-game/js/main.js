@@ -3538,7 +3538,7 @@ class Heli {
     if (!this.canFire()) return false;
     const muzzle = this.getMuzzleWorld();
     const dir = this._fireDir();   // 指向准星世界命中点：消视差
-    const s = 0.004;   // 机炮散布（收紧：AI 迭代预测后残差主要来自目标机动，散布再小一档）
+    const s = 0.003;   // 机炮散布（AI 迭代预测已准，散布收到最小：200m 处 ~0.6m）
     dir.x += randRange(-s, s); dir.y += randRange(-s, s); dir.z += randRange(-s, s); dir.normalize();
     em.addProjectile(new Projectile({
       position: muzzle, direction: dir, speed: 320, damage: 16 * (planeTypeById(this.type).dmg || 1),
@@ -3584,10 +3584,16 @@ class Heli {
     const useOwn = this.type === 'ah64' && fromButton !== 'mslot';
     if (useOwn) {
       if (this.rocketCd > 0) return false;
-      const fwd = this._fireDir();
+      const fwd = (this._aimDir || this.forwardVector()).clone();
       const dir = fwd.clone();
+      // 火箭下坠补偿：按瞄准点实际距离抬高发射角（重力6使175m/s的火箭飞150m下坠~2.2m，不补永远打低）
+      const muzzle = this.getMuzzleWorld();
+      const dist = this._aimPoint ? this._aimPoint.distanceTo(muzzle) : 120;
+      const drop = 0.5 * 6 * Math.pow(dist / 175, 2);
+      const elev = Math.atan2(drop, Math.max(20, dist));
+      dir.y += elev;
       const s = 0.02;
-      dir.x += randRange(-s, s); dir.y += randRange(-s, s); dir.z += randRange(-s, s); dir.normalize();
+      dir.x += randRange(-s, s); dir.z += randRange(-s, s); dir.normalize();
       em.addProjectile(new Projectile({
         position: this.group.position.clone().addScaledVector(fwd, 2).add(new THREE.Vector3(randRange(-1.5, 1.5), -0.2, 0)),
         direction: dir, speed: 175, damage: 85, owner: this, ownerTeam: this.team,
@@ -3601,10 +3607,14 @@ class Heli {
     }
     if (this.missiles <= 0 || this.missileCooldown > 0) return false;
     const fwd = this._fireDir();
+    // 火箭下坠补偿（同 AH-64：按瞄准点距离抬角，防系统性打低）
+    const muz = this.getMuzzleWorld();
+    const dist4 = this._aimPoint ? this._aimPoint.distanceTo(muz) : 120;
+    const elev4 = Math.atan2(0.5 * 6 * Math.pow(dist4 / 175, 2), Math.max(20, dist4));
     for (let i = 0; i < 4; i++) {
       const dir = fwd.clone();
       const s = 0.02 + i * 0.006;
-      dir.x += randRange(-s, s); dir.y += randRange(-s, s); dir.z += randRange(-s, s); dir.normalize();
+      dir.x += randRange(-s, s); dir.y += randRange(-s, s) + elev4; dir.z += randRange(-s, s); dir.normalize();
       em.addProjectile(new Projectile({
         position: this.group.position.clone().addScaledVector(fwd, 2).add(new THREE.Vector3(randRange(-1.5, 1.5), -0.2, 0)),
         direction: dir, speed: 175, damage: 85, owner: this, ownerTeam: this.team,
