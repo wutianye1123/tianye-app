@@ -1511,9 +1511,11 @@ const _puffGeo = new THREE.SphereGeometry(1.0, 10, 8);   // 共享单位球几�
 class SmokeWall {
   constructor(tank, em) {
     this.em = em; this.life = 12; this.alive = true;
-    const h = tank.heading;
-    const rx = Math.cos(h), rz = -Math.sin(h);                       // 横向（墙的展开方向）
-    const cx = tank.position.x - Math.sin(h) * 4, cz = tank.position.z - Math.cos(h) * 4;   // 车尾 4m 处起墙
+    // 按炮管朝向发射：烟幕弹打到炮口前方 ~22m 落地展开（战雷烟幕弹从炮管打出）
+    const yaw = tank.heading + (tank.turretYaw || 0);
+    const fx = Math.sin(yaw), fz = Math.cos(yaw);
+    const rx = Math.cos(yaw), rz = -Math.sin(yaw);                   // 横向（墙的展开方向，垂直炮管）
+    const cx = tank.position.x + fx * 22, cz = tank.position.z + fz * 22;   // 炮口前方落点
     const tex = makeSmokeTexture();
     this.group = new THREE.Group();
     this.puffs = [];
