@@ -4306,10 +4306,64 @@ class Game {
   }
 
   // —— 输入 ——
+  // AI 代打的强化挂载/还原（挂在实例上：重生换车自动失效重挂，关闭时精确还原当前实例）
+  _startPilot(t) {
+    this._stopPilot();   // 还原上一辆（若换车）
+    this._pilotSaved = { t, turretSpeed: t.turretSpeed, reloadTime: t.reloadTime, fireSpread: t.fireSpread, maxSpeed: t.maxSpeed };
+    t.turretSpeed *= 1.8; t.reloadTime *= 0.6; t.fireSpread *= 0.3; t.maxSpeed *= 1.15;
+    this._pilotAI = new TankAI(t);
+    this._pilotAI.fireDelay = 0.25;   // 超强反应：几乎零延迟开火
+  }
+  _stopPilot() {
+    const s = this._pilotSaved;
+    if (s && s.t) {   // 还原强化参数（车可能已死/已换，还原无害）
+      s.t.turretSpeed = s.turretSpeed; s.t.reloadTime = s.reloadTime;
+      s.t.fireSpread = s.fireSpread; s.t.maxSpeed = s.maxSpeed;
+    }
+    this._pilotSaved = null; this._pilotAI = null;
+  }
+
   _handleInputTank(dt) {
     const inp = this.input;
     const t = this.player;
     if (!t.alive) return;
+    // 🤖 AI 代打（Q 切换）：超强 AI 接管移动/瞄准/开火——炮塔×1.8、装填×0.6、散布×0.3、极速×1.15。
+    // 再按 Q 收回人工控制（参数还原）。重生换车后自动重新接管。
+    if (this._consumePress(inp, 'KeyQ')) {
+      this.aiPilot = !this.aiPilot;
+      if (this.aiPilot) { this.hud.addFeed('🤖 AI 代打开启（超强）', 'info'); this._startPilot(t); }
+      else { this.hud.addFeed('🤖 AI 代打关闭，人工接管', 'info'); this._stopPilot(); }
+    }
+    if (this.aiPilot) {
+      if (!this._pilotAI || this._pilotAI.tank !== t) this._startPilot(t);   // 重生换车：重新接管+重挂强化
+      const redAlive = this.enemies.filter((e) => e.alive);
+      const target = this._nearest(t.position, redAlive, this._markedTarget);
+      this._pilotAI.update(dt, {
+        target, entityManager: this.em,
+        obstacles: this.terrain ? this.terrain.obstacles : [], smokes: this.em.smokes,
+      });
+      // —— AI 副驾驶：灭火 / 放烟自救 / 安全时停车维修（TankAI 自带绕环走位与残血撤退）——
+      if (t.burning) {
+        const ext = t.tryExtinguish();   // F：起火先灭（持续掉血最急）
+        if (ext) this.hud.addFeed('🤖 AI：已灭火', 'info');
+      }
+      this._pilotSmokeT = (this._pilotSmokeT || 0) - dt;
+      if (t.health < t.maxHealth * 0.45 && this._pilotSmokeT <= 0) {
+        this._pilotSmokeT = 22;          // 血量告急：放烟幕墙遮蔽撤离（用玩家的烟幕弹库存/冷却）
+        this._launchSmoke();
+      }
+      const modsBroken = t.modules && (t.modules.track > 0 || t.modules.barrel > 0 || t.modules.engine > 0);
+      const safe = !target || t.position.distanceTo(target.position) > 70;   // 最近威胁 70m 外=脱战
+      if ((t.health < t.maxHealth * 0.55 || modsBroken) && safe) {
+        t.drive(0, 0, dt);               // R：安全时停车抢修（血+履带/炮管/发动机）
+        if (t.health < t.maxHealth) t.health = Math.min(t.maxHealth, t.health + 15 * dt);
+        if (t.modules) for (const k of ['track', 'barrel', 'engine']) {
+          if (t.modules[k] > 0) t.modules[k] = Math.max(0, t.modules[k] - dt * 6);
+        }
+      }
+      this._aimYaw = t.heading + t.turretYaw;   // 相机/红环跟炮塔走（观感自然）
+      return;   // 玩家输入不驱动
+    }
     let throttle = 0, turn = 0;
     if (inp.isDown('KeyW')) throttle += 1;
     if (inp.isDown('KeyS')) throttle -= 1;
@@ -5686,6 +5740,7 @@ class Game {
     this._clearCapture();
     this.em.clear();
     if (this.terrain) { this.scene.remove(this.terrain.group); if (this.terrain.grass) this.terrain.grass.dispose(); }
+    this._stopPilot && this._stopPilot();   // AI 代打参数还原
     if (this.headlight) { this.scene.remove(this.headlight, this.headlightTarget); this.headlight.dispose(); this.headlight = null; }
     if (this.postfx) this.postfx.dispose();
     this.renderer.dispose();
