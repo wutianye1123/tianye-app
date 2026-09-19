@@ -3538,7 +3538,7 @@ class Heli {
     if (!this.canFire()) return false;
     const muzzle = this.getMuzzleWorld();
     const dir = this._fireDir();   // 指向准星世界命中点：消视差
-    const s = 0.006;   // 机炮散布（收紧：200m 处偏差 ~1.2m，命中球 3m 内）
+    const s = 0.004;   // 机炮散布（收紧：AI 迭代预测后残差主要来自目标机动，散布再小一档）
     dir.x += randRange(-s, s); dir.y += randRange(-s, s); dir.z += randRange(-s, s); dir.normalize();
     em.addProjectile(new Projectile({
       position: muzzle, direction: dir, speed: 320, damage: 16 * (planeTypeById(this.type).dmg || 1),
@@ -4755,12 +4755,17 @@ class Game {
     }
     const to = _tmpV3.copy(target.position).sub(p.position);
     const flatDist = Math.hypot(to.x, to.z) || 1;
-    // 瞄准：目标速度 × 弹丸飞行时间的提前量（坦克速度用 heading 前向近似）
-    const lead = flatDist / 300;
+    // 瞄准：迭代提前量解（2 次：先估飞行时间→预测点→按预测点实际距离修正时间→再预测）。
+    // 原一次外推用平距/300（弹速还写错），坦克转向时误差好几米——AI"总是打偏"的主因。
     const tv = target.forwardVector ? target.forwardVector() : _tankFwd.set(Math.sin(target.heading), 0, Math.cos(target.heading));
     const spd = target.speed != null ? target.speed : ((target.lastThrottle || 0) * (target.maxSpeed || 10));
-    const aim = target.position.clone().addScaledVector(tv, spd * lead);
-    p.setAimPoint(aim);   // AI 也用世界命中点（消视差，弹从机头直指预测点）
+    const muzzle = p.getMuzzleWorld(_p2);
+    let aimPt = target.position.clone();
+    for (let i = 0; i < 2; i++) {
+      const flyT = muzzle.distanceTo(aimPt) / 320;   // 真弹速 320
+      aimPt = target.position.clone().addScaledVector(tv, spd * flyT);
+    }
+    p.setAimPoint(aimPt);
     // —— 被锁定规避：追踪导弹咬我（真危险）才触发；260m 内敌坦克炮口正对我也触发但更宽松 ——
     // 规避带 3s 冷却+贴地禁俯冲：多方向敌人总有人瞄着你，无冷却会陷入"永远规避"死锁
     // （表现为直升机原地急转圈/俯冲托底蹭地，完全不受控）。
