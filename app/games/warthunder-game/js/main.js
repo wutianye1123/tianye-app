@@ -992,20 +992,22 @@ function projMat(color) {
   return m;
 }
 
-// 爆炸光源池：每个爆炸原先 new 一个 PointLight，同屏多个动态光源会逼 GPU 对所有受光材质
-// (坦克/飞机/建筑/地形) 重算 fragment，是密集交战掉帧主因。改为全局上限个 PointLight 借用——
-// 池里有空闲就取，没有且未到上限就新建，到上限就返回 null（该爆炸不挂光源，靠 core 闪光球；
-// core 是 MeshBasicMaterial 永亮、不受光，足够亮）。Explosion.dispose 时归还复用。
+// 爆炸光源池：全局上限 4 盏 PointLight **常驻场景**（intensity=0 待命）。
+// 注意不能 add/remove 挂到爆炸组上——场景灯光数量一变，Three 会对所有受光材质重编译 shader，
+// 每次"击杀爆炸挂灯→熄灭摘灯"都全量重编译一次，正是击杀瞬间卡一下的根因。
+// 常驻后 lights 状态永不变化（intensity=0 不贡献光照），零重编译；爆炸只借走调亮，归还时归零。
 const _MAX_EXPLO_LIGHTS = 4;
 const _exploLightPool = [];   // { light: PointLight, inUse: boolean }
+function ensureExplosionLights(scene) {
+  while (_exploLightPool.length < _MAX_EXPLO_LIGHTS) {
+    const light = new THREE.PointLight(0xffa040, 0, 40);
+    scene.add(light);
+    _exploLightPool.push({ light, inUse: false });
+  }
+}
 function acquireExplosionLight() {
   for (const h of _exploLightPool) if (!h.inUse) { h.inUse = true; return h; }
-  if (_exploLightPool.length < _MAX_EXPLO_LIGHTS) {
-    const h = { light: new THREE.PointLight(0xffa040, 0, 40), inUse: true };
-    _exploLightPool.push(h);
-    return h;
-  }
-  return null;
+  return null;   // 池满：该爆炸不挂光源，靠 core 闪光球（MeshBasicMaterial 永亮，足够亮）
 }
 
 class Projectile {
@@ -1104,7 +1106,7 @@ class Explosion {
     );
     this.group.add(this.core, this.smoke);
 
-    // 爆炸闪光（从全局光源池借用：池满则不挂，靠 core 闪光球——多动态光源是 GPU 杀手）
+    // 爆炸闪光（从常驻光源池借用：只调位置/颜色/亮度，不 add/remove——防灯光数变化触发全材质重编译）
     const _lh = acquireExplosionLight();
     if (_lh) {
       this._lightHandle = _lh;
@@ -1112,7 +1114,7 @@ class Explosion {
       this.light.color.setHex(color);
       this.light.distance = 30 * s;
       this.light.intensity = 4;
-      this.group.add(this.light);
+      this.light.position.copy(position);
     }
 
     this.life = 0.7;
@@ -1133,12 +1135,11 @@ class Explosion {
     if (this.life <= 0) this.alive = false;
   }
 
-  // 归还光源到池（摘下、归零、标记可用），并释放独立几何/材质。
+  // 归还光源到池（归零亮度、标记可用——常驻场景不摘除），并释放独立几何/材质。
   dispose() {
     if (this._disposed) return;
     this._disposed = true;
     if (this._lightHandle) {
-      this.group.remove(this.light);
       this.light.intensity = 0;
       this._lightHandle.inUse = false;
       this._lightHandle = null; this.light = null;
@@ -1330,13 +1331,15 @@ class GrassField {
     this.update(0, 0);   // 初始铺一批
   }
   update(cx, cz) {
+    // 中心移出 8m → 把整批重排入队；每帧最多重排 160 个实例，摊平尖峰（原来 1400 个一口气重排=走一步卡一下）
     const dx = cx - this._lx, dz = cz - this._lz;
-    if (dx * dx + dz * dz < 64) return;   // 8m 内不重排
-    this._lx = cx; this._lz = cz;
+    if (dx * dx + dz * dz >= 64) { this._lx = cx; this._lz = cz; this._cursor = 0; }
+    if (this._cursor == null) return;
     const R = 110;
-    for (let i = 0; i < this.count; i++) {
+    const end = Math.min(this.count, this._cursor + 160);
+    for (let i = this._cursor; i < end; i++) {
       const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * R;
-      const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+      const x = this._lx + Math.cos(a) * r, z = this._lz + Math.sin(a) * r;
       this._p.set(x, terrainHeight(x, z) - 0.05, z);
       this._e.set((Math.random() - 0.5) * 0.25, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.25);
       this._q.setFromEuler(this._e);
@@ -1345,6 +1348,7 @@ class GrassField {
       this._m.compose(this._p, this._q, this._s);
       this.mesh.setMatrixAt(i, this._m);
     }
+    this._cursor = end >= this.count ? null : end;
     this.mesh.instanceMatrix.needsUpdate = true;
   }
   dispose() { this.mesh.geometry.dispose(); this.mat.dispose(); this.mesh.removeFromParent(); }
@@ -2189,17 +2193,21 @@ class Tank {
     // 履带差速滚动：左履带=油门-转向、右履带=油门+转向
     if (this.trackMatL) this.trackMatL.map.offset.y += ((this.lastThrottle || 0) * 1.5 - (this._lastTurn || 0) * 1.2) * dt;
     if (this.trackMatR) this.trackMatR.map.offset.y += ((this.lastThrottle || 0) * 1.5 + (this._lastTurn || 0) * 1.2) * dt;
-    // 行驶扬尘：车尾两履带口卷出土黄烟（战雷式战场氛围）；限流防粒子爆炸
+    // 行驶扬尘：车尾两履带口卷出土黄烟（战雷式战场氛围）。限流：只给相机 160m 内的车+降频，
+    // 全场 20 辆车每秒几百团烟会把 GC 和 draw call 顶爆。
     if (this.alive && this.em && Math.abs(this.lastThrottle || 0) > 0.25) {
       this.dustT = (this.dustT || 0) - dt;
       if (this.dustT <= 0) {
-        const sh0 = Math.sin(this.heading), ch0 = Math.cos(this.heading);
-        const bx = this.position.x - sh0 * this.hullLen * 0.52, bz = this.position.z - ch0 * this.hullLen * 0.52;
-        for (const sx of [-1, 1]) {
-          const p = new THREE.Vector3(bx + ch0 * sx * this.hullWid * 0.42, 0.4, bz - sh0 * sx * this.hullWid * 0.42);
-          this.em.addEffect(new Smoke(p, 0x9a8465, randRange(0.5, 0.9), randRange(1.0, 1.6), 0.8));
-        }
-        this.dustT = 0.16;
+        const near = !this.em.listener || this.position.distanceTo(this.em.listener.position) < 160;
+        if (near) {
+          const sh0 = Math.sin(this.heading), ch0 = Math.cos(this.heading);
+          const bx = this.position.x - sh0 * this.hullLen * 0.52, bz = this.position.z - ch0 * this.hullLen * 0.52;
+          for (const sx of [-1, 1]) {
+            const p = new THREE.Vector3(bx + ch0 * sx * this.hullWid * 0.42, 0.4, bz - sh0 * sx * this.hullWid * 0.42);
+            this.em.addEffect(new Smoke(p, 0x9a8465, randRange(0.5, 0.9), randRange(1.0, 1.6), 0.8));
+          }
+          this.dustT = 0.22;
+        } else this.dustT = 0.3;   // 远处车：跳过本拍但继续计时
       }
     }
     // 炮塔反旋转：抵消车体贴坡倾斜，让炮塔在世界系保持水平、按 heading+turretYaw 朝向（瞄准不受地形影响）
@@ -3581,6 +3589,7 @@ class Game {
     this.renderer.toneMappingExposure = 1.15;
 
     this.scene = new THREE.Scene();
+    ensureExplosionLights(this.scene);   // 爆炸光常驻（防每次爆炸 lights 增减触发全材质重编译）
     this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.5, 3000);
     this.camera.layers.enable(2);   // 层2=燃烧残骸(回放相机不开,避免黑残骸挡克隆车透视)
 
@@ -4920,7 +4929,9 @@ class Game {
     r.setScissor(w - pw - 14, h - ph - 46, pw, ph);
     r.setViewport(w - pw - 14, h - ph - 46, pw, ph);
     sc.cam.aspect = pw / ph; sc.cam.updateProjectionMatrix();
+    r.shadowMap.autoUpdate = false;   // 跟拍小窗复用主画面刚画好的阴影（跟拍期掉帧大户：整场景+阴影白画第二遍）
     r.render(this.scene, sc.cam);
+    r.shadowMap.autoUpdate = true;    // 恢复：主循环下一帧照常更新阴影
     r.setScissorTest(false);
     r.setViewport(0, 0, w, h);
   }
