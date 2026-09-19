@@ -1030,10 +1030,10 @@ class HUD {
   }
 
   // 显示胜负面板，按钮回调每次重绑。
-  showResult({ win, kills, onAgain, onMenu, endless = false, stats = null }) {
+  showResult({ win, kills, onAgain, onMenu, endless = false, stats = null, wave = 0 }) {
     this.resultTitle.textContent = win ? '胜利！' : (endless ? '本局阵亡' : '失败');
     this.resultTitle.style.color = win ? '#7CFC00' : (endless ? '#ffd86b' : '#ff5555');
-    this.resultSub.textContent = endless ? `坚持击毁 ${kills} 个目标` : `本局击毁 ${kills} 个目标`;
+    this.resultSub.textContent = wave > 0 ? `🌊 撑到第 ${wave} 波 · 击毁 ${kills} 个目标` : (endless ? `坚持击毁 ${kills} 个目标` : `本局击毁 ${kills} 个目标`);
     // 战雷式结算统计:命中率/判定分布/殉爆数/弹种使用——装甲系统的学习效果可量化
     const stEl = this.container.querySelector('#result-stats');
     if (stEl) {
@@ -4321,7 +4321,7 @@ class Game {
     this._namePool = [];        // AI 代号池（打乱按序取）
     this._mapBg = null;         // 大地图地形底图缓存（换图失效）
     this.playerLives = R.playerLives;
-    this.enemyTickets = this.endless ? Infinity : (mode === 'tank' ? R.tankTickets : R.planeTickets);
+    this.enemyTickets = (this.endless || this.objective === 'waves') ? Infinity : (mode === 'tank' ? R.tankTickets : R.planeTickets);
     this.enemiesToSpawn = this.objective === 'capture' ? 9999 : this.enemyTickets;   // 征服：增援池挂票数（票未尽援不断），上限在 _updateEnemySpawns 按票算
     this._bleedHolder = null;   // 流失播报状态（占多数点的一方）
     this._noEnemyT = 0;         // 敌方全灭计时（兜底判胜用）
@@ -4336,10 +4336,16 @@ class Game {
 
     this._makePlayer();
 
-    // 初始铺一波敌人
-    const initial = Math.min(R.maxConcurrentEnemies, this.enemyTickets);
-    for (let i = 0; i < initial; i++) this._spawnEnemy();
-    if (this.objective !== 'capture') this.enemiesToSpawn = this.enemyTickets - initial;   // 征服模式保持 9999 池（按票门控）
+    // 波次生存：不铺常规敌（3 秒后第一波来袭），增援池关闭
+    if (this.objective === 'waves') {
+      this.wave = 0; this._waveInterT = 3;
+      this.enemiesToSpawn = 0;
+      this.hud.setCenterMessage('🌊 波次生存：准备好！');
+    } else {
+      const initial = Math.min(R.maxConcurrentEnemies, this.enemyTickets);
+      for (let i = 0; i < initial; i++) this._spawnEnemy();
+      if (this.objective !== 'capture') this.enemiesToSpawn = this.enemyTickets - initial;   // 征服模式保持 9999 池（按票门控）
+    }
 
     // 初始队友
     for (let i = 0; i < this.allyCount; i++) this._spawnAlly();
@@ -4521,7 +4527,9 @@ class Game {
   _spawnEnemy() {
     const asTank = this.worldwar ? Math.random() < 0.5 : (this.mode === 'tank');
     if (asTank) {
-      const e = new Tank({ side: 'enemy', team: 'red', color: 0x9a7b3e, type: randomTankType(tankTypeById(this.tankType).rank).id });   // 三档分房：同级为主+高一档+少量高两档硬骨头
+      // 波次生存：rank 随波次爬升（_waveMaxRank）；普通局：三档分房（同级为主+高一档+少量高两档硬骨头）
+      const rk = this.objective === 'waves' ? (this._waveMaxRank || 2) : tankTypeById(this.tankType).rank;
+      const e = new Tank({ side: 'enemy', team: 'red', color: 0x9a7b3e, type: randomTankType(rk).id });
       const h = CONFIG.tank.worldSize;
       // 红方一律从地图北侧边缘出生（和蓝方南北对角）
       e.group.position.set(randRange(-h * 0.4, h * 0.4), 0, randRange(h * 0.55, h - 45));
@@ -5849,8 +5857,10 @@ class Game {
     // 维持场上敌人数：若有空位且还有配额，安排一次刷新。
     // 征服模式上限挂票数：ceil(敌方票/击杀扣票)——票未尽援不断，票流失增援同步缩水（歼灭也能把票打空）。
     const cap = this.objective === 'capture'
-      ? Math.ceil(this.redTickets / CONFIG.rules.conquest.killCost)
+      ? Math.ceil(this.redTickets / CONFIG.rules.killCost)
       : this.enemyTickets;
+    // 波次生存：不自动增援（一波打完等下一波，由 _checkEnd 推进）
+    if (this.objective === 'waves') return;
     if (this._enemySpawnTimer <= 0 &&
         aliveEnemies < maxC &&
         this.enemiesToSpawn > 0 &&
@@ -5955,7 +5965,14 @@ class Game {
 
   _checkEnd(dt = 0.016) {
     if (this.state !== 'playing') return;
-    if (this.objective === 'capture') {
+    if (this.objective === 'waves') {
+      // 波次生存：一波全灭 → 4s 休整（回复+补给）→ 下一波更强；撑到玩家命数耗尽为止
+      if (this.enemies.length === 0 && this.player && this.player.alive) {
+        this._waveInterT -= dt;
+        if (this._waveInterT <= 0) this._startWave();
+        else this.hud.setCenterMessage(`第 ${this.wave} 波肃清！下一波 ${Math.ceil(this._waveInterT)}s（休整中…）`);
+      }
+    } else if (this.objective === 'capture') {
       // 征服模式：先耗尽对方票数者获胜（占点流失 + 击杀扣票两条路）
       if (this.redTickets <= 0) { this._end(true); return; }
       if (this.blueTickets <= 0) { this._end(false); return; }
@@ -5967,6 +5984,28 @@ class Game {
     } else if (!this.endless && this.kills >= this.enemyTickets) { this._end(true); return; }
     if (this.playerLives <= 0 && this.respawnTimer <= 0 && !(this.player && this.player.alive)) {
       this._end(false);
+    }
+  }
+
+  // —— 波次生存：第 N 波出 2+N 辆敌车，rank 随波次爬升（1-2波≤rank2 → 9波+全池），5 波起血量递增 ——
+  _startWave() {
+    this.wave = (this.wave || 0) + 1;
+    const n = 2 + this.wave;
+    this._waveMaxRank = Math.min(6, 1 + Math.floor((this.wave + 1) / 2));
+    for (let i = 0; i < n; i++) this._spawnEnemy();
+    if (this.wave >= 5) {
+      const k = 1 + (this.wave - 4) * 0.08;
+      for (const e of this.enemies) { e.maxHealth *= k; e.health = e.maxHealth; }
+    }
+    this._waveInterT = 4;
+    this.hud.setCenterMessage(`🌊 第 ${this.wave} 波来袭！`);
+    this.hud.addFeed(`🌊 第 ${this.wave} 波（${n} 辆）`, 'kill');
+    // 波间补给：回复 30% 血+清模块伤+烟幕弹补满
+    const p = this.player;
+    if (p && p.alive) {
+      p.health = Math.min(p.maxHealth, p.health + p.maxHealth * 0.3);
+      if (p.modules) for (const k2 in p.modules) p.modules[k2] = 0;
+      this._smokeAmmo = 3;
     }
   }
 
@@ -5990,6 +6029,7 @@ class Game {
       win,
       kills: this.kills,
       endless: this.endless,
+      wave: this.objective === 'waves' ? this.wave : 0,
       stats: { ...st, shells: sh },
       onAgain: () => this.restart(this.mode),
       onMenu: () => { if (this.onExit) this.onExit(); },
@@ -6135,8 +6175,8 @@ function renderEndlessBtn() {
 }
 function renderObjectiveBtn() {
   if (!objectiveBtn) return;
-  objectiveBtn.textContent = `🎯 征服模式(A/B/C)：${objective === 'capture' ? '开启' : '关闭'}`;
-  objectiveBtn.classList.toggle('active', objective === 'capture');
+  objectiveBtn.textContent = `🎯 目标：${objective === 'capture' ? '征服(A/B/C)' : (objective === 'waves' ? '🌊 波次生存' : '歼灭')}`;
+  objectiveBtn.classList.toggle('active', objective === 'capture' || objective === 'waves');
   objectiveBtn.style.display = (worldwar || pendingMode === 'tank') ? '' : 'none';   // 世界大战时也显示
 }
 function renderMapBtn() {
@@ -6376,7 +6416,7 @@ document.querySelectorAll('.diff-btn').forEach((btn) => {
 });
 
 if (endlessBtn) endlessBtn.addEventListener('click', () => { endless = !endless; renderEndlessBtn(); });
-if (objectiveBtn) objectiveBtn.addEventListener('click', () => { objective = objective === 'capture' ? 'battle' : 'capture'; renderObjectiveBtn(); renderLoadout(); });
+if (objectiveBtn) objectiveBtn.addEventListener('click', () => { objective = objective === 'battle' ? 'capture' : (objective === 'capture' ? 'waves' : 'battle'); renderObjectiveBtn(); renderLoadout(); });
 if (mapBtn) mapBtn.addEventListener('click', () => { mapIndex = (mapIndex + 1) % MAPS.length; renderMapBtn(); renderLoadout(); });
 if (worldwarBtn) worldwarBtn.addEventListener('click', () => { worldwar = !worldwar; renderWorldwarBtn(); renderLoadout(); });
 if (techtreeBtn) techtreeBtn.addEventListener('click', openTechTree);
