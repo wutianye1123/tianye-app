@@ -996,6 +996,7 @@ class Projectile {
     this.velocity = direction.clone().normalize().multiplyScalar(speed);
     this.launchPos = position.clone();   // 击杀回放：出膛点快照（按真实弹道慢放重演）
     this.launchVel = this.velocity.clone();
+    this._prev = position.clone();       // 上一帧位置（扫掠命中线段起点；真实弹速 12.5m/帧，点位采样会隧穿）
     this.maxLife = life;
     this.damage = damage;
     this.owner = owner;           // 发射者实体（用于击杀归属）
@@ -1015,6 +1016,7 @@ class Projectile {
       this.velocity.copy(cur.multiplyScalar(this.velocity.length()));
     }
     if (this.gravity) this.velocity.y -= this.gravity * dt;
+    this._prev.copy(this.mesh.position);   // 移动前快照：本帧扫掠线段起点
     this.mesh.position.addScaledVector(this.velocity, dt);
     if (this.stretch) {   // 曳光定向:弹体长轴对齐速度方向(每帧一次,主炮弹少,开销可忽略)
       _projTmp.copy(this.velocity).normalize();
@@ -1024,6 +1026,24 @@ class Projectile {
     if (this.life <= 0) this.alive = false;
     if (this.mesh.position.y < terrainHeight(this.mesh.position.x, this.mesh.position.z) + 0.1) this.alive = false; // 落地（贴地形）
   }
+}
+
+// 线段 p0→p1 与球 (c, r) 相交：返回进入点参数 t∈[0,1]，未命中返回 -1。检测零分配。
+// 起点 p0 已在球内返回 0（当帧即命中）；起点在球外且朝远离方向（b≥0）必不相交。
+const _segD = new THREE.Vector3(), _segF = new THREE.Vector3();
+function segSphereT(p0, p1, c, r) {
+  _segD.subVectors(p1, p0);
+  _segF.subVectors(p0, c);
+  const a = _segD.dot(_segD);
+  if (a < 1e-9) return _segF.lengthSq() <= r * r ? 0 : -1;
+  const cc = _segF.lengthSq() - r * r;
+  if (cc <= 0) return 0;   // 起点在球内
+  const b = 2 * _segF.dot(_segD);
+  if (b >= 0) return -1;   // 起点在球外且线段背离球心
+  const disc = b * b - 4 * a * cc;
+  if (disc < 0) return -1;
+  const t = (-b - Math.sqrt(disc)) / (2 * a);
+  return (t >= 0 && t <= 1) ? t : -1;
 }
 
 
@@ -1312,16 +1332,41 @@ class EntityManager {
     for (const p of this.projectiles) p.update(dt);
     for (const e of this.effects) e.update(dt);
 
-    // 炮弹 vs 障碍物（楼房/树等）：穿不过，命中销毁 + 小火花（炸弹靠落点爆炸，不拦）
+    // 炮弹 vs 障碍物（楼房/树等）：穿不过，命中销毁 + 小火花（炸弹靠落点爆炸，不拦）。
+    // 同样扫掠：水平面线段 vs 障碍圆（真实弹速点位采样会穿墙），高度按线段进入点判定。
     if (this.obstacles && this.obstacles.length) {
       for (const p of this.projectiles) {
         if (!p.alive || p.isBomb) continue;
         for (const ob of this.obstacles) {
-          const dx = p.mesh.position.x - ob.position.x;
-          const dz = p.mesh.position.z - ob.position.z;
+          const mx = p.mesh.position.x - p._prev.x, mz = p.mesh.position.z - p._prev.z;
+          const fx = p._prev.x - ob.position.x, fz = p._prev.z - ob.position.z;
           const rr = (ob.radius || 3) + (p.radius || 0.4);
-          // 高度判定：弹丸在障碍顶之上(留1m余量)则飞过——高楼不再拦头顶上的炮弹
-          if (dx * dx + dz * dz < rr * rr && p.mesh.position.y < (ob.height ?? 30) + 1) { p.alive = false; this.addEffect(new Explosion(p.mesh.position.clone(), 1.2, 0xffa040)); break; }
+          const a = mx * mx + mz * mz;
+          let hitT = -1;
+          if (a < 1e-9) { if (fx * fx + fz * fz <= rr * rr) hitT = 0; }
+          else {
+            const cc = fx * fx + fz * fz - rr * rr;
+            if (cc <= 0) hitT = 0;   // 起点已入圆（如上一帧从屋顶上方落进楼体）
+            else {
+              const b = 2 * (fx * mx + fz * mz);
+              if (b < 0) {
+                const disc = b * b - 4 * a * cc;
+                if (disc >= 0) {
+                  const t = (-b - Math.sqrt(disc)) / (2 * a);
+                  if (t >= 0 && t <= 1) hitT = t;
+                }
+              }
+            }
+          }
+          if (hitT >= 0) {
+            // 高度判定：进入点在障碍顶之上(留1m余量)则飞过——高楼不再拦头顶上的炮弹
+            const hy = p._prev.y + (p.mesh.position.y - p._prev.y) * hitT;
+            if (hy < (ob.height ?? 30) + 1) {
+              p.alive = false;
+              this.addEffect(new Explosion(new THREE.Vector3(p._prev.x + mx * hitT, hy, p._prev.z + mz * hitT), 1.2, 0xffa040));
+              break;
+            }
+          }
         }
       }
     }
@@ -1354,54 +1399,59 @@ class EntityManager {
     });
   }
 
-  // 弹丸 vs 目标列表 的球体命中判定。命中后扣血、生成爆炸、销毁弹丸。
+  // 弹丸 vs 目标列表 的球体命中判定（扫掠式）。命中后扣血、生成爆炸、销毁弹丸。
+  // 扫掠：判"上一帧→当前帧扫过的线段"是否进入命中球，取最早进入者——
+  // 真实弹速 750m/s 一帧跳 12.5m，命中球直径才 ~7m，点位采样会整辆车隧穿（打不中穿过去的根因）。
   checkCollisions(targets) {
     const hits = [];
     for (const p of this.projectiles) {
       if (!p.alive) continue;
+      let bestT = Infinity, bestTarget = null;
       for (const t of targets) {
         if (!t.alive) continue;
         if (p.ownerTeam === t.team) continue; // 同队不互伤
         const r = (t.radius || 3) + (p.radius || 0.4);
-        if (t.position.distanceToSquared(p.mesh.position) <= r * r) {
-          const wasAlive = t.alive;
-          t._lastAttacker = p.owner; // 记录击杀归属
-          // 弹着点=车体表面(沿弹丸→车心方向贴回球面):部位判定+回放共用
-          const _hp = p.mesh.position.clone().sub(t.position);
-          const hitPoint = t.position.clone().addScaledVector(_hp.normalize(), (t.radius || 3) + (p.radius || 0.4) * 0.5);
-          const verdict = t.onHit(p.damage, p, hitPoint);   // p/hitPoint 供装甲判定+部位判定
-          // —— 可见跳弹：弹丸不销毁，沿装甲板法线反射弹飞（战雷式"叮"+曳光飞走）——
-          // 掉一半穿深/伤害（撞板失能），弹开的弹丸下一帧照常参与碰撞——还能打到别的车，甚至再跳一次。
-          if (verdict === 'bounce' && t.lastPlateNormal) {
-            const n = t.lastPlateNormal;
-            const v = p.velocity;
-            const d = v.x * n.x + v.y * n.y + v.z * n.z;
-            v.x -= 2 * d * n.x; v.y -= 2 * d * n.y; v.z -= 2 * d * n.z;
-            v.multiplyScalar(0.55);                                          // 撞板掉能量
-            v.x += randRange(-10, 10); v.y += randRange(2, 10); v.z += randRange(-10, 10);   // 乱飞+偏上（跳弹失控感）
-            p.mesh.position.copy(hitPoint).addScaledVector(n, p.radius + 0.6);   // 推出命中球，防当帧回打原车
-            p.pen *= 0.5; p.damage *= 0.5;
-            this.addEffect(new Explosion(hitPoint, 0.9, 0xfff2c0));    // 白黄小火花（区别于命中的橙色爆闪）
-            hits.push({ owner: p.owner, target: t, proj: p, killed: false, crit: null, verdict, hitPoint, penInfo: t.lastPenInfo });
-            break;
-          }
-          // 榴弹未击穿→范围爆炸：命中者吃贴甲溅射,再波及附近所有敌方坦克(距离衰减)
-          if (verdict === 'splash') {
-            t.takeDamage(p.damage * 0.25);   // 命中者：贴甲爆 25%（原溅射逻辑）
-            const SR = 10;   // 榴弹爆风半径
-            this.addEffect(new SplashRing(p.mesh.position.clone()));
-            for (const ot of [...this.tanks, ...this.planes]) {
-              if (ot === t || !ot.alive || ot.team === p.ownerTeam) continue;
-              const d2 = ot.position.distanceTo(p.mesh.position);
-              if (d2 < SR) { ot._lastAttacker = p.owner; ot.onHit(p.damage * 0.5 * (1 - d2 / SR), p); }
-            }
-          }
-          // (hitPoint 已在 onHit 前算好,回放与部位判定共用)
-          p.alive = false;
-          this.addEffect(new Explosion(hitPoint, t.radius ? t.radius * 0.6 : 1, 0xffa040));
-          hits.push({ owner: p.owner, target: t, proj: p, killed: wasAlive && !t.alive, crit: t.lastCrit, verdict, hitPoint, penInfo: t.lastPenInfo });
-          break;
+        const tt = segSphereT(p._prev, p.mesh.position, t.position, r);
+        if (tt >= 0 && tt < bestT) { bestT = tt; bestTarget = t; }
+      }
+      if (bestTarget) {
+        const t = bestTarget;
+        const wasAlive = t.alive;
+        t._lastAttacker = p.owner; // 记录击杀归属
+        // 弹着点=线段进入命中球面的精确交点（部位判定+回放共用）
+        const hitPoint = new THREE.Vector3().lerpVectors(p._prev, p.mesh.position, bestT);
+        const verdict = t.onHit(p.damage, p, hitPoint);   // p/hitPoint 供装甲判定+部位判定
+        // —— 可见跳弹：弹丸不销毁，沿装甲板法线反射弹飞（战雷式"叮"+曳光飞走）——
+        // 掉一半穿深/伤害（撞板失能），弹开的弹丸下一帧照常参与碰撞——还能打到别的车，甚至再跳一次。
+        if (verdict === 'bounce' && t.lastPlateNormal) {
+          const n = t.lastPlateNormal;
+          const v = p.velocity;
+          const d = v.x * n.x + v.y * n.y + v.z * n.z;
+          v.x -= 2 * d * n.x; v.y -= 2 * d * n.y; v.z -= 2 * d * n.z;
+          v.multiplyScalar(0.55);                                          // 撞板掉能量
+          v.x += randRange(-10, 10); v.y += randRange(2, 10); v.z += randRange(-10, 10);   // 乱飞+偏上（跳弹失控感）
+          p.mesh.position.copy(hitPoint).addScaledVector(n, p.radius + 0.6);   // 推出命中球，防当帧回打原车
+          p._prev.copy(p.mesh.position);                                       // 扫掠起点同步重置（不然下帧线段穿回原车）
+          p.pen *= 0.5; p.damage *= 0.5;
+          this.addEffect(new Explosion(hitPoint, 0.9, 0xfff2c0));    // 白黄小火花（区别于命中的橙色爆闪）
+          hits.push({ owner: p.owner, target: t, proj: p, killed: false, crit: null, verdict, hitPoint, penInfo: t.lastPenInfo });
+          continue;   // 本帧判完；弹开的弹丸下一帧照常飞行，可再命中任何目标
         }
+        // 榴弹未击穿→范围爆炸：命中者吃贴甲溅射,再波及附近所有敌方坦克(距离衰减)
+        if (verdict === 'splash') {
+          t.takeDamage(p.damage * 0.25);   // 命中者：贴甲爆 25%（原溅射逻辑）
+          const SR = 10;   // 榴弹爆风半径
+          this.addEffect(new SplashRing(p.mesh.position.clone()));
+          for (const ot of [...this.tanks, ...this.planes]) {
+            if (ot === t || !ot.alive || ot.team === p.ownerTeam) continue;
+            const d2 = ot.position.distanceTo(p.mesh.position);
+            if (d2 < SR) { ot._lastAttacker = p.owner; ot.onHit(p.damage * 0.5 * (1 - d2 / SR), p); }
+          }
+        }
+        // (hitPoint 已在 onHit 前算好,回放与部位判定共用)
+        p.alive = false;
+        this.addEffect(new Explosion(hitPoint, t.radius ? t.radius * 0.6 : 1, 0xffa040));
+        hits.push({ owner: p.owner, target: t, proj: p, killed: wasAlive && !t.alive, crit: t.lastCrit, verdict, hitPoint, penInfo: t.lastPenInfo });
       }
     }
     return hits;
