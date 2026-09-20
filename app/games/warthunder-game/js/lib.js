@@ -142,6 +142,21 @@ export function makeSmokeTexture() {
   return _smokeTex;
 }
 
+// 履带印贴图：窄条深色横纹（履带板压痕），左右履带各一道
+let _trackMarkTex = null;
+export function makeTrackMarkTexture() {
+  if (_trackMarkTex) return _trackMarkTex;
+  const c = document.createElement('canvas'); c.width = 32; c.height = 64;
+  const x = c.getContext('2d');
+  x.fillStyle = 'rgba(30,24,18,0.55)'; x.fillRect(0, 0, 32, 64);
+  x.fillStyle = 'rgba(20,16,12,0.5)';   // 履带板横纹
+  for (let y = 0; y < 64; y += 10) x.fillRect(0, y, 32, 4);
+  x.fillStyle = 'rgba(60,50,38,0.35)';  // 边缘导齿
+  x.fillRect(0, 0, 4, 64); x.fillRect(28, 0, 4, 64);
+  _trackMarkTex = new THREE.CanvasTexture(c);
+  return _trackMarkTex;
+}
+
 // 弹坑贴花：黑心+焦边飞溅斑（炮弹落地/爆炸在地表留痕）
 let _craterTex = null;
 export function makeCraterTexture() {

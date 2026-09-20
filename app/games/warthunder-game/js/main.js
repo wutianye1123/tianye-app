@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTexture, camoTexture, makeTrackTexture, makeNoiseTexture, makeShadowTexture, makeGrassTexture, makeSmokeTexture, makeCraterTexture, terrainHeight, setTerrainScale, setTerrainMode } from './lib.js';
+import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTexture, camoTexture, makeTrackTexture, makeNoiseTexture, makeShadowTexture, makeGrassTexture, makeSmokeTexture, makeCraterTexture, makeTrackMarkTexture, terrainHeight, setTerrainScale, setTerrainMode } from './lib.js';
 
 // 坦克贴地姿态用的临时对象（避免每帧分配）
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
@@ -308,7 +308,7 @@ class Input {
 
     this._onKeyDown = (e) => {
       this.keys.add(e.code);
-      if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyC', 'KeyF', 'Tab', 'KeyM'].includes(e.code)) {
+      if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyC', 'KeyF', 'KeyX', 'F1', 'F2', 'F3', 'Tab', 'KeyM'].includes(e.code)) {
         e.preventDefault();
       }
     };
@@ -1728,7 +1728,7 @@ class EntityManager {
   addProjectile(p) {
     this.projectiles.push(p); this.scene.add(p.mesh);
     if (this.sfx && !p.homing) {
-      if (p.size >= 0.4) this.sfx.gunshot(p.mesh.position);
+      if (p.size >= 0.4) this.sfx.gunshot(p.mesh.position, p.pen || 100);
       else this.sfx.mg(p.mesh.position);
     }
   }
@@ -1746,7 +1746,32 @@ class EntityManager {
     }
   }
 
-  // —— 弹坑贴花：炮弹落地/近地爆炸在地表留焦痕（上限 60 滚动，几何/材质共享） ——
+  // —— 履带印贴花：坦克每走 1.4m 在两履带位置留压痕（上限 120 对滚动，几何/材质共享） ——
+  addTrackMark(x, z, yaw) {
+    if (!this._trackGeo) {
+      this._trackGeo = new THREE.PlaneGeometry(0.9, 1.7);
+      this._trackMat = new THREE.MeshBasicMaterial({ map: makeTrackMarkTexture(), transparent: true, depthWrite: false, opacity: 0.8 });
+    }
+    if (!this.trackMarks) this.trackMarks = [];
+    if (this.trackMarks.length >= 120) this.scene.remove(this.trackMarks.shift());
+    const m = new THREE.Mesh(this._trackGeo, this._trackMat);
+    m.rotation.set(-Math.PI / 2, 0, -yaw);
+    m.position.set(x, terrainHeight(x, z) + 0.09, z);
+    m.renderOrder = 0.4;
+    this.scene.add(m);
+    this.trackMarks.push(m);
+  }
+
+  // —— 弹壳抛出（Debris 复用，铜色小壳）：开炮从炮塔侧抛出 ——
+  ejectShell(pos, yaw) {
+    const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+    const v = right.multiplyScalar(randRange(3.5, 5.5)).add(new THREE.Vector3(randRange(-1, 1), randRange(4.5, 6.5), randRange(-1, 1)));
+    const d = new Debris(pos.clone().add(new THREE.Vector3(0, 0.6, 0)), this, v);
+    d.mesh.material.color.setHex(0xb8863a);
+    d.mesh.material.metalness = 0.7;
+    d.mesh.scale.multiplyScalar(0.5);
+    this.addEffect(d);
+  }
   addCrater(pos, size) {
     if (!this._craterGeo) {
       this._craterGeo = new THREE.PlaneGeometry(1, 1);
@@ -1938,7 +1963,8 @@ class EntityManager {
     for (const p of this.planes) this.scene.remove(p.group);
     for (const p of this.projectiles) this.scene.remove(p.mesh);
     for (const c of this.craters) this.scene.remove(c);
-    this.tanks = []; this.planes = []; this.projectiles = []; this.effects = []; this.smokes = []; this.craters = [];
+    for (const m of (this.trackMarks || [])) this.scene.remove(m);
+    this.tanks = []; this.planes = []; this.projectiles = []; this.effects = []; this.smokes = []; this.craters = []; this.trackMarks = [];
   }
 }
 
@@ -2413,6 +2439,16 @@ class Tank {
       this.velX = (this.group.position.x - this._px) / dt;
       this.velZ = (this.group.position.z - this._pz) / dt;
     }
+    // 履带印：每走 1.4m 在两履带中点各留一道压痕（与尘带轨迹一致）
+    const movedD = Math.hypot(this.group.position.x - (this._txX ?? this.group.position.x), this.group.position.z - (this._txZ ?? this.group.position.z));
+    if (this.em && movedD > 1.4 && (this.velX || this.velZ)) {
+      this._txX = this.group.position.x; this._txZ = this.group.position.z;
+      const h = this.heading;
+      const lx = Math.cos(h), lz = -Math.sin(h);
+      const bx = this.group.position.x, bz = this.group.position.z;
+      this.em.addTrackMark(bx + lx * (this.hullWid * 0.5 + 0.1), bz + lz * (this.hullWid * 0.5 + 0.1), h);
+      this.em.addTrackMark(bx - lx * (this.hullWid * 0.5 + 0.1), bz - lz * (this.hullWid * 0.5 + 0.1), h);
+    }
     this._px = this.group.position.x; this._pz = this.group.position.z;
     // 车体姿态：按地形法线倾斜（爬坡时俯仰、侧坡时侧倾）。航向 + 贴坡一起进 group.quaternion。
     const px = this.group.position.x, pz = this.group.position.z, dd = 1.2;
@@ -2553,6 +2589,8 @@ class Tank {
       pen: this.pen * sh.penMul, shellDef: sh,
     }));
     em.addEffect(new MuzzleFlash(muzzleWorld));
+    // 弹壳从炮塔侧抛出（铜壳侧飞+落地弹跳）
+    if (this.type !== 'aa') em.ejectShell(this.turret ? this.turret.getWorldPosition(_tmpV3) : muzzleWorld, this.heading + this.turretYaw);
     // 炮口硝烟：沿炮管向侧后喷散的灰白烟（口径越大团数越多）
     const nSmk = 2 + Math.round(clamp(this.pen / 120, 0, 3));
     for (let i = 0; i < nSmk; i++) {
@@ -3589,6 +3627,17 @@ class Heli {
       }
     }
     if (this.healthBar) { this.healthBar.lookAt(this._camPos || this.group.position.clone().add(new THREE.Vector3(0, 0, 10))); }
+    // 螺旋桨节拍声：近距才响（130m 内），11Hz 啪嗒=旋翼转频
+    if (this.em && this.em.sfx && this.em.listener) {
+      const d = this.group.position.distanceTo(this.em.listener.position);
+      if (d < 130) {
+        this._rotorSndT = (this._rotorSndT || 0) - dt;
+        if (this._rotorSndT <= 0) {
+          this._rotorSndT = 0.09;
+          this.em.sfx._blip(78, 58, 0.05, 0.4 * (1 - d / 130), 'sine');
+        }
+      }
+    }
   }
 
   get reloadFraction() { return clamp(1 - this.reloadTimer / this.fireCooldown, 0, 1); }
@@ -4579,7 +4628,13 @@ class Sfx {
     } else g.connect(this.master);
     src.start(); src.stop(this.ctx.currentTime + dur);
   }
-  gunshot(pos) { this._oneshot(0.22, 'lowpass', 1400, 0.55, pos, 300); }
+  // 炮声按口径分档（穿深近似口径）：小炮哒哒脆响 / 中炮标准炮声 / 大口径低频长轰
+  gunshot(pos, pen = 100) {
+    const dg = this._distGain(pos);
+    if (pen < 80) this._oneshot(0.14, 'lowpass', 2400, 0.45, pos, 500);                    // 20~57mm 速射/小炮
+    else if (pen < 260) this._oneshot(0.24, 'lowpass', 1500, 0.7, pos, 260);               // 75~100mm 标准炮
+    else { this._oneshot(0.36, 'lowpass', 950, 0.95, pos, 110); this._blip(85, 55, 0.3, 0.4 * dg, 'sine'); }   // 122~152mm 低频长轰+低音垫
+  }
   mg(pos) { this._oneshot(0.06, 'lowpass', 2600, 0.22, pos, 1200); }
   explosion(pos) { this._oneshot(0.7, 'lowpass', 600, 1.0, pos, 80); }
   missile(pos) { this._oneshot(0.45, 'bandpass', 900, 0.4, pos, 300); }
@@ -5157,6 +5212,13 @@ class Game {
     }
   }
 
+  // —— 队伍指挥（F1/F2/F3）：跟随我 / 集火我的目标 / 自由作战 ——
+  _squadCommand(inp) {
+    if (this._consumePress(inp, 'F1')) { this._squadCmd = 'follow'; this.hud.addFeed('📢 队伍：跟随我', 'info'); }
+    else if (this._consumePress(inp, 'F2')) { this._squadCmd = 'focus'; this.hud.addFeed('📢 队伍：集火我的目标（V 标记优先）', 'info'); }
+    else if (this._consumePress(inp, 'F3')) { this._squadCmd = 'free'; this.hud.addFeed('📢 队伍：自由作战', 'info'); }
+  }
+
   // 目标粘性：AI 当前目标还活着且在 450m 内就保持（玩家 V 标记的集火目标优先），新目标要近一半以上才换。
   // 否则两个等距目标之间来回切换，AI 谁都打不死，看起来"总是换目标/卡着绕圈"。
   _stickyTarget(unit, fresh, marked) {
@@ -5231,6 +5293,7 @@ class Game {
     const inp = this.input;
     const t = this.player;
     if (!t.alive) return;
+    this._squadCommand(inp);   // 队伍指挥 F1/F2/F3
     // 🤖 AI 代打（Q 切换）：超强 AI 接管移动/瞄准/开火——炮塔×1.8、装填×0.6、散布×0.3、极速×1.15。
     // 再按 Q 收回人工控制（参数还原）。重生换车后自动重新接管。
     if (this._consumePress(inp, 'KeyQ')) {
@@ -5390,6 +5453,7 @@ class Game {
     inp.consumeWheel();     // 排空滚轮累积（飞机模式不用，避免切回坦克瞬间跳射距）
     const p = this.player;
     if (!p.alive) return;
+    this._squadCommand(inp);   // 队伍指挥 F1/F2/F3
     // 🤖 AI 代打（Q 切换）：喷气机=PlaneAI 接管+机炮伤害×1.5；直升机=_heliPilotTick 盘旋悬停+预测瞄准
     if (this._consumePress(inp, 'KeyQ')) {
       this.aiPilot = !this.aiPilot;
@@ -5788,10 +5852,20 @@ class Game {
       }
       for (const a of this.allies) {
         if (!a.ai) continue;
-        let t = this._nearest(a.position, redAlive, this._markedTarget);   // 标记目标全队集火
-        const zoneT = this._zoneTargetFor(a.position, 'blue');
-        if (zoneT && (!t || a.position.distanceTo(t.position) > 75)) t = zoneT;
-        t = this._stickyTarget(a, t, this._markedTarget);   // 目标粘性
+        let t;
+        if (this._squadCmd === 'follow' && this.player && this.player.alive) {
+          // 跟随我：虚拟驻守点=玩家后方 18m（坦克驶来驻守/飞机绕点巡航，不打）
+          const fx = Math.sin(this.player.heading), fz = Math.cos(this.player.heading);
+          const fyx = a.forwardVector ? 40 : 0;   // 飞机跟随点上抬 40m
+          t = { position: new THREE.Vector3(this.player.position.x - fx * 18, this.player.position.y + fyx, this.player.position.z - fz * 18), isZone: true, alive: true };
+        } else if (this._squadCmd === 'focus') {
+          t = (this._markedTarget && this._markedTarget.alive) ? this._markedTarget : this._nearest(a.position, redAlive);
+        } else {
+          t = this._nearest(a.position, redAlive, this._markedTarget);   // 标记目标全队集火
+          const zoneT = this._zoneTargetFor(a.position, 'blue');
+          if (zoneT && (!t || a.position.distanceTo(t.position) > 75)) t = zoneT;
+          t = this._stickyTarget(a, t, this._markedTarget);   // 目标粘性
+        }
         a.ai.update(dt, a.isHeli
           ? { target: t, threats: redAlive, entityManager: this.em, obstacles, enemies: this.enemies }   // 友直升机：威胁=红方
           : { target: t, threats: redAlive, entityManager: this.em, obstacles, smokes: this.em.smokes });   // 友坦克也喂威胁（蛇形规避用）
