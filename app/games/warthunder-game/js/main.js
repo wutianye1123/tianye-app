@@ -286,7 +286,7 @@ const PLANE_TYPES = [
   // ===== 直升机（heli:true：悬停物理 + 机炮 + 火箭巢；AI 不驾驶）=====
   { id:'mi24',   name:'Mi-24 雌鹿',  icon:'🇷🇺', hp:1.6,  speed:1.0,  agi:0.8, dmg:1.3, heli:true, missiles:true, rank:3, rp:1200, prereq:'mig29', price:5000 },
   { id:'z10',    name:'直-10',       icon:'🇨🇳', hp:1.3,  speed:1.05, agi:0.9, dmg:1.25, heli:true, missiles:true, rank:4, rp:2200, prereq:'j10',   price:8000 },
-  { id:'ah64',   name:'AH-64 阿帕奇', icon:'🇺🇸', hp:3.5,  speed:1.15, agi:1.1, dmg:2.0,  heli:true, missiles:true, rank:6, rp:15000, prereq:'heavy',  price:60000 }, // 无敌神器：血量/火力/机动全面拉满，天价研发
+  { id:'ah64',   name:'AH-64 阿帕奇', icon:'🇺🇸', hp:3.5,  speed:1.8,  agi:1.8, dmg:2.0,  heli:true, missiles:true, rank:6, rp:15000, prereq:'heavy',  price:60000 }, // 无敌神器：属性条全满格，天价研发
 ];
 function planeTypeById(id) { return PLANE_TYPES.find((p) => p.id === id) || PLANE_TYPES[0]; }
 function randomPlaneType() { const pool = PLANE_TYPES.filter((p) => !p.heli); return pool[Math.floor(Math.random() * pool.length)]; }   // AI 不开直升机（飞行AI不适配悬停物理）
