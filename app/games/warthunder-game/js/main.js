@@ -3526,7 +3526,7 @@ class Heli {
     this.maxSpeed = 62 * pt.speed;
     this.alive = true; this.burning = false; this.extCooldown = 0;
     this._aimPitch = 0; this._yawRate = 0; this._climb = 0; this._throttleIn = 0;
-    this.reloadTimer = 0; this.fireCooldown = 0.09;
+    this.reloadTimer = 0; this.fireCooldown = this.team === 'red' ? 2.2 : 0.09;   // 敌方机炮射速：比坦克主炮(3s)略快——2.2s 一发，不再连续撕
     this.maxMissiles = 12; this.missiles = this.maxMissiles; this.missileCooldown = 0;   // 火箭巢组数（HUD 导弹位显示）
     if (type === 'ah64') { this.maxMissiles = 8; this.missiles = 8; this.rocketCd = 0; }   // AH-64：右键=地狱火×8 + E键=火箭(无限,5发一巢装填4s)
     this.maxBombs = 0; this.bombs = 0;   // 无炸弹（防飞机模式输入分支误读）
