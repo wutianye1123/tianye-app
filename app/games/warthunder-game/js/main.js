@@ -3659,13 +3659,18 @@ class Heli {
     if (!this.canFire()) return false;
     const muzzle = this.getMuzzleWorld();
     const dir = this._fireDir();   // 指向准星世界命中点：消视差
-    const s = 0.003;   // 机炮散布（AI 迭代预测已准，散布收到最小：200m 处 ~0.6m）
+    const isEnemy = this.team === 'red';
+    const s = isEnemy ? 0.012 : 0.003;   // 敌方散布大（玩家/友军的"必须打穿"是给玩家爽的，敌方回归正常装甲判定）
     dir.x += randRange(-s, s); dir.y += randRange(-s, s); dir.z += randRange(-s, s); dir.normalize();
     em.addProjectile(new Projectile({
-      position: muzzle, direction: dir, speed: 320, damage: 16 * (planeTypeById(this.type).dmg || 1),
-      owner: this, ownerTeam: this.team, gravity: 0, life: 2.5,   // 直线弹道（无下坠）：所见即所打
-      color: 0xffe08a, size: 0.3, pen: 700,
-      shellDef: { id: 'cannon', name: '航炮弹', penMul: 1, dmgMul: 1, bounceDeg: 90, noBounce: true, effCap: 500 },   // 穿深拉满+永不跳弹+等效装甲封顶500:俯冲大入射角的等效膨胀(cos下限0.18能算出5倍真甲)不再挡弹
+      position: muzzle, direction: dir, speed: isEnemy ? 300 : 320,
+      damage: (isEnemy ? 10 : 16) * (planeTypeById(this.type).dmg || 1),
+      owner: this, ownerTeam: this.team, gravity: 0, life: 2.5,
+      color: 0xffe08a, size: 0.3,
+      pen: isEnemy ? 120 : 700,
+      shellDef: isEnemy
+        ? { id: 'cannon', name: '航炮弹', penMul: 1, dmgMul: 1, bounceDeg: 74, noBounce: false }                                    // 敌方：正常装甲判定（打薄甲行、重甲乏力）
+        : { id: 'cannon', name: '航炮弹', penMul: 1, dmgMul: 1, bounceDeg: 90, noBounce: true, effCap: 500 },   // 玩家：必穿
     }));
     this.reloadTimer = this.fireCooldown;
     return true;
@@ -3688,7 +3693,7 @@ class Heli {
       const dir = best ? best.position.clone().sub(this.position).normalize() : aim.clone();
       const proj = new Projectile({
         position: this.position.clone().addScaledVector(aim, 2), direction: dir,
-        speed: 190, damage: 260, owner: this, ownerTeam: this.team,
+        speed: 190, damage: this.team === 'red' ? 120 : 260, owner: this, ownerTeam: this.team,   // 敌方地狱火伤害减半
         gravity: 0, life: 6, color: 0xff5544, size: 0.42,
       });
       proj.target = best; proj.homing = 2.2;   // 强追踪：直升机悬停发射也能咬住
@@ -3738,12 +3743,12 @@ class Heli {
       dir.x += randRange(-s, s); dir.y += randRange(-s, s) + elev4; dir.z += randRange(-s, s); dir.normalize();
       em.addProjectile(new Projectile({
         position: this.group.position.clone().addScaledVector(fwd, 2).add(new THREE.Vector3(randRange(-1.5, 1.5), -0.2, 0)),
-        direction: dir, speed: 175, damage: 85, owner: this, ownerTeam: this.team,
+        direction: dir, speed: 175, damage: this.team === 'red' ? 40 : 85, owner: this, ownerTeam: this.team,   // 敌方火箭伤害减半
         gravity: 6, life: 5, color: 0xffa050, size: 0.5, pen: 130,
         shellDef: { id: 'rocket', name: '火箭弹', penMul: 1, dmgMul: 1, bounceDeg: 80, noBounce: true },
       }));
     }
-    this.missiles--; this.missileCooldown = 2.4;
+    this.missiles--; this.missileCooldown = this.team === 'red' ? 3.5 : 2.4;   // 敌方火箭冷却更长
     return true;
   }
   tryFireMG() {}
@@ -3891,7 +3896,9 @@ class HeliAI {
       p.setYawInput(clamp(dy * 1.8, -1, 1));
     }
     // 开火（规避中也打）
-    if (flatDist < 260 && p.canFire() && !losBlocked(p.position, target.position, obstacles)) p.tryFire(em);
+    // 敌方机炮带 45% 停顿（泼弹节奏化），玩家/友军连射
+    if (flatDist < 260 && p.canFire() && !losBlocked(p.position, target.position, obstacles)
+        && (p.team === 'red' ? Math.random() < 0.55 : true)) p.tryFire(em);
     if (p.type === 'ah64') {
       if (flatDist < 200 && p.missiles > 0 && Math.random() < dt * 0.7) p.tryFireMissile(em, enemies);
       if (flatDist < 150 && Math.random() < dt * 3) p.tryFireRockets(em, true);
