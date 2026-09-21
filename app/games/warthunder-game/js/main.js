@@ -5740,7 +5740,10 @@ class Game {
     try {
     let dt = Math.min(this.clock.getDelta(), 0.05);
     // 最后一杀慢放：0.25 倍速 1.3s（真实时间倒计时），结束后正式结算
-    if (this._slowMoT > 0) {
+    // 最后一杀慢放：终局回放全场 0.4 倍速（含殉爆炮塔飞出），普通慢放 0.25 倍 1.3s 后结算
+    if (this._finalReplay) {
+      dt *= 0.4;
+    } else if (this._slowMoT > 0) {
       this._slowMoT -= dt;
       dt *= 0.25;
       if (this._slowMoT <= 0 && this._pendingEnd) { this._pendingEnd = false; this._end(true); return; }
@@ -5946,6 +5949,7 @@ class Game {
           else if (h.verdict === 'nopen' || h.verdict === 'splash') this.stats.nopen++;
           else this.stats.pen++;
           if (h.killed && h.crit === '弹药殉爆') this.stats.ammoKills++;
+          if (h.killed) this._lastKillShot = { target: h.target, hitPoint: h.hitPoint, proj: h.proj, verdict: h.verdict, crit: h.crit };   // 终局回放快照：若这是赢下比赛的最后一杀，_end 会用它放全屏弹道跟拍
           // 击杀回放触发：击杀播全套（X光+殉爆名场面）；
           // 跳弹（未击杀）也播：小窗看炮弹"叮"一声弹上天的慢镜头——限流 3s 一次且不抢击杀回放，
           // 速射武器连续跳弹也不会疯狂切镜头。
@@ -6108,8 +6112,13 @@ class Game {
       } catch (e) {}
     }
     // CCIP 炸弹落点标记的计算已合并到上方主 try 内（原此处重复了一份 1500 步模拟，每帧白跑一遍，已删）
-    this.postfx.render(this.scene, this.camera);
-    this._renderShellcam();   // 右上角跟拍小窗（scissor 二次渲染，无小窗时零开销）
+    // 终局回放：全屏渲染回放相机（贴弹丸跟拍），主相机画面让位
+    if (this._shellcam && this._shellcam.fullscreen) {
+      this.postfx.render(this.scene, this._shellcam.cam);
+    } else {
+      this.postfx.render(this.scene, this.camera);
+      this._renderShellcam();   // 右上角跟拍小窗（scissor 二次渲染，无小窗时零开销）
+    }
   };
 
   // —— 树木撞倒（战雷式碾树）：活坦克以移动状态撞上树障碍 → 树绕根部朝背离方向倒伏 ——
@@ -6229,7 +6238,7 @@ class Game {
   _updateShellcam(dt) {
     const sc = this._shellcam;
     if (!sc) return;
-    sc.t += dt;
+    sc.t += dt * (sc.slow ? 0.45 : 1);   // 终局回放慢速重演
     const speedup = sc.realT / sc.replayFly;
     if (!sc.dirEnd) {
       const vEnd = sc.v0.clone(); vEnd.y -= sc.g * sc.realT;
@@ -6248,7 +6257,12 @@ class Game {
     if (sc.t < sc.replayFly) phase = 1;
     else if (sc.t < sc.replayFly + sc.replayIn) phase = 2;
     else if (sc.t < sc.replayFly + sc.replayIn + sc.replayBoom) phase = 3;
-    else { this._endShellcam(); return; }
+    else {
+      const wasFinal = sc.fullscreen;
+      this._endShellcam();
+      if (wasFinal) { this._finalReplay = false; this._end(true); }   // 终局回放播完 → 真结算
+      return;
+    }
 
     if (phase === 1) {
       if (sc.muzzleFlash) {
@@ -6425,6 +6439,7 @@ class Game {
   _renderShellcam() {
     const sc = this._shellcam;
     if (!sc) return;
+    if (sc.fullscreen) return;   // 终局全屏版走主渲染分支，不再叠小窗
     const w = window.innerWidth, h = window.innerHeight;
     const pw = Math.round(Math.min(380, w * 0.30)), ph = Math.round(pw / 1.6);
     const r = this.renderer;
@@ -6826,9 +6841,23 @@ class Game {
   }
 
   _end(win) {
-    // 胜利的最后一杀：先播 1.3s 全屏慢放（0.25 倍速）再出结算——战雷式收尾特写
+    // 胜利的最后一杀：全屏弹道跟拍回放（镜头贴着炮弹从炮口飞向敌车，命中殉爆炮塔飞出，全场 0.4 倍慢放）
     if (win && !this._slowPlayed && this.state === 'playing') {
       this._slowPlayed = true;
+      const ks = this._lastKillShot;
+      if (ks && ks.target && ks.proj && ks.proj.launchPos) {
+        this._lastReplayT = 0;   // 绕过回放节流（终局必放）
+        this._startKillReplay(ks.target, ks.hitPoint, true, ks.verdict, ks.proj, ks.proj.shellDef ? ks.proj.shellDef.id : null, ks.crit);
+        if (this._shellcam) {
+          const sc = this._shellcam;
+          sc.fullscreen = true;   // 全屏（不再小窗）
+          sc.slow = true;         // 回放自身慢速
+          this._finalReplay = true;
+          this.hud.setCenterMessage('🎬 ' + (this.objective === 'waves' ? `撑到第 ${this.wave} 波！` : '胜利！'));
+          return;   // 回放结束后自动 _end(true) 真结算
+        }
+      }
+      // 无快照兜底：简单全屏慢放 1.3s
       this._pendingEnd = true;
       this._slowMoT = 1.3;
       this.hud.setCenterMessage('🎬 ' + (this.objective === 'waves' ? `撑到第 ${this.wave} 波！` : '胜利！'));
