@@ -286,7 +286,7 @@ const PLANE_TYPES = [
   // ===== 直升机（heli:true：悬停物理 + 机炮 + 火箭巢；AI 不驾驶）=====
   { id:'mi24',   name:'Mi-24 雌鹿',  icon:'🇷🇺', hp:1.6,  speed:1.0,  agi:0.8, dmg:1.3, heli:true, missiles:true, rank:3, rp:1200, prereq:'mig29', price:5000 },
   { id:'z10',    name:'直-10',       icon:'🇨🇳', hp:1.3,  speed:1.05, agi:0.9, dmg:1.25, heli:true, missiles:true, rank:4, rp:2200, prereq:'j10',   price:8000 },
-  { id:'ah64',   name:'AH-64 阿帕奇', icon:'🇺🇸', hp:1.5,  speed:1.0,  agi:0.85, dmg:1.4,  heli:true, missiles:true, rank:5, rp:3000, prereq:'heavy',  price:9500 },
+  { id:'ah64',   name:'AH-64 阿帕奇', icon:'🇺🇸', hp:3.5,  speed:1.15, agi:1.1, dmg:2.0,  heli:true, missiles:true, rank:6, rp:15000, prereq:'heavy',  price:60000 }, // 无敌神器：血量/火力/机动全面拉满，天价研发
 ];
 function planeTypeById(id) { return PLANE_TYPES.find((p) => p.id === id) || PLANE_TYPES[0]; }
 function randomPlaneType() { const pool = PLANE_TYPES.filter((p) => !p.heli); return pool[Math.floor(Math.random() * pool.length)]; }   // AI 不开直升机（飞行AI不适配悬停物理）
@@ -3529,9 +3529,9 @@ class Heli {
     this.maxSpeed = 62 * pt.speed;
     this.alive = true; this.burning = false; this.extCooldown = 0;
     this._aimPitch = 0; this._yawRate = 0; this._climb = 0; this._throttleIn = 0;
-    this.reloadTimer = 0; this.fireCooldown = this.team === 'red' ? 2.2 : 0.09;   // 敌方机炮射速：比坦克主炮(3s)略快——2.2s 一发，不再连续撕
+    this.reloadTimer = 0; this.fireCooldown = this.team === 'red' ? 2.2 : (type === 'ah64' ? 0.07 : 0.09);   // 敌方机炮射速：比坦克主炮(3s)略快——2.2s 一发，不再连续撕
     this.maxMissiles = 12; this.missiles = this.maxMissiles; this.missileCooldown = 0;   // 火箭巢组数（HUD 导弹位显示）
-    if (type === 'ah64') { this.maxMissiles = 8; this.missiles = 8; this.rocketCd = 0; }   // AH-64：右键=地狱火×8 + E键=火箭(无限,5发一巢装填4s)
+    if (type === 'ah64') { this.maxMissiles = 40; this.missiles = 40; this.rocketCd = 0; }   // AH-64：右键=火箭40组 + E键=火箭(无限,5发一巢装填2.5s)
     this.maxBombs = 0; this.bombs = 0;   // 无炸弹（防飞机模式输入分支误读）
     this.modules = null; this.crew = null;
     this._build();
@@ -3667,7 +3667,7 @@ class Heli {
     dir.x += randRange(-s, s); dir.y += randRange(-s, s); dir.z += randRange(-s, s); dir.normalize();
     em.addProjectile(new Projectile({
       position: muzzle, direction: dir, speed: isEnemy ? 300 : 320,
-      damage: (isEnemy ? 10 : 16) * (planeTypeById(this.type).dmg || 1),
+      damage: (isEnemy ? 10 : (this.type === 'ah64' ? 22 : 16)) * (planeTypeById(this.type).dmg || 1),
       owner: this, ownerTeam: this.team, gravity: 0, life: 2.5,
       color: 0xffe08a, size: 0.3,
       pen: isEnemy ? 120 : 700,
@@ -3703,14 +3703,14 @@ class Heli {
       dir.x += randRange(-s, s); dir.z += randRange(-s, s); dir.normalize();
       em.addProjectile(new Projectile({
         position: this.group.position.clone().addScaledVector(fwd, 2).add(new THREE.Vector3(randRange(-1.5, 1.5), -0.2, 0)),
-        direction: dir, speed: 175, damage: 85, owner: this, ownerTeam: this.team,
+        direction: dir, speed: 175, damage: this.type === 'ah64' ? 130 : 85, owner: this, ownerTeam: this.team,
         gravity: 6, life: 5, color: 0xffa050, size: 0.5,
         pen: this.team === 'red' ? 130 : 700,
         shellDef: { id: 'rocket', name: '火箭弹', penMul: 1, dmgMul: 1, bounceDeg: 90, noBounce: true, effCap: this.team === 'red' ? undefined : 500 },
       }));
       this._rocketCount = (this._rocketCount || 0) + 1;
-      if (this._rocketCount >= 5) { this._rocketCount = 0; this.rocketCd = 4; this._rocketReloaded = true; }   // 5 发一巢：打满装填
-      else this.rocketCd = 0.22;   // 连射节奏
+      if (this._rocketCount >= 5) { this._rocketCount = 0; this.rocketCd = this.type === 'ah64' ? 2.5 : 4; this._rocketReloaded = true; }   // 5 发一巢：打满装填（AH-64 更快）
+      else this.rocketCd = this.type === 'ah64' ? 0.15 : 0.22;   // 连射节奏
       return true;
     }
     if (this.missiles <= 0 || this.missileCooldown > 0) return false;
