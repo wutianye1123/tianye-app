@@ -1784,6 +1784,20 @@ class EntityManager {
     d.mesh.scale.multiplyScalar(0.5);
     this.addEffect(d);
   }
+
+  // —— 火箭范围爆炸：命中/落地炸出大火球+8m 溅射（战雷火箭面杀伤：一发烧一片） ——
+  rocketBoom(p) {
+    const pos = p.mesh.position.clone();
+    this.addEffect(new Explosion(pos, 3.5, 0xffa050));
+    this.addEffect(new SplashRing(pos));
+    const R = 8;
+    for (const t of [...this.tanks, ...this.planes]) {
+      if (!t.alive || t === p.owner || t.team === p.ownerTeam) continue;
+      const d = t.position.distanceTo(pos);
+      if (d < R) { t._lastAttacker = p.owner; t._lastHitT = performance.now(); t.onHit(p.damage * 0.6 * (1 - d / R), p); }
+    }
+  }
+
   addCrater(pos, size) {
     if (!this._craterGeo) {
       this._craterGeo = new THREE.PlaneGeometry(1, 1);
@@ -1849,6 +1863,7 @@ class EntityManager {
     this.projectiles = this.projectiles.filter((p) => {
       if (!p.alive) {
         this.scene.remove(p.mesh);
+        if (p.isRocket && p.mesh.position.y - terrainHeight(p.mesh.position.x, p.mesh.position.z) < 1.5) this.rocketBoom(p);   // 火箭落地：面爆炸
         // 落地弹留小弹坑（贴地死亡=未命中任何东西的弹）
         if (p.mesh.position.y - terrainHeight(p.mesh.position.x, p.mesh.position.z) < 1.2) this.addCrater(p.mesh.position, p.size * 5);
         // 几何/材质已全局缓存共享（projGeo/projMat），不在此 dispose（否则毁掉缓存）
@@ -1934,7 +1949,8 @@ class EntityManager {
         // (hitPoint 已在 onHit 前算好,回放与部位判定共用)
         if (verdict === 'nopen') t.takeDamage(p.damage * 0.15);   // 未击穿啃 15% 血：超压震伤/崩落装甲碎片，低穿车对硬目标不再零作为
         p.alive = false;
-        this.addEffect(new Explosion(hitPoint, t.radius ? t.radius * 0.6 : 1, 0xffa040));
+        if (p.isRocket) { this.rocketBoom(p); }   // 火箭：大火球+8m 溅射（替换单点小爆炸）
+        else this.addEffect(new Explosion(hitPoint, t.radius ? t.radius * 0.6 : 1, 0xffa040));
         hits.push({ owner: p.owner, target: t, proj: p, killed: wasAlive && !t.alive, crit: t.lastCrit, verdict, hitPoint, penInfo: t.lastPenInfo });
       }
     }
@@ -3701,13 +3717,15 @@ class Heli {
       dir.y += elev;
       const s = 0.012;
       dir.x += randRange(-s, s); dir.z += randRange(-s, s); dir.normalize();
-      em.addProjectile(new Projectile({
+      const _rp = new Projectile({
         position: this.group.position.clone().addScaledVector(fwd, 2).add(new THREE.Vector3(randRange(-1.5, 1.5), -0.2, 0)),
         direction: dir, speed: 175, damage: this.type === 'ah64' ? 130 : 85, owner: this, ownerTeam: this.team,
         gravity: 6, life: 5, color: 0xffa050, size: 0.5,
         pen: this.team === 'red' ? 130 : 700,
         shellDef: { id: 'rocket', name: '火箭弹', penMul: 1, dmgMul: 1, bounceDeg: 90, noBounce: true, effCap: this.team === 'red' ? undefined : 500 },
-      }));
+      });
+      _rp.isRocket = true;   // 范围爆炸弹（面杀伤）
+      em.addProjectile(_rp);
       this._rocketCount = (this._rocketCount || 0) + 1;
       if (this._rocketCount >= 5) { this._rocketCount = 0; this.rocketCd = this.type === 'ah64' ? 2.5 : 4; this._rocketReloaded = true; }   // 5 发一巢：打满装填（AH-64 更快）
       else this.rocketCd = this.type === 'ah64' ? 0.15 : 0.22;   // 连射节奏
@@ -3722,13 +3740,15 @@ class Heli {
       const dir = fwd.clone();
       const s = 0.02 + i * 0.006;
       dir.x += randRange(-s, s); dir.y += randRange(-s, s) + elev4; dir.z += randRange(-s, s); dir.normalize();
-      em.addProjectile(new Projectile({
+      const _rp = new Projectile({
         position: this.group.position.clone().addScaledVector(fwd, 2).add(new THREE.Vector3(randRange(-1.5, 1.5), -0.2, 0)),
         direction: dir, speed: 175, damage: this.team === 'red' ? 25 : 85, owner: this, ownerTeam: this.team,   // 敌方火箭伤害减半
         gravity: 6, life: 5, color: 0xffa050, size: 0.5,
         pen: this.team === 'red' ? 130 : 700,
         shellDef: { id: 'rocket', name: '火箭弹', penMul: 1, dmgMul: 1, bounceDeg: 90, noBounce: true, effCap: this.team === 'red' ? undefined : 500 },
-      }));
+      });
+      _rp.isRocket = true;   // 范围爆炸弹（面杀伤）
+      em.addProjectile(_rp);
     }
     this.missiles--; this.missileCooldown = this.team === 'red' ? 3.5 : 2.4;   // 敌方火箭冷却更长
     return true;
@@ -5491,9 +5511,9 @@ class Game {
       else fv = p.isHeli ? (p._aimDir || p.forwardVector()) : p.forwardVector();
       const pp = _tmpV3.copy(p.position).addScaledVector(fv, 80).project(this.camera);
       this._planeAimNDC = { x: pp.x, y: pp.y };
-      // AI 副驾驶：起火自动灭火 + 边飞边修（血量<95% 持续回血，R 键同款速率）
+      // AI 副驾驶：起火自动灭火 + 边飞边修（血量不满立刻修；AH-64 神器修理 35/s，其余 12/s）
       if (p.burning) { const ext = p.tryExtinguish(); if (ext) this.hud.addFeed('🤖 AI：已灭火', 'info'); }
-      if (p.health < p.maxHealth) p.health = Math.min(p.maxHealth, p.health + 12 * dt);   // 血量不满立刻修（R 键同款速率）
+      if (p.health < p.maxHealth) p.health = Math.min(p.maxHealth, p.health + (p.type === 'ah64' ? 35 : 12) * dt);
       return;
     }
     // 指针锁定时用"虚拟瞄准点"（累积鼠标移动，光标不会飞出窗口）；未锁定时用光标绝对位置。
@@ -5531,7 +5551,7 @@ class Game {
     // 修车（按住 R）：飞机也能修，但减速
     this._repairing = inp.isDown('KeyR') && p.health < p.maxHealth;
     if (this._repairing) {
-      p.health = Math.min(p.maxHealth, p.health + 12 * dt);
+      p.health = Math.min(p.maxHealth, p.health + (p.isHeli && p.type === 'ah64' ? 35 : 12) * dt);   // AH-64 手动修理也 35/s
       this.hud.setCenterMessage(`🔧 维修中… ${Math.floor(p.health)}/${p.maxHealth}`);
     }
 
