@@ -968,7 +968,7 @@ class HUD {
   }
 
   // 小地图：玩家居中、朝上为前进方向；敌人画红点。
-  drawMinimap({ playerPos, playerHeading, enemies, allies, zones = null, range = 200 } = {}) {
+  drawMinimap({ playerPos, playerHeading, enemies, allies, zones = null, range = 250 } = {}) {
     const ctx = this.miniCtx;
     const w = this.mini.width, h = this.mini.height;
     ctx.clearRect(0, 0, w, h);
@@ -1015,11 +1015,14 @@ class HUD {
     }
 
     if (allies) for (const a of allies) dot(a, '#66aaff', 2.4);   // 友方（蓝）
-    // 敌方：带朝向的三角箭头（预判走位）；无朝向数据时退化为圆点
+    // 敌方：带朝向的三角箭头（预判走位）+红描边光圈（远处也醒目）；无朝向数据时退化为圆点
     if (enemies) for (const e of enemies) {
       const { px, py } = project(e);
       if (px < 6 || px > w - 6 || py < 6 || py > h - 6) continue;
       ctx.fillStyle = '#ff5555';
+      ctx.strokeStyle = 'rgba(255,60,60,0.45)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(px, py, 6.5, 0, Math.PI * 2); ctx.stroke();
       if (e.h != null) {
         // 敌人朝向世界向量投到玩家局部系,再转屏幕角(与 project 同基:屏幕右=世界-rgt)
         const fx = Math.sin(e.h), fz = Math.cos(e.h);
@@ -1635,6 +1638,9 @@ class Wreck {
     this.mesh.traverse((c) => { c.layers && c.layers.set(2); });   // 层2(见 update 注释)
     this.pos = tank.position;
     this.life = 8; this.alive = true; this.em = em; this.smokeT = 0;
+    // 残骸=掩体：进障碍列表挡炮弹/挡视线（战雷经典：躲残骸后面打）
+    this.ob = { position: new THREE.Vector3(tank.position.x, 0, tank.position.z), radius: 3.2, height: terrainHeight(tank.position.x, tank.position.z) + 2.4 };
+    if (em.obstacles) em.obstacles.push(this.ob);
   }
   update(dt) {
     this.life -= dt;
@@ -1651,7 +1657,13 @@ class Wreck {
       this.mesh.traverse((c) => { if (c.material) { c.material.transparent = true; c.material.opacity = o; } });
     }
   }
-  dispose() { this.mesh.traverse((c) => { if (c.geometry) c.geometry.dispose(); if (c.material) { Array.isArray(c.material) ? c.material.forEach((m) => m.dispose()) : c.material.dispose(); } }); }
+  dispose() {
+    if (this.ob && this.em && this.em.obstacles) {   // 撤掩体：残骸销毁时从障碍列表移除
+      const i = this.em.obstacles.indexOf(this.ob);
+      if (i >= 0) this.em.obstacles.splice(i, 1);
+    }
+    this.mesh.traverse((c) => { if (c.geometry) c.geometry.dispose(); if (c.material) { Array.isArray(c.material) ? c.material.forEach((m) => m.dispose()) : c.material.dispose(); } });
+  }
 }
 
 // —— 烟幕墙（战雷式）：G 键释放瞬间在车侧横向铺开一条 ~76m 宽的连续浓烟墙 ——
@@ -4342,6 +4354,7 @@ const MAPS = [
   { id:'rain',    name:'雨天',     urban:false, towns:1, density:1.0, fog:0x8a949e, bg:0x99a3ad, gLow:[0.22,0.26,0.24], gHigh:[0.34,0.38,0.34], leaf:0x2a4228, wall:0x555a50, height:0.9, wallColor:0x7a8a99, rain:true },
   { id:'canyon',  name:'峡谷',     urban:false, towns:1, density:0.8, fog:0xc4b89e, bg:0xc9bda6, gLow:[0.55,0.44,0.30], gHigh:[0.72,0.62,0.46], leaf:0x5a5a30, wall:0x8a7a5a, height:0.5, wallColor:0xd0b890, canyon:true },
   { id:'island',  name:'海岛',     urban:false, towns:1, density:0.9, fog:0xa8c8d4, bg:0xb8d4de, gLow:[0.72,0.66,0.46], gHigh:[0.42,0.55,0.30], leaf:0x3a6b35, wall:0x9a8a62, height:0.8, wallColor:0x70c0d8, island:true },
+  { id:'storm',   name:'雷暴',     urban:false, towns:1, density:0.9, fog:0x0d1420, bg:0x131a28, gLow:[0.10,0.13,0.18], gHigh:[0.18,0.22,0.28], leaf:0x0c1c12, wall:0x1a2430, height:0.8, wallColor:0x4a5a78, night:true, rain:true, storm:true },
 ];
 
 // 创建地面 + 障碍物 + 边界，返回 { group, obstacles, half }。mapId 决定地形主题。
@@ -4640,6 +4653,8 @@ class Sfx {
   missile(pos) { this._oneshot(0.45, 'bandpass', 900, 0.4, pos, 300); }
   // RWR 导弹来袭警报：双音急促哔哔（重复触发形成连续告警）
   alarm() { this._blip(1900, 1750, 0.07, 0.2, 'square'); this._blip(1450, 1350, 0.07, 0.16, 'square'); }
+  // 滚雷：低频长噪（远处雷声滚过）
+  thunder() { this._oneshot(1.8, 'lowpass', 240, 0.5, null, 60); }
   _blip(freq0, freq1, dur, gain, type) {
     if (this.muted) return;
     this._ensure(); if (!this.ctx) return;
@@ -4724,6 +4739,8 @@ class Game {
 
     setupEnvironment(this.scene, mode, this.renderer, this._isNight && mode === 'tank', this._isRain && mode === 'tank');
     if (this._isRain && mode === 'tank') this.rain = new RainFX(this.scene);   // 雨幕（跟相机）
+    this._isStorm = !!(MAPS.find((m) => m.id === this.mapId) || {}).storm;     // 雷暴：随机闪电照亮全场
+    this._stormT = randRange(3, 7); this._lightning = 0; this._thunderT = -1;
     // 夜战车头灯：一盏 SpotLight 照玩家车前方（AI 不给灯——黑暗里找灯打也是夜战玩法）
     if (this._isNight && mode === 'tank') {
       this.headlight = new THREE.SpotLight(0xffeec8, 320, 60, 0.52, 0.5, 1.1);
@@ -5714,7 +5731,13 @@ class Game {
     if (this._disposed) return;
     this._raf = requestAnimationFrame(this._animate);
     try {
-    const dt = Math.min(this.clock.getDelta(), 0.05);
+    let dt = Math.min(this.clock.getDelta(), 0.05);
+    // 最后一杀慢放：0.25 倍速 1.3s（真实时间倒计时），结束后正式结算
+    if (this._slowMoT > 0) {
+      this._slowMoT -= dt;
+      dt *= 0.25;
+      if (this._slowMoT <= 0 && this._pendingEnd) { this._pendingEnd = false; this._end(true); return; }
+    }
     // Esc 暂停/恢复统一走常驻 _onEscKey（锁定时 Esc 由浏览器退锁、_onPLChange 暂停）。
     if (this.paused) { this.postfx.render(this.scene, this.camera); return; }
     if (this.state === 'playing') this.matchT += dt;
@@ -5874,6 +5897,26 @@ class Game {
       this.em.update(dt);
       if (this.terrain?.grass) this.terrain.grass.update(this.camera.position.x, this.camera.position.z);
       if (this.rain) this.rain.update(dt, this.camera.position);   // 雨幕跟随相机
+      // —— 雷暴：随机闪电（环境光瞬间脉冲照亮全场）+ 1.5~3s 后滚雷 ——
+      if (this._isStorm) {
+        if (this._lightning > 0) {   // 闪电衰减（两段频闪）
+          this._lightning -= dt * 6;
+          const fl = Math.max(0, this._lightning);
+          this._stormAmb.intensity = 0.3 + fl * 3.2 * (Math.sin(this._lightning * 40) > 0 ? 1 : 0.3);
+          this.renderer.toneMappingExposure = 1.35 + fl * 0.9;
+        }
+        this._stormT -= dt;
+        if (this._stormT <= 0 && this._lightning <= 0) {
+          this._stormT = randRange(3.5, 9);
+          this._lightning = 1;
+          if (!this._stormAmb) { this._stormAmb = new THREE.AmbientLight(0xcfe0ff, 0.3); this.scene.add(this._stormAmb); }
+          this._thunderT = randRange(1.5, 3);   // 雷声延迟（光速>音速）
+        }
+        if (this._thunderT > 0) {
+          this._thunderT -= dt;
+          if (this._thunderT <= 0) this.sfx.thunder();
+        }
+      }
       this._updateTreeFalls(dt);   // 撞树倒伏：检测坦克碾压 + 倒下动画
       if (this.mode === 'tank') this._resolveObstacles();
 
@@ -6508,8 +6551,8 @@ class Game {
           this._streak = (this._streakT > 0) ? this._streak + 1 : 1;
           this._streakT = 8;
           if (this._streak >= 2) {
-            const words = { 2: '双杀！', 3: '三杀！', 4: '四杀！' };
-            const w = words[this._streak] || '⚔️ 大杀特杀！';
+            const words = { 2: '双杀！', 3: '三杀！', 4: '四杀！', 5: '五杀！🔥' };
+            const w = words[this._streak] || '⚔️ 无人能挡！';
             this.hud.setCenterMessage(w + ' ×' + this._streak);
             if (this.sfx) this.sfx._blip(500 + this._streak * 140, 700 + this._streak * 160, 0.16, 0.3, 'triangle');   // 音调随连杀递升
           }
@@ -6758,6 +6801,7 @@ class Game {
     const n = 2 + this.wave;
     this._waveMaxRank = Math.min(6, 1 + Math.floor((this.wave + 1) / 2));
     for (let i = 0; i < n; i++) this._spawnEnemy();
+    if (this.wave % 5 === 0) { this._spawnBoss(); this.hud.addFeed(`💀 第 ${this.wave} 波 BOSS 出现！`, 'death'); }   // 每 5 波一只精英 Boss
     if (this.wave >= 5) {
       const k = 1 + (this.wave - 4) * 0.08;
       for (const e of this.enemies) { e.maxHealth *= k; e.health = e.maxHealth; }
@@ -6775,6 +6819,14 @@ class Game {
   }
 
   _end(win) {
+    // 胜利的最后一杀：先播 1.3s 全屏慢放（0.25 倍速）再出结算——战雷式收尾特写
+    if (win && !this._slowPlayed && this.state === 'playing') {
+      this._slowPlayed = true;
+      this._pendingEnd = true;
+      this._slowMoT = 1.3;
+      this.hud.setCenterMessage('🎬 ' + (this.objective === 'waves' ? `撑到第 ${this.wave} 波！` : '胜利！'));
+      return;
+    }
     this.state = 'over';
     this._endShellcam();   // 结束比赛：关掉回放小窗，别冻在结算界面旁
     // 一局结束：释放指针锁让光标出现（点"再来一局/返回菜单"），并藏掉准星。
