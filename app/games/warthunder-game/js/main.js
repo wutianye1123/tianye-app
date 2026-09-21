@@ -2818,7 +2818,7 @@ class Tank {
 
 const INST = {
   bankK: 1.3, maxBank: 1.15, rollK: 3.0, rollRate: 3.2,
-  yawGain: 1.7, pitchK: 3.0, pitchRate: 2.2, maxPitch: 0.7,
+  yawGain: 1.7, pitchK: 3.0, pitchRate: 2.2, maxPitch: 1.5,   // 86°：可接近垂直俯冲/垂直爬升（原 0.7=40° 太平）
 };
 
 // 飞机：街机飞行 + 飞行教官（鼠标指哪飞哪、自动改平）。
@@ -3490,7 +3490,10 @@ class TankAI {
     const isAirTarget = isAir;   // 目标是飞机
     // 视线检查：炮口到目标连线被建筑/岩石挡住 → 不开火（炮弹会拍墙上白装填；掩体后目标先机动绕出再打）
     const losBlocked = !isAir && this._losBlocked(tank.position, target.position, obstacles);
-    if (!smokeBlind && !losBlocked && !target.isZone && tank.canFire() && dist < 240 && Math.abs(aimDiff) < aimThresh && Math.random() < fireChance) {
+    // 对空削弱：敌方坦克打飞机射程 240→160、开火率减半（玩家飞机不再被防空火力秒）
+    const airRange = isAir ? (isEnemy ? 160 : 240) : 240;
+    const airChance = (isAir && isEnemy) ? fireChance * 0.5 : fireChance;
+    if (!smokeBlind && !losBlocked && !target.isZone && tank.canFire() && dist < airRange && Math.abs(aimDiff) < aimThresh && Math.random() < airChance) {
       tank.tryFire(em);
     }
     // 打飞机时额外用机枪（密集火力追着飞机打）；敌方不用（太超模）；视线被挡不打
@@ -3721,7 +3724,7 @@ class Heli {
       dir.x += randRange(-s, s); dir.y += randRange(-s, s) + elev4; dir.z += randRange(-s, s); dir.normalize();
       em.addProjectile(new Projectile({
         position: this.group.position.clone().addScaledVector(fwd, 2).add(new THREE.Vector3(randRange(-1.5, 1.5), -0.2, 0)),
-        direction: dir, speed: 175, damage: this.team === 'red' ? 40 : 85, owner: this, ownerTeam: this.team,   // 敌方火箭伤害减半
+        direction: dir, speed: 175, damage: this.team === 'red' ? 25 : 85, owner: this, ownerTeam: this.team,   // 敌方火箭伤害减半
         gravity: 6, life: 5, color: 0xffa050, size: 0.5,
         pen: this.team === 'red' ? 130 : 700,
         shellDef: { id: 'rocket', name: '火箭弹', penMul: 1, dmgMul: 1, bounceDeg: 90, noBounce: true, effCap: this.team === 'red' ? undefined : 500 },
@@ -4126,14 +4129,20 @@ class PlaneAI {
       aimDir.y = 0.7;
       aimDir.normalize();
       plane.throttle = 1;
-      if (alt > 125) { this.phase = 'cruise'; this._diveCd = 1 + Math.random() * 2; this._orbit *= Math.random() < 0.3 ? -1 : 1; }
+      if (alt > 115) { this.phase = 'cruise'; this._diveCd = 0.6 + Math.random() * 1.2; this._orbit *= Math.random() < 0.3 ? -1 : 1; }   // 拉起到位即找下一轮窗口，冷却缩短
     } else {
-      // 高空巡航：145m 高度带绕目标盘旋，等俯冲窗口
-      aimDir = dirFlat.clone().addScaledVector(sideFlat, 1.3).normalize();
+      // 高空巡航：145m 高度带绕目标小幅盘旋（盘旋分量小、向目标收拢——不在边缘/头顶干转圈发呆）
+      aimDir = dirFlat.clone().addScaledVector(sideFlat, 0.85).normalize();
+      // 接近地图边缘时朝中心回拉（防在边界来回蹭）
+      const lim = (plane.worldSize || CONFIG.plane.worldSize) - 90;
+      if (Math.abs(plane.position.x) > lim || Math.abs(plane.position.z) > lim) {
+        const toC = new THREE.Vector3(-plane.position.x, 0, -plane.position.z).normalize();
+        aimDir.addScaledVector(toC, 1.2).normalize();
+      }
       aimDir.y = clamp((145 - alt) * 0.012, -0.3, 0.42);
       aimDir.normalize();
       plane.throttle = 0.85;
-      if (this._diveCd <= 0 && alt > 115 && flatDist < 300) this.phase = 'dive';
+      if (this._diveCd <= 0 && alt > 100 && flatDist < 360) this.phase = 'dive';   // 俯冲窗口放宽：升到位就下去打，不多等
     }
       // 低空安全兜底（俯冲失误/地形突变）
       if (alt < 20) { aimDir.y = Math.max(aimDir.y, 0.55); aimDir.normalize(); }
@@ -5137,18 +5146,20 @@ class Game {
     } else {
       const ang = randRange(0, Math.PI * 2);
       const dist = randRange(150, 220);
-      // 敌方空中单位：25% 概率出直升机（HeliAI 驾驶：盘旋+机炮+火箭），其余喷气机
-      if (Math.random() < 0.25) {
+      // 敌方空中单位：15% 概率出直升机（HeliAI 驾驶：盘旋+机炮+火箭），其余喷气机
+      if (Math.random() < 0.15) {
         const heliTypes = PLANE_TYPES.filter((x) => x.heli);
         const e = new Heli({ side: 'enemy', team: 'red', color: 0x8a5a42, type: heliTypes[Math.floor(Math.random() * heliTypes.length)].id });
         e.displayName = this._nextName();
         e.group.position.set(Math.sin(ang) * dist, CONFIG.plane.spawnAltitude + randRange(-5, 8), Math.cos(ang) * dist);
         e.ai = new HeliAI(e);
+        e.maxHealth *= 0.6; e.health = e.maxHealth;   // 敌方直升机血量-40%：好打下来
         this.em.addPlane(e);
         if (this.worldwar) e.worldSize = CONFIG.tank.worldSize;
         this.enemies.push(e);
       } else {
         const e = new Plane({ side: 'enemy', team: 'red', color: 0xb5462e, type: randomPlaneType().id });
+        if (e.bulletDamage != null) e.bulletDamage *= 0.6;   // 敌方机炮伤害-40%：不再秒玩家
         e.displayName = this._nextName();
         e.group.position.set(Math.sin(ang) * dist, CONFIG.plane.spawnAltitude + randRange(-10, 12), Math.cos(ang) * dist);
         const toCenter = this._playerBasePos().clone().sub(e.group.position).normalize();
