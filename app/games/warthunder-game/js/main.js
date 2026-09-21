@@ -3677,54 +3677,33 @@ class Heli {
   }
   // 导弹位（右键/X）：AH-64=地狱火追踪导弹（锁准星前半球目标）；Mi-24/直-10=无制导火箭巢齐射
   tryFireMissile(em, enemies) {
-    if (!this.alive || this.missileCooldown > 0 || this.missiles <= 0) return false;
-    if (this.type === 'ah64') {
-      // —— 地狱火：追踪导弹（目标=准星前半球最近敌人）——
-      let best = null, bestD = Infinity;
-      const aim = (this._aimDir || this.forwardVector());
-      for (const t of (enemies || [])) {
-        if (!t.alive || t.team === this.team) continue;
-        const to = t.position.clone().sub(this.position);
-        const d = to.length();
-        if (d > 600) continue;
-        if (aim.dot(to.normalize()) < 0.5) continue;   // 准星 60° 锥内才锁
-        if (d < bestD) { bestD = d; best = t; }
-      }
-      const dir = best ? best.position.clone().sub(this.position).normalize() : aim.clone();
-      const proj = new Projectile({
-        position: this.position.clone().addScaledVector(aim, 2), direction: dir,
-        speed: 190, damage: this.team === 'red' ? 120 : 260, owner: this, ownerTeam: this.team,   // 敌方地狱火伤害减半
-        gravity: 0, life: 6, color: 0xff5544, size: 0.42,
-      });
-      proj.target = best; proj.homing = 2.2;   // 强追踪：直升机悬停发射也能咬住
-      em.addProjectile(proj);
-      this.missiles--; this.missileCooldown = 1.2;
-      if (best) this._mslTarget = best;
-      return true;
-    }
-    return this.tryFireRockets(em);
+    // 直升机"导弹位"= 火箭弹（地狱火追踪弹已按需求移除）：右键/X 与 E 键行为一致
+    return this.tryFireRockets(em, 'mslot');
   }
   // 火箭巢：AH-64 走 E 键——无限弹、按住逐发连射（0.22s 节奏），每打满 5 发自动装填 4s；
   // Mi-24/直-10 复用导弹位（4 连发齐射）。
+  // —— 火箭弹（直升机唯一重型武器：右键/X 与 E 键都走这里；地狱火追踪弹已按需求移除）——
+  // 沿准星方向（_fireDir：指向瞄准点，跟鼠标/机炮一起动——不再朝机头方向低着头射）；
+  // 必穿参数（pen 700+等效封顶+永不跳弹）：不再出现打不动重甲"跳弹打不死人"。
   tryFireRockets(em, fromButton) {
     const useOwn = this.type === 'ah64' && fromButton !== 'mslot';
     if (useOwn) {
       if (this.rocketCd > 0) return false;
-      const fwd = (this._aimDir || this.forwardVector()).clone();
+      const fwd = this._fireDir();
       const dir = fwd.clone();
-      // 火箭下坠补偿：按瞄准点实际距离抬高发射角（重力6使175m/s的火箭飞150m下坠~2.2m，不补永远打低）
       const muzzle = this.getMuzzleWorld();
       const dist = this._aimPoint ? this._aimPoint.distanceTo(muzzle) : 120;
       const drop = 0.5 * 6 * Math.pow(dist / 175, 2);
-      const elev = Math.atan2(drop, Math.max(20, dist));
+      const elev = Math.atan2(drop, Math.max(20, dist));   // 下坠补偿：按瞄准点实际距离抬角
       dir.y += elev;
-      const s = 0.02;
+      const s = 0.012;
       dir.x += randRange(-s, s); dir.z += randRange(-s, s); dir.normalize();
       em.addProjectile(new Projectile({
         position: this.group.position.clone().addScaledVector(fwd, 2).add(new THREE.Vector3(randRange(-1.5, 1.5), -0.2, 0)),
         direction: dir, speed: 175, damage: 85, owner: this, ownerTeam: this.team,
-        gravity: 6, life: 5, color: 0xffa050, size: 0.5, pen: 130,
-        shellDef: { id: 'rocket', name: '火箭弹', penMul: 1, dmgMul: 1, bounceDeg: 80, noBounce: true },
+        gravity: 6, life: 5, color: 0xffa050, size: 0.5,
+        pen: this.team === 'red' ? 130 : 700,
+        shellDef: { id: 'rocket', name: '火箭弹', penMul: 1, dmgMul: 1, bounceDeg: 90, noBounce: true, effCap: this.team === 'red' ? undefined : 500 },
       }));
       this._rocketCount = (this._rocketCount || 0) + 1;
       if (this._rocketCount >= 5) { this._rocketCount = 0; this.rocketCd = 4; this._rocketReloaded = true; }   // 5 发一巢：打满装填
@@ -3733,7 +3712,6 @@ class Heli {
     }
     if (this.missiles <= 0 || this.missileCooldown > 0) return false;
     const fwd = this._fireDir();
-    // 火箭下坠补偿（同 AH-64：按瞄准点距离抬角，防系统性打低）
     const muz = this.getMuzzleWorld();
     const dist4 = this._aimPoint ? this._aimPoint.distanceTo(muz) : 120;
     const elev4 = Math.atan2(0.5 * 6 * Math.pow(dist4 / 175, 2), Math.max(20, dist4));
@@ -3744,8 +3722,9 @@ class Heli {
       em.addProjectile(new Projectile({
         position: this.group.position.clone().addScaledVector(fwd, 2).add(new THREE.Vector3(randRange(-1.5, 1.5), -0.2, 0)),
         direction: dir, speed: 175, damage: this.team === 'red' ? 40 : 85, owner: this, ownerTeam: this.team,   // 敌方火箭伤害减半
-        gravity: 6, life: 5, color: 0xffa050, size: 0.5, pen: 130,
-        shellDef: { id: 'rocket', name: '火箭弹', penMul: 1, dmgMul: 1, bounceDeg: 80, noBounce: true },
+        gravity: 6, life: 5, color: 0xffa050, size: 0.5,
+        pen: this.team === 'red' ? 130 : 700,
+        shellDef: { id: 'rocket', name: '火箭弹', penMul: 1, dmgMul: 1, bounceDeg: 90, noBounce: true, effCap: this.team === 'red' ? undefined : 500 },
       }));
     }
     this.missiles--; this.missileCooldown = this.team === 'red' ? 3.5 : 2.4;   // 敌方火箭冷却更长
@@ -5549,7 +5528,7 @@ class Game {
     if (this._consumePress(inp, 'KeyF')) this._extinguish(p);
     // 导弹（喷气机）：右键或 X
     if ((inp.rightMouseDown || inp.isDown('KeyX')) && p.missiles > 0) {
-      if (p.tryFireMissile(this.em, this.enemies)) { this.hud.addFeed(`🚀 ${p.isHeli && p.type === 'ah64' ? '地狱火' : '导弹/火箭'} ${p.missiles}/${p.maxMissiles}`, 'info'); this.sfx.missile(p.position); }
+      if (p.tryFireMissile(this.em, this.enemies)) { this.hud.addFeed(p.isHeli ? `🚀 火箭巢 ${p.missiles}/${p.maxMissiles}` : `🚀 导弹 ${p.missiles}/${p.maxMissiles}`, 'info'); this.sfx.missile(p.position); }
     }
     // AH-64 专属火箭巢（按住 E 逐发连射）：5 发一巢打满自动装填 4s，弹无限
     if (p.isHeli && p.type === 'ah64' && inp.isDown('KeyE')) {
