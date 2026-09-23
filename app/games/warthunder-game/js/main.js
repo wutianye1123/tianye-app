@@ -5429,10 +5429,14 @@ class Game {
     t._dropAngle = Math.atan2(drop, Math.max(30, dEff));
     t.aimTurretAt(aimWorld, dt, 0);
 
-    // 修车（按住 R）：不能动但可以开火/灭火，消耗时间修血+模块。
-    // 血满但零件坏了（履带/炮管/发动机）也能修——原先被 health<max 挡住，R 对零件完全无效。
+    // 修车（按住 R，或连按两下 R 常开自动修理）：边走边修，修血+模块。
     const modsBroken = t.modules && (t.modules.track > 0 || t.modules.barrel > 0 || t.modules.engine > 0);
-    this._repairing = inp.isDown('KeyR') && (t.health < t.maxHealth || modsBroken);
+    if (this._consumePress(inp, 'KeyR')) {
+      const now = performance.now();
+      if (now - (this._lastR || 0) < 300) { this._autoRepair = !this._autoRepair; this.hud.addFeed(this._autoRepair ? '🔧 自动修理：开' : '🔧 自动修理：关', 'info'); this._lastR = 0; }
+      else this._lastR = now;
+    }
+    this._repairing = (inp.isDown('KeyR') || this._autoRepair) && (t.health < t.maxHealth || modsBroken);
     if (this._repairing) {
       // 边走边修：不影响移动/瞄准/开火（drive 已由 WASD 输入驱动，此处只回血修模块）
       if (t.health < t.maxHealth) t.health = Math.min(t.maxHealth, t.health + 15 * dt);
@@ -5445,6 +5449,9 @@ class Game {
       this.hud.setCenterMessage(t.health < t.maxHealth
         ? `🔧 修车中… ${Math.floor(t.health)}/${t.maxHealth}`
         : '🔧 修理零件中…');
+    } else if (this._autoRepair && !(t.modules && (t.modules.track > 0 || t.modules.barrel > 0 || t.modules.engine > 0)) && t.health >= t.maxHealth) {
+      this._autoRepair = false;   // 全修好自动关（省心）
+      this.hud.setCenterMessage('');
     }
 
     if (inp.mouseDown) t.tryFire(this.em);
@@ -5549,7 +5556,12 @@ class Game {
       p.setThrottleInput(td, dt);
     }
     // 修车（按住 R）：飞机也能修，但减速
-    this._repairing = inp.isDown('KeyR') && p.health < p.maxHealth;
+    if (this._consumePress(inp, 'KeyR')) {
+      const now = performance.now();
+      if (now - (this._lastR || 0) < 300) { this._autoRepair = !this._autoRepair; this.hud.addFeed(this._autoRepair ? '🔧 自动修理：开' : '🔧 自动修理：关', 'info'); this._lastR = 0; }
+      else this._lastR = now;
+    }
+    this._repairing = (inp.isDown('KeyR') || this._autoRepair) && p.health < p.maxHealth;
     if (this._repairing) {
       p.health = Math.min(p.maxHealth, p.health + (p.isHeli && p.type === 'ah64' ? 35 : 12) * dt);   // AH-64 手动修理也 35/s
       this.hud.setCenterMessage(`🔧 维修中… ${Math.floor(p.health)}/${p.maxHealth}`);
