@@ -7135,11 +7135,15 @@ const techtreeBtn = document.getElementById('btn-tech');
 // —— 成就面板 ——
 function toggleAchievements() {
   let el = document.getElementById('achv-panel');
-  if (el) { el.remove(); return; }
+  if (el) { el.remove(); if (el._bd) el._bd.remove(); return; }
   el = document.createElement('div');
   el.id = 'achv-panel';
-  el.style.cssText = 'position:fixed;inset:0;background:rgba(6,10,8,0.82);z-index:120;display:flex;align-items:center;justify-content:center;';
+  el.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:120;';   // 绝对居中（定心定位，不受外层布局影响）
   const done = meta.achievements || [];
+  const bd = document.createElement('div');   // 全屏遮罩：点空白处也关闭
+  bd.style.cssText = 'position:fixed;inset:0;background:rgba(6,10,8,0.72);z-index:119;';
+  bd.addEventListener('click', () => { el.remove(); bd.remove(); });
+  el._bd = bd;
   el.innerHTML = `
     <div style="width:min(560px,92vw);max-height:80vh;overflow-y:auto;background:rgba(24,34,26,0.97);border:1px solid rgba(150,180,150,0.4);border-radius:14px;padding:20px 24px;">
       <h2 style="color:#cfe8c0;margin:0 0 4px;text-align:center;">🏆 成就 <span style="font-size:13px;color:#8da08d">${done.length}/${ACHIEVEMENTS.length}</span></h2>
@@ -7151,8 +7155,9 @@ function toggleAchievements() {
           <div style="color:#ffd86b;font-size:12px;white-space:nowrap">+${a.reward}💰</div>
         </div>`;
       }).join('')}
-      <button class="lo-btn" style="margin-top:12px;width:100%" onclick="document.getElementById('achv-panel').remove()">关闭</button>
+      <button class="lo-btn" style="margin-top:12px;width:100%" onclick="(function(){const e=document.getElementById('achv-panel');const b=e&&e._bd;if(e)e.remove();if(b)b.remove();})()">关闭</button>
     </div>`;
+  document.body.appendChild(bd);
   document.body.appendChild(el);
 }
 
