@@ -4914,6 +4914,13 @@ class Game {
     this.groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     this._tmpDir = new THREE.Vector3();
     this.postfx = new PostFX(this.renderer);   // 后处理：Bloom+分级+暗角（主循环经此渲染）
+    // 画质等级（设置面板）：0流畅/1均衡/2高清=锁定；3自动=FPS 动态自适应。初始立即应用。
+    const _q = this.settings.quality != null ? this.settings.quality : 3;
+    if (_q < 3) {
+      this._qLevel = _q;   // 手动锁定（跳过自动升降）
+      const QM = [{ pr: 1.2, sh: 1024 }, { pr: 1.5, sh: 2048 }, { pr: 2.0, sh: 4096 }];
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, QM[_q].pr));
+    }
 
     this._onResize = () => this._handleResize();
     window.addEventListener('resize', this._onResize);
@@ -6013,8 +6020,11 @@ class Game {
       const Q = [{ pr: 1.2, sh: 1024 }, { pr: 1.5, sh: 2048 }, { pr: 2.0, sh: 4096 }];
       this._qLevel = this._qLevel != null ? this._qLevel : 1;
       let nl = this._qLevel;
-      if (avg > 57 && this._qLevel < 2) nl = this._qLevel + 1;
-      else if (avg < 42 && this._qLevel > 0) nl = this._qLevel - 1;
+      const manual = this.settings && this.settings.quality != null && this.settings.quality < 3;   // 手动档：不自动升降
+      if (!manual) {
+        if (avg > 57 && this._qLevel < 2) nl = this._qLevel + 1;
+        else if (avg < 42 && this._qLevel > 0) nl = this._qLevel - 1;
+      }
       if (nl !== this._qLevel) {
         this._qLevel = nl;
         const q = Q[nl];
@@ -7716,6 +7726,8 @@ renderEndlessBtn();
   const sSh = document.getElementById('set-shadows'), sShV = document.getElementById('set-shadows-v');
   const sIv = document.getElementById('set-inverty'), sIvV = document.getElementById('set-inverty-v');
   const sPg = document.getElementById('set-planegain'), sPgV = document.getElementById('set-planegain-v');
+  const sQ = document.getElementById('set-quality'), sQV = document.getElementById('set-quality-v');
+  const Q_NAMES = ['流畅', '均衡', '高清', '自动'];
   let cur = loadSettings();
   const refresh = () => {
     sVol.value = cur.volume; sVolV.textContent = Math.round(cur.volume * 100) + '%';
@@ -7723,6 +7735,7 @@ renderEndlessBtn();
     sSh.value = cur.shadows ? 1 : 0; sShV.textContent = cur.shadows ? '开' : '关';
     sIv.value = cur.invertY ? 1 : 0; sIvV.textContent = cur.invertY ? '开' : '关';
     sPg.value = cur.planeGain; sPgV.textContent = cur.planeGain.toFixed(2);
+    if (sQ) { sQ.value = cur.quality != null ? cur.quality : 3; sQV.textContent = Q_NAMES[cur.quality != null ? cur.quality : 3]; }
   };
   refresh();
   if (openBtn) openBtn.addEventListener('click', () => { refresh(); el.classList.remove('hidden'); });
@@ -7732,6 +7745,7 @@ renderEndlessBtn();
   sSh.addEventListener('input', () => { cur.shadows = sSh.value === '1'; saveSettings(cur); sShV.textContent = cur.shadows ? '开' : '关'; });
   sIv.addEventListener('input', () => { cur.invertY = sIv.value === '1'; saveSettings(cur); sIvV.textContent = cur.invertY ? '开' : '关'; });
   sPg.addEventListener('input', () => { cur.planeGain = parseFloat(sPg.value); saveSettings(cur); sPgV.textContent = cur.planeGain.toFixed(2); });
+  if (sQ) sQ.addEventListener('input', () => { cur.quality = parseInt(sQ.value, 10); saveSettings(cur); sQV.textContent = Q_NAMES[cur.quality]; });
 })();
 
 // 冒烟测试入口：URL 带 ?auto=tank / ?auto=plane 时跳过菜单直接开局（便于回归测试）
