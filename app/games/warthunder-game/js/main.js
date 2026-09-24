@@ -7144,7 +7144,7 @@ function toggleAchievements() {
   const done = meta.achievements || [];
   el.innerHTML = `
     <div style="width:min(560px,92vw);max-height:80vh;overflow-y:auto;background:rgba(24,34,26,0.97);border:1px solid rgba(150,180,150,0.4);border-radius:14px;padding:20px 24px;">
-      <h2 style="color:#cfe8c0;margin:0 0 4px;">🏆 成就 <span style="font-size:13px;color:#8da08d">${done.length}/${ACHIEVEMENTS.length}</span></h2>
+      <h2 style="color:#cfe8c0;margin:0 0 4px;text-align:center;">🏆 成就 <span style="font-size:13px;color:#8da08d">${done.length}/${ACHIEVEMENTS.length}</span></h2>
       <p class="tip" style="margin:0 0 12px;font-size:12px;color:#8da08d;">达成即奖金币+研发点，进度自动累计</p>
       ${ACHIEVEMENTS.map((a) => {
         const ok = done.includes(a.id);
@@ -7568,13 +7568,15 @@ if (mapBtn) mapBtn.addEventListener('click', () => { mapIndex = (mapIndex + 1) %
 if (worldwarBtn) worldwarBtn.addEventListener('click', () => { worldwar = !worldwar; renderWorldwarBtn(); renderLoadout(); });
 if (soloBtn) soloBtn.addEventListener('click', () => { solo = !solo; soloBtn.textContent = `👥 队友：${solo ? '无' : '有'}`; soloBtn.classList.toggle('active', solo); renderLoadout(); });
 if (techtreeBtn) techtreeBtn.addEventListener('click', openTechTree);
-if (techtreeBtn) {
-  const ab = document.createElement('button');
-  ab.className = 'mode-btn';
-  ab.textContent = '🏆 成就';
-  ab.style.marginTop = '8px';
-  techtreeBtn.parentNode.insertBefore(ab, techtreeBtn.nextSibling);
-  ab.addEventListener('click', toggleAchievements);
+{
+  const sb = document.getElementById('btn-settings');
+  if (sb) {
+    const ab = document.createElement('button');
+    ab.className = 'mode-btn';
+    ab.textContent = '🏆 成就';
+    sb.parentNode.insertBefore(ab, sb);   // 与科技树/设置同排（设置前面），整齐不换行错位
+    ab.addEventListener('click', toggleAchievements);
+  }
 }
 if (techtreeEl) techtreeEl.addEventListener('click', (e) => {
   const card = e.target.closest('.tt-card');
