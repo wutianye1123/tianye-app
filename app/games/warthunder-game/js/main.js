@@ -5493,9 +5493,8 @@ class Game {
       this.hud.setCenterMessage(t.health < t.maxHealth
         ? `🔧 修车中… ${Math.floor(t.health)}/${t.maxHealth}`
         : '🔧 修理零件中…');
-    } else if (this._autoRepair && !(t.modules && (t.modules.track > 0 || t.modules.barrel > 0 || t.modules.engine > 0)) && t.health >= t.maxHealth) {
-      this._autoRepair = false;   // 全修好自动关（省心）
-      this.hud.setCenterMessage('');
+    } else if (this._repairing || (this._autoRepair && t.health < t.maxHealth)) {
+      this.hud.setCenterMessage('');   // 修完收提示；自动修理保持常开（再挨打继续修），只有双击 R 手动关
     }
 
     if (inp.mouseDown) t.tryFire(this.em);
@@ -5569,10 +5568,19 @@ class Game {
       return;
     }
     // 指针锁定时用"虚拟瞄准点"（累积鼠标移动，光标不会飞出窗口）；未锁定时用光标绝对位置。
+    // 直升机炮手视角的坦克式增量必须【最先】消费 movement——通用段消费后归零，炮手视角会"转不动"。
+    if (p.isHeli && this.heliGunner) {
+      let mdx, mdy;
+      if (document.pointerLockElement === this.canvas) { const mv = inp.consumeMovement(); mdx = mv.x; mdy = mv.y; }
+      else { inp.consumeMovement(); mdx = inp.mouseX - (this._lastMx ?? inp.mouseX); mdy = inp.mouseY - (this._lastMy ?? inp.mouseY); }
+      this._lastMx = inp.mouseX; this._lastMy = inp.mouseY;
+      this._heliGunnerMv = { x: mdx, y: mdy };
+    } else this._heliGunnerMv = null;
     let ndc;
     if (document.pointerLockElement === this.canvas) {
       const mv = inp.consumeMovement();
-      ndc = inp.aimVirtualNDC(mv.x, mv.y, 0.003);
+      if (this._heliGunnerMv) ndc = this._planeAimNDC || { x: 0, y: 0 };   // 炮手视角十字钉中心，虚拟点不用
+      else ndc = inp.aimVirtualNDC(mv.x, mv.y, 0.003);
     } else {
       inp.consumeMovement();
       ndc = inp.getNDC();
@@ -5588,10 +5596,8 @@ class Game {
       // ②第三人称：光标绝对位置=准星（世界命中点吸敌球，弹从机头指向该点消视差）。
       // WASD=飞行（W/S 前后倾、A/D 偏航），Shift 爬升 / Space 下降。
       if (this.heliGunner) {
-        let mdx, mdy;
-        if (document.pointerLockElement === this.canvas) { const mv = inp.consumeMovement(); mdx = mv.x; mdy = mv.y; }
-        else { inp.consumeMovement(); mdx = inp.mouseX - (this._lastMx ?? inp.mouseX); mdy = inp.mouseY - (this._lastMy ?? inp.mouseY); }
-        this._lastMx = inp.mouseX; this._lastMy = inp.mouseY;
+        const mdx = this._heliGunnerMv ? this._heliGunnerMv.x : 0;
+        const mdy = this._heliGunnerMv ? this._heliGunnerMv.y : 0;
         this._heliAimYaw = (this._heliAimYaw ?? p.heading) - mdx * 0.0026;                 // 同坦克 YAW_SENS
         this._heliAimPitch = clamp((this._heliAimPitch ?? -0.2) - mdy * 0.0022, -1.25, 0.5);
         const nose = p.getMuzzleWorld(_heliAimV);
