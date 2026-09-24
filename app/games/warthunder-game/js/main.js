@@ -4562,6 +4562,7 @@ function createTerrain(scene, mode, mapId) {
     }
   }
 
+  let trees = [];   // 树实例数据（InstancedMesh 用，循环后统一构建）
   // 散落掩体：类型按地图 mix 配比；位置在 ±spread 内
   const mix = theme.mix || { building: 0.3, rock: 0.25, tree: 0.3, wall: 0.15 };
   const types = Object.keys(mix);
@@ -4572,7 +4573,7 @@ function createTerrain(scene, mode, mapId) {
     if (nearZone(x, z)) continue;   // 据点周边留空（散落掩体也别糊点）
     const type = pickType();
     let mesh, radius;
-    trees = trees || [];   // 树实例数据（InstancedMesh 用，循环后统一构建）
+    // （trees 已在循环外声明）
     if (type === 'building') {
       const w = randRange(8, 18), h = randRange(7, 22), d = randRange(8, 18);
       mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: buildPal, roughness: 0.9 }));
