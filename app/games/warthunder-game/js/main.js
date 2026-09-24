@@ -2300,7 +2300,12 @@ class Tank {
         const wheel = new THREE.Mesh(new THREE.CylinderGeometry(r, r, w, 14), mat || darkMat);
         wheel.rotation.z = Math.PI / 2;
         wheel.position.set(sx * trackX, y !== undefined ? y : wheelR, z);
-        this.group.add(wheel);   // 轮子在履带内部，影子被履带盖住——不进阴影 pass（省 draw call）
+        this.group.add(wheel);
+        // 轮辋：外侧金属圆盘（外胎+轮辋的双圈层次，真实车轮）
+        const rim = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.55, r * 0.55, w * 1.15, 10), metalMat);
+        rim.rotation.z = Math.PI / 2;
+        rim.position.set(sx * (trackX + 0.02), y !== undefined ? y : wheelR, z);
+        this.group.add(rim);
         return wheel;
       };
       if (g.susp === 'interleave') {
@@ -2517,10 +2522,16 @@ class Tank {
         add(new THREE.Mesh(new THREE.LatheGeometry(pts, 16), bodyMat));
         break;
       }
-      case 'box':   // 焊接方炮塔（虎I/黑豹）：带斜前装甲（真实就是 welded 方块）
+      case 'box': { // 焊接方炮塔（虎I/黑豹）：斜前装甲+左右侧斜板（楔形拼接的真实焊接塔）
         add(new THREE.Mesh(new THREE.BoxGeometry(tw, th, tw * 1.1), bodyMat));
         add(new THREE.Mesh(new THREE.BoxGeometry(tw * 0.85, th * 0.7, tw * 0.25), bodyMat), 0, 0, tw * 0.55, -0.5);
+        for (const sxs of [-1, 1]) {   // 侧斜板：外倾 15°，顶部收窄
+          const side = new THREE.Mesh(new THREE.BoxGeometry(tw * 0.16, th * 0.95, tw * 0.95), bodyMat);
+          side.position.set(sxs * tw * 0.52, 0, 0); side.rotation.z = -sxs * 0.26;
+          add(side);
+        }
         break;
+      }
       case 'flat':  // 现代低矮方炮塔（T-80U）
         add(new THREE.Mesh(new THREE.BoxGeometry(tw, th, tw * 1.0), bodyMat));
         add(new THREE.Mesh(new THREE.BoxGeometry(tw * 0.5, th * 0.6, tw * 0.3), bodyMat), 0, th * 0.2, tw * 0.5);
