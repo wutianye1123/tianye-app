@@ -457,6 +457,9 @@ class HUD {
       <div id="reload-ring"></div>
       <div id="dmg-dir"></div>
       <div id="bounce-tip"></div>
+      <div id="ccip-ring"></div>
+      <div id="ai-status"></div>
+      <div id="squad-panel"></div>
       <div id="msl-warn">⚠ 导弹来袭 ⚠</div>
       <div id="msl-vignette"></div>
       <div id="hitmarker"></div>
@@ -500,6 +503,39 @@ class HUD {
     this.bounceTip = container.querySelector('#bounce-tip');
     this.mslWarn = container.querySelector('#msl-warn');
     this.mslVig = container.querySelector('#msl-vignette');
+    this.ccipRing = container.querySelector('#ccip-ring');
+    this.aiStatus = container.querySelector('#ai-status');
+    this.squadPanel = container.querySelector('#squad-panel');
+  }
+
+  // AI 代打仪表：目标/阶段/规避状态（0.2s 更新一次即可，由 Game 驱动）
+  setAiStatus(lines) {
+    if (!this.aiStatus) this.aiStatus = this.container.querySelector('#ai-status');
+    if (!this.aiStatus) return;
+    if (!lines) { this.aiStatus.style.display = 'none'; return; }
+    this.aiStatus.style.display = 'block';
+    this.aiStatus.innerHTML = lines;
+  }
+
+  // 队友面板：名字+血条+正在打谁
+  setSquadPanel(rows) {
+    if (!this.squadPanel) this.squadPanel = this.container.querySelector('#squad-panel');
+    if (!this.squadPanel) return;
+    if (!rows || !rows.length) { this.squadPanel.innerHTML = ''; return; }
+    this.squadPanel.innerHTML = rows.map((r) =>
+      `<div class="sq-row">${r.dead ? '💀' : '🔵'} ${r.name}` +
+      (r.dead ? '' : `<div class="sq-hp" style="width:${Math.round(r.hp * 100)}%;background:${r.hp > 0.5 ? '#57c46a' : (r.hp > 0.25 ? '#d8b84a' : '#d85a4a')}"></div>${r.target ? `<span style="color:#8da08d;font-size:10px">→ ${r.target}</span>` : ''}`) +
+      `</div>`).join('');
+  }
+
+  // 火箭 CCIP 落点圈（直升机）：投影 NDC → 屏幕位置。
+  positionCcip(ndcX, ndcY, on) {
+    if (!this.ccipRing) this.ccipRing = this.container.querySelector('#ccip-ring');
+    if (!this.ccipRing) return;
+    if (!on || ndcY > 1) { this.ccipRing.style.display = 'none'; return; }
+    this.ccipRing.style.display = 'block';
+    this.ccipRing.style.left = `${(ndcX * 0.5 + 0.5) * window.innerWidth}px`;
+    this.ccipRing.style.top = `${(-ndcY * 0.5 + 0.5) * window.innerHeight}px`;
   }
 
   // 导弹来袭警告（RWR）：红字闪烁+全屏红晕脉冲；on=false 全部熄灭。
@@ -1747,6 +1783,13 @@ class EntityManager {
   addEffect(e) {
     this.effects.push(e); if (e.mesh) this.scene.add(e.mesh);
     if (e.isExplosion && this.sfx) this.sfx.explosion(e.mesh.position);
+    // 爆炸屏震：近距爆炸镜头猛抖（强度随距离衰减），战场的冲击感
+    if (e.isExplosion && this.listener) {
+      const d = e.mesh.position.distanceTo(this.listener.position);
+      const sz = (e.core && e.core.scale.x) || 1;
+      const k = clamp((1 - d / (30 + sz * 22)) * sz * 0.5, 0, 1.2);
+      if (k > 0) { this._shake = Math.min(1.4, (this._shake || 0) + k); }
+    }
     // 近地爆炸留弹坑（命中载具的空中爆炸不留）
     if (e.isExplosion) {
       const s = e.core ? e.core.scale.x : 1;
@@ -5503,6 +5546,7 @@ class Game {
     }
     if (this.aiPilot) {
       inp.consumeMovement();   // 排空鼠标累积（关闭 AI 瞬间不跳变）
+      this.hud.positionCcip(0, 2, false);   // AI 代打不需要 CCIP 圈
       // 接管句柄失效判定（换机/重生后重建；运算符显式加括号防每帧误重建 new 风暴）
       const stale = p.isHeli
         ? (!this._pilotSaved || this._pilotSaved.t !== p)
@@ -5534,6 +5578,7 @@ class Game {
     }
     this._planeAimNDC = ndc;   // 供 _animate 把准星画在虚拟瞄准点（指针锁定后 clientX/Y 会冻结）
     const ny = this.settings.invertY ? -ndc.y : ndc.y;
+    if (!p.isHeli) this.hud.positionCcip(0, 2, false);   // 非直升机关 CCIP 圈
     p.mouseAim(-ndc.x * this.settings.planeGain, ny * this.settings.planeGain, dt); // 水平方向校准：光标左移→左转
 
     if (p.isHeli) {
@@ -5544,6 +5589,25 @@ class Game {
       const rd = this.raycaster.ray.direction;
       const rt = this._rayAimHit(this.camera.position.x, this.camera.position.y, this.camera.position.z, rd.x, rd.y, rd.z);
       p.setAimPoint(_tmpV3.copy(this.camera.position).addScaledVector(rd, rt >= 0 ? rt : 300));
+      // 火箭 CCIP 落点圈：模拟火箭弹道（同 tryFireRockets 物理含下坠补偿）→ 落点投影
+      {
+        const mz = p.getMuzzleWorld(_heliAimV);
+        const d0 = p._aimPoint ? p._aimPoint.distanceTo(mz) : 120;
+        const elev = Math.atan2(0.5 * 6 * Math.pow(d0 / 175, 2), Math.max(20, d0));
+        const dir = p._fireDir(); dir.y += elev; dir.normalize();
+        let vx = dir.x * 175, vy = dir.y * 175, vz = dir.z * 175;
+        let px2 = mz.x, py2 = mz.y, pz2 = mz.z;
+        const hh = 0.05;
+        let land = null;
+        for (let i = 0; i < 300; i++) {
+          vy -= 6 * hh; px2 += vx * hh; py2 += vy * hh; pz2 += vz * hh;
+          if (py2 <= terrainHeight(px2, pz2)) { land = true; break; }
+        }
+        if (land) {
+          const pp = _tmpV3.set(px2, py2, pz2).project(this.camera);
+          this.hud.positionCcip(pp.x, pp.y, pp.z < 1);
+        } else this.hud.positionCcip(0, 2, false);
+      }
       p.setClimb((inp.isDown('ShiftLeft') || inp.isDown('ShiftRight') ? 1 : 0) + (inp.isDown('Space') ? -1 : 0));
       p.setYawInput((inp.isDown('KeyA') ? 1 : 0) - (inp.isDown('KeyD') ? 1 : 0));
       p.setPitchInput((inp.isDown('KeyW') ? 1 : 0) - (inp.isDown('KeyS') ? 1 : 0));
@@ -5823,6 +5887,28 @@ class Game {
       this.hud.hideScope();   // 阵亡/切载具：镜筒遮罩撤掉
       this.hud.setCrosshairVisible(true);
       this.hud.hideLockPrompt();
+    }
+    // —— AI 代打仪表（0.2s 节流）+ 队友面板（0.3s 节流） ——
+    this._hudT = (this._hudT || 0) - dt;
+    if (this._hudT <= 0) {
+      this._hudT = 0.25;
+      if (this.aiPilot && this.player && this.player.alive) {
+        const ai = this._pilotAI;
+        let phase = '—', tgt = this._markedTarget && this._markedTarget.alive ? this._markedTarget.typeName : '最近敌';
+        if (this.player.isHeli) phase = (this._pilotHeliAI && this._pilotHeliAI._evadeT > 0) ? '规避机动' : '盘旋攻击';
+        else if (ai && ai.phase) phase = (ai._evadeT > 0) ? '规避机动' : ({ cruise: '高空巡航', dive: '俯冲攻击', climb: '拉起脱离' })[ai.phase] || ai.phase;
+        const hp = Math.round(this.player.health / this.player.maxHealth * 100);
+        this.hud.setAiStatus(`🤖 <b>AI 代打中</b>\n阶段：${phase}\n目标：${tgt}\n本机：${hp}%${this._autoRepair ? ' 🔧自动修理' : ''}`);
+      } else this.hud.setAiStatus(null);
+      // 队友面板
+      if (this.allies && this.allies.length) {
+        this.hud.setSquadPanel(this.allies.map((a) => ({
+          name: a.displayName || '队友',
+          dead: !a.alive,
+          hp: a.alive ? a.health / a.maxHealth : 0,
+          target: (a.ai && a.ai._sticky && a.ai._sticky.alive) ? (a.ai._sticky.typeName || '敌车') : null,
+        })));
+      } else this.hud.setSquadPanel(null);
     }
     // —— RWR 导弹来袭警告：有追踪弹锁定玩家载具 → 红字+红晕+急促警报（0.35s 节奏重复） ——
     if (this.state === 'playing' && this.player && this.player.alive) {
@@ -6134,6 +6220,14 @@ class Game {
       } catch (e) {}
     }
     // CCIP 炸弹落点标记的计算已合并到上方主 try 内（原此处重复了一份 1500 步模拟，每帧白跑一遍，已删）
+    // 爆炸屏震：渲染前对相机施加随机偏转（每帧衰减；相机下一帧 lookAt 自动复位）
+    if ((this._shake || 0) > 0.01) {
+      const s = this._shake;
+      this.camera.rotateZ(randRange(-1, 1) * s * 0.03);
+      this.camera.rotateX(randRange(-1, 1) * s * 0.025);
+      this.camera.rotateY(randRange(-1, 1) * s * 0.02);
+      this._shake *= Math.pow(0.001, dt);   // 指数衰减（约 0.35s 抖完）
+    }
     // 终局回放：全屏渲染回放相机（贴弹丸跟拍），主相机画面让位
     if (this._shellcam && this._shellcam.fullscreen) {
       this.postfx.render(this.scene, this._shellcam.cam);
@@ -6895,6 +6989,7 @@ class Game {
     this.hud.hideBigMap();                // 大地图/战绩板也撤掉
     this.hud.hideScoreboard();
     this.hud.setMissileWarn(false); this._mslWarnOn = false;   // RWR 警告熄灭
+    this.hud.setAiStatus(null); this.hud.setSquadPanel(null); this.hud.positionCcip(0, 2, false);   // 仪表/面板/圈清理
     this.hud.positionLead(0, 0, false);   // 结束时清提前量瞄准环，防卡屏残留
     if (this._bombX) this._bombX.style.display = 'none';
     this.hud.setCenterMessage('');

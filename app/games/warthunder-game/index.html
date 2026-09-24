@@ -305,6 +305,61 @@ html, body {
 }
 @keyframes dmgFade { 0% { opacity: 1; } 70% { opacity: 0.75; } 100% { opacity: 0; } }
 
+/* AI 代打仪表：屏幕左下小状态行（模式/目标/阶段） */
+#ai-status {
+  position: absolute;
+  left: 14px; bottom: 120px;
+  font: 12px/1.5 "Microsoft YaHei", sans-serif;
+  color: #9fe0b0;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  pointer-events: none;
+  display: none;
+  white-space: pre-line;
+}
+
+/* 队友面板：右侧存活/血量/目标列表 */
+#squad-panel {
+  position: absolute;
+  right: 14px; top: 46%;
+  width: 168px;
+  font: 11px/1.6 "Microsoft YaHei", sans-serif;
+  color: #bcd8c0;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  pointer-events: none;
+}
+#squad-panel .sq-row {
+  margin-bottom: 3px;
+  padding: 2px 6px;
+  background: rgba(0,0,0,0.35);
+  border-radius: 5px;
+}
+#squad-panel .sq-hp {
+  height: 3px; border-radius: 2px;
+  background: #57c46a; margin-top: 2px;
+  transition: width 0.3s ease;
+}
+
+/* 火箭 CCIP 落点圈：橙色虚线圈=火箭弹会落在哪（直升机手动模式） */
+#ccip-ring {
+  position: absolute;
+  width: 44px; height: 44px;
+  margin: -22px 0 0 -22px;
+  border: 2px dashed rgba(255, 160, 60, 0.9);
+  border-radius: 50%;
+  pointer-events: none;
+  display: none;
+  box-shadow: 0 0 8px rgba(255, 140, 40, 0.4);
+}
+#ccip-ring::after {
+  content: "";
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 4px; height: 4px;
+  margin: -2px 0 0 -2px;
+  background: rgba(255, 200, 120, 0.95);
+  border-radius: 50%;
+}
+
 /* 导弹来袭警告（RWR）：顶部红字闪烁 + 全屏红色边框脉冲 */
 #msl-warn {
   position: absolute;
