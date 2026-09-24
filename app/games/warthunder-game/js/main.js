@@ -1911,6 +1911,7 @@ class EntityManager {
         // 落地弹留小弹坑（贴地死亡=未命中任何东西的弹）
         if (p.mesh.position.y - terrainHeight(p.mesh.position.x, p.mesh.position.z) < 1.2) this.addCrater(p.mesh.position, p.size * 5);
         // 几何/材质已全局缓存共享（projGeo/projMat），不在此 dispose（否则毁掉缓存）
+        let _nuked = 0;
         if (p.isBomb) {   // 炸弹落地/命中：范围爆炸（冲击波）
           const _bp = p.mesh.position.clone();
           const _nuke = p.isNuke;
@@ -1920,8 +1921,9 @@ class EntityManager {
           for (const t of [...this.tanks, ...this.planes]) {
             if (!t.alive || t === p.owner) continue;
             const _d = t.position.distanceTo(_bp);
-            if (_d < _R) { t.onHit(p.damage * (_nuke ? Math.max(0.7, 1 - _d / _R) : Math.max(0.6, 1 - _d / _R))); t._lastAttacker = p.owner; }
+            if (_d < _R) { t.onHit(p.damage * (_nuke ? Math.max(0.7, 1 - _d / _R) : Math.max(0.6, 1 - _d / _R))); t._lastAttacker = p.owner; _nuked++; }
           }
+          if (_nuke && _nuked > (meta.astats.nukeBest || 0)) { meta.astats.nukeBest = _nuked; checkAchievements(); }
         }
         return false;
       }
@@ -4770,6 +4772,7 @@ class Game {
     this.planeType = planeType;
     this.endless = endless;
     this.objective = mode === 'tank' ? objective : 'battle';   // 'battle'(歼灭) | 'capture'(占领，仅陆战)
+    this.solo = solo;   // 无队友模式（成就用）
     this.mapId = mode === 'tank' ? mapId : 'open';             // 地图主题（仅陆战）
     this._isNight = !!(MAPS.find((m) => m.id === this.mapId) || {}).night;   // 夜战：月光+星空+车头灯
     this._isRain = !!(MAPS.find((m) => m.id === this.mapId) || {}).rain;     // 雨天：雨幕+湿滑反光
@@ -5170,15 +5173,16 @@ class Game {
   _makePlayer() {
     const base = this._playerBasePos();
     if (this.mode === 'tank') {
-      this.player = new Tank({ side: 'player', color: 0x4f7a3a, type: this.tankType });
+      this.player = new Tank({ side: 'player', color: (meta.paints || {})[this.tankType] != null ? meta.paints[this.tankType] : 0x4f7a3a, type: this.tankType });   // 涂装色
       if (this._shellPref) this.player.shellKind = this._shellPref;   // 弹种偏好跨重生保留
       this.player.group.position.copy(base);
       this.player.heading = 0;
       this.em.addTank(this.player);
     } else {
+      const _pc = (meta.paints || {})[this.planeType] != null ? meta.paints[this.planeType] : null;
       this.player = planeTypeById(this.planeType).heli
-        ? new Heli({ side: 'player', color: 0x3a5a3a, type: this.planeType })
-        : new Plane({ side: 'player', color: 0x3a6b9e, type: this.planeType });
+        ? new Heli({ side: 'player', color: _pc != null ? _pc : 0x3a5a3a, type: this.planeType })
+        : new Plane({ side: 'player', color: _pc != null ? _pc : 0x3a6b9e, type: this.planeType });   // 涂装色
       this.player.group.position.copy(base);
       this.player.group.quaternion.identity();
       this.em.addPlane(this.player);
@@ -6728,6 +6732,10 @@ class Game {
         const isPlayerKill = (atk === playerRef);
         if (this.worldwar) { this.sp = Math.min(9999, this.sp + (isPlayerKill ? 300 : 120)); if (isPlayerKill) this.hud.addFeed('+' + 300 + 'SP', 'info'); }
         if (isPlayerKill) {
+          meta.astats.kills = (meta.astats.kills || 0) + 1;
+          if (this.player && this.player.isHeli) meta.astats.heliKills = (meta.astats.heliKills || 0) + 1;
+          if (wasBoss) meta.astats.bossKills = (meta.astats.bossKills || 0) + 1;
+          checkAchievements();
           this._streak = (this._streakT > 0) ? this._streak + 1 : 1;
           this._streakT = 8;
           if (this._streak >= 2) {
@@ -7032,6 +7040,11 @@ class Game {
     this.hud.hideScoreboard();
     this.hud.setMissileWarn(false); this._mslWarnOn = false;   // RWR 警告熄灭
     this.hud.setAiStatus(null); this.hud.setSquadPanel(null); this.hud.positionCcip(0, 2, false);   // 仪表/面板/圈清理
+    // 成就累计：跳弹数/波次/单挑胜场 → 检查解锁
+    meta.astats.bounces = (meta.astats.bounces || 0) + (this.stats ? this.stats.bounce : 0);
+    if (this.objective === 'waves') meta.astats.bestWave = Math.max(meta.astats.bestWave || 0, this.wave || 0);
+    if (win && this.solo) meta.astats.soloWins = (meta.astats.soloWins || 0) + 1;
+    checkAchievements(); saveMeta();
     this.hud.positionLead(0, 0, false);   // 结束时清提前量瞄准环，防卡屏残留
     if (this._bombX) this._bombX.style.display = 'none';
     this.hud.setCenterMessage('');
@@ -7121,6 +7134,30 @@ const rpEl = document.getElementById('rp');
 const techtreeEl = document.getElementById('techtree');
 const techtreeBtn = document.getElementById('btn-tech');
 
+// —— 成就面板 ——
+function toggleAchievements() {
+  let el = document.getElementById('achv-panel');
+  if (el) { el.remove(); return; }
+  el = document.createElement('div');
+  el.id = 'achv-panel';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(6,10,8,0.82);z-index:120;display:flex;align-items:center;justify-content:center;';
+  const done = meta.achievements || [];
+  el.innerHTML = `
+    <div style="width:min(560px,92vw);max-height:80vh;overflow-y:auto;background:rgba(24,34,26,0.97);border:1px solid rgba(150,180,150,0.4);border-radius:14px;padding:20px 24px;">
+      <h2 style="color:#cfe8c0;margin:0 0 4px;">🏆 成就 <span style="font-size:13px;color:#8da08d">${done.length}/${ACHIEVEMENTS.length}</span></h2>
+      <p class="tip" style="margin:0 0 12px;font-size:12px;color:#8da08d;">达成即奖金币+研发点，进度自动累计</p>
+      ${ACHIEVEMENTS.map((a) => {
+        const ok = done.includes(a.id);
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;margin:4px 0;border-radius:8px;background:${ok ? 'rgba(70,110,70,0.35)' : 'rgba(30,40,32,0.5)'};opacity:${ok ? 1 : 0.65}">
+          <div><b style="color:${ok ? '#a8e8a0' : '#9ab09a'}">${ok ? '🏆' : '🔒'} ${a.name}</b><div style="font-size:11px;color:#8da08d">${a.desc}</div></div>
+          <div style="color:#ffd86b;font-size:12px;white-space:nowrap">+${a.reward}💰</div>
+        </div>`;
+      }).join('')}
+      <button class="lo-btn" style="margin-top:12px;width:100%" onclick="document.getElementById('achv-panel').remove()">关闭</button>
+    </div>`;
+  document.body.appendChild(el);
+}
+
 // 出战选择页元素
 const loEls = {
   mode: document.getElementById('lo-mode'),
@@ -7135,6 +7172,71 @@ const loEls = {
   start: document.getElementById('lo-start'),
 };
 let pendingMode = 'tank';
+
+// —— 成就系统：局内/累计事件驱动，达成即奖励金币+研发点 ——
+const ACHIEVEMENTS = [
+  { id: 'first_blood', name: '首开纪录', desc: '击毁第一辆敌车', reward: 200, cond: (s) => s.kills >= 1 },
+  { id: 'kills_50',    name: '老兵', desc: '累计击毁 50 个目标', reward: 800, cond: (s) => s.kills >= 50 },
+  { id: 'kills_200',   name: '王牌车长', desc: '累计击毁 200 个目标', reward: 2500, cond: (s) => s.kills >= 200 },
+  { id: 'bounce_50',   name: '装甲大师', desc: '累计打出 50 次跳弹', reward: 600, cond: (s) => s.bounces >= 50 },
+  { id: 'nuke_5',      name: '一锅端', desc: '核弹一次波及 ≥5 辆坦克', reward: 1500, cond: (s) => s.nukeBest >= 5 },
+  { id: 'heli_20',     name: '低空死神', desc: '用直升机累计击毁 20 个目标', reward: 1000, cond: (s) => s.heliKills >= 20 },
+  { id: 'wave_10',     name: '波次守卫者', desc: '波次生存撑到第 10 波', reward: 1200, cond: (s) => s.bestWave >= 10 },
+  { id: 'solo_win',    name: '独行侠', desc: '无队友模式获胜一局', reward: 1500, cond: (s) => s.soloWins >= 1 },
+  { id: 'boss_kill',   name: '巨人杀手', desc: '击毁一只精英 Boss', reward: 800, cond: (s) => s.bossKills >= 1 },
+];
+function checkAchievements() {
+  for (const a of ACHIEVEMENTS) {
+    if (meta.achievements.includes(a.id)) continue;
+    let ok = false;
+    try { ok = a.cond(meta.astats); } catch (e) {}
+    if (ok) {
+      meta.achievements.push(a.id);
+      meta.money += a.reward; meta.rp += Math.round(a.reward * 0.4);
+      saveMeta();
+      try { if (game && game.hud) game.hud.addFeed(`🏆 成就解锁：${a.name}（+${a.reward}💰）`, 'kill'); } catch (e) {}
+    }
+  }
+}
+
+// —— 车库 3D 预览：出战页 220×220 独立小场景，360° 展示当前车型（真实模型+涂装色） ——
+let _pv = null;   // { renderer, scene, cam, root, raf }
+function updatePreview3d(isTank, typeId, paintHex) {
+  const cv = document.getElementById('lo-preview3d');
+  if (!cv) return;
+  if (!_pv) {
+    const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    renderer.setSize(220, 220, false);
+    const scene = new THREE.Scene();
+    scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+    const sun = new THREE.DirectionalLight(0xffe8c0, 1.2); sun.position.set(3, 6, 4); scene.add(sun);
+    const rim = new THREE.DirectionalLight(0x88aaff, 0.5); rim.position.set(-4, 2, -3); scene.add(rim);
+    const cam = new THREE.PerspectiveCamera(38, 1, 0.5, 200);
+    cam.position.set(0, 5.5, 15); cam.lookAt(0, 2, 0);
+    _pv = { renderer, scene, cam, root: null, raf: 0 };
+    const tick = () => {
+      _pv.raf = requestAnimationFrame(tick);
+      if (_pv.root) _pv.root.rotation.y += 0.006;
+      if (!document.getElementById('loadout') || document.getElementById('loadout').classList.contains('hidden')) return;   // 页面隐藏时不渲染
+      _pv.renderer.render(_pv.scene, _pv.cam);
+    };
+    tick();
+  }
+  if (_pv.root) { _pv.scene.remove(_pv.root); }
+  const color = paintHex != null ? paintHex : undefined;
+  let obj;
+  if (isTank) obj = new Tank({ side: 'player', color: color != null ? color : 0x4a6b3a, type: typeId }).group;
+  else if (planeTypeById(typeId).heli) obj = new Heli({ side: 'player', color: color != null ? color : 0x3a5a3a, type: typeId }).group;
+  else obj = new Plane({ side: 'player', color: color != null ? color : 0x3a6b9e, type: typeId }).group;
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3()).length() || 10;
+  const s = 13 / size;
+  obj.scale.setScalar(s);
+  obj.position.y = -box.getCenter(new THREE.Vector3()).y * s;
+  _pv.scene.add(obj);
+  _pv.root = obj;
+}
 
 let game = null;
 let difficulty = 'normal';
@@ -7162,6 +7264,8 @@ function loadMeta() {
       m.researchedPlanes = Array.isArray(m.researchedPlanes) ? m.researchedPlanes : [];
       m.ownedPlanes = Array.isArray(m.ownedPlanes) ? m.ownedPlanes : ['fighter', 'trainer'];
       m.selectedPlane = m.selectedPlane || 'fighter';
+      m.paints = m.paints || {}; m.achievements = Array.isArray(m.achievements) ? m.achievements : [];
+      m.astats = m.astats || { kills: 0, bounces: 0, nukes: 0, bestWave: 0, heliKills: 0 };
       return m;
     }
   } catch {}
@@ -7170,6 +7274,7 @@ function loadMeta() {
     owned: ['medium', 'light'], selected: 'medium', researched: [],
     ownedPlanes: ['fighter', 'trainer'], selectedPlane: 'fighter', researchedPlanes: [],
     bestTankEndless: 0, bestPlaneEndless: 0,
+    paints: {}, achievements: [], astats: { kills: 0, bounces: 0, nukes: 0, bestWave: 0, heliKills: 0 },
   };
 }
 let meta = loadMeta();
@@ -7319,7 +7424,8 @@ function renderLoadout() {
   loEls.name.textContent = t.name;
   loEls.weapon.textContent = weaponDesc(isTank, t);
   loEls.stats.innerHTML = statBars(isTank, t);
-  loEls.summary.textContent = `难度：${DIFFICULTY_LABELS[difficulty]}　·　无尽：${endless ? '开' : '关'}${isTank ? `　·　目标：${objective === 'capture' ? '征服' : '歼灭'}　·　🗺 ${MAPS[mapIndex].name}` : ''}${worldwar ? '　·　🌍世界大战' : ''}　·　💰 ${meta.money}`;
+  loEls.summary.textContent = `难度：${DIFFICULTY_LABELS[difficulty]}　·　无尽：${endless ? '开' : '关'}${isTank ? `　·　目标：${objective === 'capture' ? '征服' : '歼灭'}　·　🗺 ${MAPS[mapIndex].name}` : ''}${worldwar ? '　·　🌍世界大战' : ''}${solo ? '　·　👥无队友' : ''}　·　💰 ${meta.money}`;
+  updatePreview3d(isTank, t.id, (meta.paints || {})[t.id]);   // 3D 预览（含涂装色）
   renderEndlessBtn();
   renderObjectiveBtn();
   renderMapBtn();
@@ -7343,6 +7449,28 @@ function renderLoadout() {
   } else {
     loEls.swapType.style.display = 'none';
   }
+  // 🎨 涂装按钮：循环色板（默认国家色→沙黄→雪白→丛林绿→城市灰）
+  if (!loEls.paintBtn) {
+    const btn = document.createElement('button');
+    btn.className = 'lo-btn';
+    btn.style.cssText = 'padding:6px 14px;font-size:13px;';
+    loEls.back.parentNode.insertBefore(btn, loEls.start);
+    loEls.paintBtn = btn;
+    btn.addEventListener('click', () => {
+      const { types, sel } = loadoutTypes();
+      const tt = types.find((x) => x.id === sel);
+      if (!tt) return;
+      const PAINTS = [null, 0xa89660, 0xe8e8e0, 0x44583a, 0x5a5f66];
+      const cur = (meta.paints || {})[tt.id] != null ? (meta.paints[tt.id] | 0) : null;
+      const idx = PAINTS.indexOf(cur);
+      const next = PAINTS[(idx + 1 + PAINTS.length) % PAINTS.length];
+      if (next == null) delete meta.paints[tt.id]; else meta.paints[tt.id] = next;
+      saveMeta();
+      renderLoadout();
+    });
+  }
+  const pcur = (meta.paints || {})[t.id];
+  loEls.paintBtn.textContent = `🎨 涂装：${pcur != null ? ['沙黄', '雪白', '丛林绿', '城市灰'][[0xa89660, 0xe8e8e0, 0x44583a, 0x5a5f66].indexOf(pcur | 0)] || '自定义' : '默认'}`;
   const cycling = owned.length > 1;
   loEls.prev.disabled = !cycling;
   loEls.next.disabled = !cycling;
@@ -7437,6 +7565,14 @@ if (mapBtn) mapBtn.addEventListener('click', () => { mapIndex = (mapIndex + 1) %
 if (worldwarBtn) worldwarBtn.addEventListener('click', () => { worldwar = !worldwar; renderWorldwarBtn(); renderLoadout(); });
 if (soloBtn) soloBtn.addEventListener('click', () => { solo = !solo; soloBtn.textContent = `👥 队友：${solo ? '无' : '有'}`; soloBtn.classList.toggle('active', solo); renderLoadout(); });
 if (techtreeBtn) techtreeBtn.addEventListener('click', openTechTree);
+if (techtreeBtn) {
+  const ab = document.createElement('button');
+  ab.className = 'mode-btn';
+  ab.textContent = '🏆 成就';
+  ab.style.marginTop = '8px';
+  techtreeBtn.parentNode.insertBefore(ab, techtreeBtn.nextSibling);
+  ab.addEventListener('click', toggleAchievements);
+}
 if (techtreeEl) techtreeEl.addEventListener('click', (e) => {
   const card = e.target.closest('.tt-card');
   if (!card) return;
