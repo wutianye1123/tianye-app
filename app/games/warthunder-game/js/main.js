@@ -4762,7 +4762,7 @@ class Sfx {
 }
 
 class Game {
-  constructor({ canvas, mode = 'tank', difficulty = 'normal', tankType = 'medium', planeType = 'fighter', endless = false, objective = 'battle', mapId = 'open', worldwar = false, ownedTanks = ['medium'], ownedPlanes = ['fighter'], hudContainer, onExit, onResult } = {}) {
+  constructor({ canvas, mode = 'tank', difficulty = 'normal', tankType = 'medium', planeType = 'fighter', endless = false, objective = 'battle', mapId = 'open', worldwar = false, solo = false, ownedTanks = ['medium'], ownedPlanes = ['fighter'], hudContainer, onExit, onResult } = {}) {
     this.canvas = canvas;
     this.mode = mode;
     this.difficulty = difficulty;
@@ -4997,7 +4997,7 @@ class Game {
     this.respawnTimer = -1;       // 玩家重生倒计时，-1 表示无
     this._enemySpawnTimer = -1;   // 敌方刷新倒计时
     this._allySpawnTimer = -1;    // 队友刷新倒计时
-    this.allyCount = R.allyCount; // 同屏队友数（受难度影响）
+    this.allyCount = solo ? 0 : R.allyCount; // 同屏队友数（受难度影响；无队友模式=0：单人硬闯）
     this._snapCam = true;
     this.state = 'playing';
     this.enemies = [];
@@ -5481,6 +5481,7 @@ class Game {
       else this._lastR = now;
     }
     this._repairing = (inp.isDown('KeyR') || this._autoRepair) && (t.health < t.maxHealth || modsBroken);
+    if (this._autoRepair && t.burning) { const ext = t.tryExtinguish(); if (ext) this.hud.addFeed('🔥 自动灭火', 'info'); }   // 自动修理附带自动灭火
     if (this._repairing) {
       // 边走边修：不影响移动/瞄准/开火（drive 已由 WASD 输入驱动，此处只回血修模块）
       if (t.health < t.maxHealth) t.health = Math.min(t.maxHealth, t.health + 15 * dt);
@@ -5655,6 +5656,7 @@ class Game {
       else this._lastR = now;
     }
     this._repairing = (inp.isDown('KeyR') || this._autoRepair) && p.health < p.maxHealth;
+    if (this._autoRepair && p.burning) { const ext = p.tryExtinguish(); if (ext) this.hud.addFeed('🔥 自动灭火', 'info'); }
     if (this._repairing) {
       p.health = Math.min(p.maxHealth, p.health + (p.isHeli && p.type === 'ah64' ? 35 : 12) * dt);   // AH-64 手动修理也 35/s
       this.hud.setCenterMessage(`🔧 维修中… ${Math.floor(p.health)}/${p.maxHealth}`);
@@ -7145,6 +7147,8 @@ const endlessBtn = document.getElementById('btn-endless');
 const objectiveBtn = document.getElementById('btn-objective');
 const mapBtn = document.getElementById('btn-map');
 const worldwarBtn = document.getElementById('btn-worldwar');
+const soloBtn = document.getElementById('btn-solo');
+let solo = false;   // 无队友模式
 
 // —— 存档：金币 / 已拥有坦克 / 当前选用 ——
 const STORAGE_KEY = 'warthunder_meta_v1';
@@ -7374,6 +7378,7 @@ function startGame(mode) {
     objective,
     mapId: MAPS[mapIndex].id,
     worldwar,
+    solo,
     ownedTanks: meta.owned,
     ownedPlanes: meta.ownedPlanes,
     hudContainer,
@@ -7430,6 +7435,7 @@ if (endlessBtn) endlessBtn.addEventListener('click', () => { endless = !endless;
 if (objectiveBtn) objectiveBtn.addEventListener('click', () => { objective = objective === 'battle' ? 'capture' : (objective === 'capture' ? 'waves' : 'battle'); renderObjectiveBtn(); renderLoadout(); });
 if (mapBtn) mapBtn.addEventListener('click', () => { mapIndex = (mapIndex + 1) % MAPS.length; renderMapBtn(); renderLoadout(); });
 if (worldwarBtn) worldwarBtn.addEventListener('click', () => { worldwar = !worldwar; renderWorldwarBtn(); renderLoadout(); });
+if (soloBtn) soloBtn.addEventListener('click', () => { solo = !solo; soloBtn.textContent = `👥 队友：${solo ? '无' : '有'}`; soloBtn.classList.toggle('active', solo); renderLoadout(); });
 if (techtreeBtn) techtreeBtn.addEventListener('click', openTechTree);
 if (techtreeEl) techtreeEl.addEventListener('click', (e) => {
   const card = e.target.closest('.tt-card');
