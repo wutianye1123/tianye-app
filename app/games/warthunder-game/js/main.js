@@ -7212,8 +7212,8 @@ function updatePreview3d(isTank, typeId, paintHex) {
     scene.add(new THREE.AmbientLight(0xffffff, 0.75));
     const sun = new THREE.DirectionalLight(0xffe8c0, 1.2); sun.position.set(3, 6, 4); scene.add(sun);
     const rim = new THREE.DirectionalLight(0x88aaff, 0.5); rim.position.set(-4, 2, -3); scene.add(rim);
-    const cam = new THREE.PerspectiveCamera(38, 1, 0.5, 200);
-    cam.position.set(0, 5.5, 15); cam.lookAt(0, 2, 0);
+    const cam = new THREE.PerspectiveCamera(38, 1, 0.1, 300);
+    cam.position.set(0, 4.2, 13); cam.lookAt(0, 0, 0);
     _pv = { renderer, scene, cam, root: null, raf: 0 };
     const tick = () => {
       _pv.raf = requestAnimationFrame(tick);
@@ -7230,10 +7230,13 @@ function updatePreview3d(isTank, typeId, paintHex) {
   else if (planeTypeById(typeId).heli) obj = new Heli({ side: 'player', color: color != null ? color : 0x3a5a3a, type: typeId }).group;
   else obj = new Plane({ side: 'player', color: color != null ? color : 0x3a6b9e, type: typeId }).group;
   const box = new THREE.Box3().setFromObject(obj);
-  const size = box.getSize(new THREE.Vector3()).length() || 10;
-  const s = 13 / size;
+  const sz = box.getSize(new THREE.Vector3());
+  // 用最大边适配视野（38° FOV 在 13 距离处半宽≈4.5，留边距取 7.6）；对角线适配会让宽车/大旋翼穿出画框
+  const maxDim = Math.max(sz.x, sz.y, sz.z) || 10;
+  const s = 7.6 / maxDim;
   obj.scale.setScalar(s);
-  obj.position.y = -box.getCenter(new THREE.Vector3()).y * s;
+  const ctr = box.getCenter(new THREE.Vector3());
+  obj.position.set(-ctr.x * s, -ctr.y * s, -ctr.z * s);   // 包围盒中心对到原点（相机看向原点）
   _pv.scene.add(obj);
   _pv.root = obj;
 }
