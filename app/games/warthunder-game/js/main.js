@@ -1516,6 +1516,9 @@ class PostFX {
     const w = Math.max(2, Math.floor(innerWidth * pr)), h = Math.max(2, Math.floor(innerHeight * pr));
     const mkRT = (tw, th) => new THREE.WebGLRenderTarget(tw, th, { type: THREE.HalfFloatType });
     this.rtScene = mkRT(w, h);
+    this.rtScene.depthTexture = new THREE.DepthTexture(w, h);   // SSAO：场景深度
+    this.rtAo = mkRT(Math.max(2, w >> 1), Math.max(2, h >> 1));   // AO buffer（半分辨率）
+    this.hq = false;   // 高清档：SSAO+锐化
     this.rtA = mkRT(Math.max(2, w >> 1), Math.max(2, h >> 1));
     this.rtB = mkRT(Math.max(2, w >> 1), Math.max(2, h >> 1));
     this.quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -1541,16 +1544,63 @@ class PostFX {
           s += (texture2D(tDiffuse, vUv + o2).rgb + texture2D(tDiffuse, vUv - o2).rgb) * 0.0702;
           gl_FragColor = vec4(s, 1.0); }`   // 5 tap 线性采样高斯
     });
-    this.matComp = new THREE.ShaderMaterial({
-      uniforms: { tDiffuse: { value: null }, tBloom: { value: null }, strength: { value: 0.85 } },
+    // —— SSAO（简化深度差采样）：16 向环形采样深度差 → 遮蔽，模糊由半分辨率天然柔化 ——
+    this.matSSAO = new THREE.ShaderMaterial({
+      uniforms: { tDepth: { value: null }, uProj: { value: new THREE.Vector2(1, 1) }, uNear: { value: 0.5 }, uFar: { value: 3000 } },
       vertexShader: vs,
-      fragmentShader: `uniform sampler2D tDiffuse; uniform sampler2D tBloom; uniform float strength; varying vec2 vUv;
+      fragmentShader: `uniform sampler2D tDepth; uniform vec2 uProj; uniform float uNear, uFar; varying vec2 vUv;
+        float linD(vec2 uv){ float z = texture2D(tDepth, uv).x * 2.0 - 1.0; return (2.0 * uNear * uFar) / (uFar + uNear - z * (uFar - uNear)); }
+        void main(){
+          float d = linD(vUv);
+          if (d > 900.0) { gl_FragColor = vec4(1.0); return; }   // 远处不算
+          float occ = 0.0;
+          for (int i = 0; i < 16; i++) {
+            float a = float(i) * 0.3927;   // 2π/16
+            vec2 off = vec2(cos(a), sin(a)) * (0.004 + 0.010 * fract(float(i) * 0.618));   // 金角螺旋半径
+            float ds = linD(vUv + off * uProj);
+            float diff = d - ds;
+            occ += clamp(diff * 0.08, 0.0, 1.0) * clamp(3.0 / (1.0 + diff * 0.05), 0.0, 1.0);   // 近差遮蔽、远差衰减
+          }
+          float ao = 1.0 - occ / 16.0 * 1.4;
+          gl_FragColor = vec4(vec3(clamp(ao, 0.35, 1.0)), 1.0);
+        }`
+    });
+    this.matComp = new THREE.ShaderMaterial({
+      uniforms: { tDiffuse: { value: null }, tBloom: { value: null }, strength: { value: 0.85 },
+        tAO: { value: null }, uAO: { value: 0 }, uSharp: { value: 0 },
+        uSun: { value: new THREE.Vector2(0.5, 0.5) }, uSunOn: { value: 0 }, uTexel: { value: new THREE.Vector2(1, 1) } },
+      vertexShader: vs,
+      fragmentShader: `uniform sampler2D tDiffuse; uniform sampler2D tBloom; uniform float strength;
+        uniform sampler2D tAO; uniform float uAO, uSharp, uSunOn; uniform vec2 uSun, uTexel; varying vec2 vUv;
         void main(){
           vec3 c = texture2D(tDiffuse, vUv).rgb + texture2D(tBloom, vUv).rgb * strength;
           // 色彩分级：轻降饱和 + 提对比 + 微冷调（电影感）
           float l = dot(c, vec3(0.2126,0.7152,0.0722));
           c = mix(vec3(l), c, 0.92);
           c = clamp((c - 0.5) * 1.06 + 0.5 + vec3(0.0, 0.004, 0.012), 0.0, 4.0);
+          // SSAO：乘环境光遮蔽（缝隙/轮拱/贴地处变暗——接地感）
+          if (uAO > 0.5) c *= mix(1.0, texture2D(tAO, vUv).r, 0.85);
+          // 轻锐化（unsharp 3×3）：高清档纹理更锐
+          if (uSharp > 0.5) {
+            vec3 nb = texture2D(tDiffuse, vUv + vec2(uTexel.x, 0.0)).rgb + texture2D(tDiffuse, vUv - vec2(uTexel.x, 0.0)).rgb
+                    + texture2D(tDiffuse, vUv + vec2(0.0, uTexel.y)).rgb + texture2D(tDiffuse, vUv - vec2(0.0, uTexel.y)).rgb;
+            c += (c * 4.0 - nb) * 0.22;
+          }
+          // God Rays：向太阳屏幕位置采样亮部拉光束（亮图自身近似遮挡）
+          if (uSunOn > 0.5) {
+            vec2 dir = uSun - vUv;
+            float sunDist = length(dir);
+            if (sunDist < 1.4) {
+              vec3 ray = vec3(0.0);
+              for (int i = 1; i <= 10; i++) {
+                float t = float(i) / 10.0;
+                vec2 sp = vUv + dir * t * 0.85;
+                vec3 s = texture2D(tBloom, sp).rgb;
+                ray += s * (1.0 - t) * (1.0 - sunDist * 0.5);
+              }
+              c += ray * 0.10 * (1.0 - sunDist * 0.45);
+            }
+          }
           // 暗角：四角压暗
           vec2 d = vUv - 0.5;
           c *= 1.0 - dot(d, d) * 0.55;
@@ -1562,13 +1612,23 @@ class PostFX {
     const pr = this.renderer.getPixelRatio();
     const W = Math.max(2, Math.floor(w * pr)), H = Math.max(2, Math.floor(h * pr));
     this.rtScene.setSize(W, H);
+    if (this.rtScene.depthTexture) { this.rtScene.depthTexture.dispose(); this.rtScene.depthTexture = new THREE.DepthTexture(W, H); }
+    this.rtAo.setSize(Math.max(2, W >> 1), Math.max(2, H >> 1));
     this.rtA.setSize(Math.max(2, W >> 1), Math.max(2, H >> 1));
     this.rtB.setSize(Math.max(2, W >> 1), Math.max(2, H >> 1));
   }
+  setQuality(hq) { this.hq = hq; }
+  setSunScreen(x, y, on) { this.matComp.uniforms.uSun.value.set(x, y); this.matComp.uniforms.uSunOn.value = on ? 1 : 0; }
   render(scene, camera) {
     const r = this.renderer;
     r.setRenderTarget(this.rtScene); r.render(scene, camera);
     const q = (mat, rt) => { this.quad.material = mat; r.setRenderTarget(rt); r.render(this.quadScene, this.quadCam); };
+    if (this.hq) {   // SSAO（高清档）：半分辨率深度差采样
+      this.matSSAO.uniforms.tDepth.value = this.rtScene.depthTexture;
+      this.matSSAO.uniforms.uProj.value.set(1 / this.rtAo.width, 1 / this.rtAo.height);
+      this.matSSAO.uniforms.uNear.value = camera.near; this.matSSAO.uniforms.uFar.value = camera.far;
+      q(this.matSSAO, this.rtAo);
+    }
     this.matBright.uniforms.tDiffuse.value = this.rtScene.texture;
     q(this.matBright, this.rtA);
     this.matBlur.uniforms.texel.value.set(1 / this.rtA.width, 1 / this.rtA.height);
@@ -1576,6 +1636,10 @@ class PostFX {
     this.matBlur.uniforms.tDiffuse.value = this.rtB.texture; this.matBlur.uniforms.dir.value.set(0, 1); q(this.matBlur, this.rtA);
     this.matComp.uniforms.tDiffuse.value = this.rtScene.texture;
     this.matComp.uniforms.tBloom.value = this.rtA.texture;
+    this.matComp.uniforms.tAO.value = this.rtAo.texture;
+    this.matComp.uniforms.uAO.value = this.hq ? 1 : 0;
+    this.matComp.uniforms.uSharp.value = this.hq ? 1 : 0;
+    this.matComp.uniforms.uTexel.value.set(1 / this.rtScene.width, 1 / this.rtScene.height);
     q(this.matComp, null);
   }
   dispose() {
@@ -4921,6 +4985,7 @@ class Game {
       const QM = [{ pr: 1.2, sh: 1024 }, { pr: 1.5, sh: 2048 }, { pr: 2.0, sh: 4096 }];
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, QM[_q].pr));
     }
+    this.postfx.setQuality(this._qLevel === 2);   // 高清档：SSAO+锐化
 
     this._onResize = () => this._handleResize();
     window.addEventListener('resize', this._onResize);
@@ -6034,6 +6099,7 @@ class Game {
           sun.shadow.mapSize.set(q.sh, q.sh);
           if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }   // 释放旧图让 three 按新尺寸重建
         }
+        if (this.postfx) this.postfx.setQuality(nl === 2);   // SSAO/锐化随档位
         this.hud.addFeed(`🎚 画质自适应：${['流畅', '均衡', '高清'][nl]}（${Math.round(avg)}fps）`, 'info');
       }
     }
@@ -6371,6 +6437,14 @@ class Game {
       } catch (e) {}
     }
     // CCIP 炸弹落点标记的计算已合并到上方主 try 内（原此处重复了一份 1500 步模拟，每帧白跑一遍，已删）
+    // God Rays：太阳世界位置投影到屏幕（屏内才开光束；雨/夜关）
+    if (this.postfx) {
+      const sunL = this.scene.userData.sun;
+      if (sunL && !this._isRain) {
+        _tmpV3.copy(sunL.position).multiplyScalar(6).project(this.camera);
+        this.postfx.setSunScreen(_tmpV3.x * 0.5 + 0.5, _tmpV3.y * 0.5 + 0.5, _tmpV3.z < 1 && Math.abs(_tmpV3.x) < 1.2 && Math.abs(_tmpV3.y) < 1.2);
+      } else this.postfx.setSunScreen(0.5, 0.5, false);
+    }
     // 爆炸屏震：渲染前对相机施加随机偏转（每帧衰减；相机下一帧 lookAt 自动复位）
     if ((this._shake || 0) > 0.01) {
       const s = this._shake;
