@@ -1568,16 +1568,24 @@ class PostFX {
     this.matComp = new THREE.ShaderMaterial({
       uniforms: { tDiffuse: { value: null }, tBloom: { value: null }, strength: { value: 0.85 },
         tAO: { value: null }, uAO: { value: 0 }, uSharp: { value: 0 },
-        uSun: { value: new THREE.Vector2(0.5, 0.5) }, uSunOn: { value: 0 }, uTexel: { value: new THREE.Vector2(1, 1) } },
+        uSun: { value: new THREE.Vector2(0.5, 0.5) }, uSunOn: { value: 0 }, uTexel: { value: new THREE.Vector2(1, 1) },
+        uTime: { value: 0 } },
       vertexShader: vs,
       fragmentShader: `uniform sampler2D tDiffuse; uniform sampler2D tBloom; uniform float strength;
-        uniform sampler2D tAO; uniform float uAO, uSharp, uSunOn; uniform vec2 uSun, uTexel; varying vec2 vUv;
+        uniform sampler2D tAO; uniform float uAO, uSharp, uSunOn; uniform vec2 uSun, uTexel; uniform float uTime; varying vec2 vUv;
+        float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         void main(){
-          vec3 c = texture2D(tDiffuse, vUv).rgb + texture2D(tBloom, vUv).rgb * strength;
+          vec2 cc = vUv - 0.5;
+          float ca = dot(cc, cc) * 0.9;   // 镜头色差：离中心越远 RGB 分离越大（真实镜头感）
+          vec3 c;
+          c.r = texture2D(tDiffuse, vUv + cc * ca * 0.0022).r;
+          c.g = texture2D(tDiffuse, vUv).g;
+          c.b = texture2D(tDiffuse, vUv - cc * ca * 0.0022).b;
+          c += texture2D(tBloom, vUv).rgb * strength;
           // 色彩分级：轻降饱和 + 提对比 + 微冷调（电影感）
           float l = dot(c, vec3(0.2126,0.7152,0.0722));
-          c = mix(vec3(l), c, 0.92);
-          c = clamp((c - 0.5) * 1.06 + 0.5 + vec3(0.0, 0.004, 0.012), 0.0, 4.0);
+          c = mix(vec3(l), c, 0.87);   // 降饱和：真实摄影质感
+          c = clamp((c - 0.5) * 1.04 + 0.5 + vec3(0.002, 0.004, 0.010), 0.0, 4.0);
           // SSAO：乘环境光遮蔽（缝隙/轮拱/贴地处变暗——接地感）
           if (uAO > 0.5) c *= mix(1.0, texture2D(tAO, vUv).r, 0.85);
           // 轻锐化（unsharp 3×3）：高清档纹理更锐
@@ -1604,6 +1612,8 @@ class PostFX {
           // 暗角：四角压暗
           vec2 d = vUv - 0.5;
           c *= 1.0 - dot(d, d) * 0.55;
+          // 胶片颗粒：细噪去 CG 数字感（像现实照片的底片感）
+          c += (hash(vUv * vec2(1920.0, 1080.0) + fract(uTime) * 7.13) - 0.5) * 0.028;
           gl_FragColor = vec4(pow(max(c, vec3(0.0)), vec3(0.4545)), 1.0);   // linear→sRGB
         }`
     });
@@ -1640,6 +1650,7 @@ class PostFX {
     this.matComp.uniforms.uAO.value = this.hq ? 1 : 0;
     this.matComp.uniforms.uSharp.value = this.hq ? 1 : 0;
     this.matComp.uniforms.uTexel.value.set(1 / this.rtScene.width, 1 / this.rtScene.height);
+    this.matComp.uniforms.uTime.value = performance.now() * 0.001;
     q(this.matComp, null);
   }
   dispose() {

@@ -24,12 +24,26 @@ export function randInt(a, b) {
 
 // —— Canvas 纹理生成器（云、天穹、迷彩、履带）——
 export function makeSkyTexture(topColor, bottomColor) {
-  const c = document.createElement('canvas'); c.width = 8; c.height = 256;
+  const c = document.createElement('canvas'); c.width = 64; c.height = 512;
   const x = c.getContext('2d');
   const hex = (n) => '#' + n.toString(16).padStart(6, '0');
-  const g = x.createLinearGradient(0, 0, 0, 256);
-  g.addColorStop(0, hex(topColor)); g.addColorStop(1, hex(bottomColor));
-  x.fillStyle = g; x.fillRect(0, 0, 8, 256);
+  // 三段大气渐变：天顶深→中段过渡→地平线暖雾带（真实天空亮度向地平线抬升）
+  const g = x.createLinearGradient(0, 0, 0, 512);
+  g.addColorStop(0, hex(topColor));
+  g.addColorStop(0.62, hex(bottomColor));
+  const b = bottomColor;
+  const warm = '#' + [Math.min(255, ((b >> 16) & 255) + 34), Math.min(255, ((b >> 8) & 255) + 22), Math.min(255, (b & 255) + 6)].map(v => v.toString(16).padStart(2, '0')).join('');
+  g.addColorStop(0.88, warm);   // 地平线暖雾（大气散射的米氏效应）
+  g.addColorStop(1, warm);
+  x.fillStyle = g; x.fillRect(0, 0, 64, 512);
+  // 极轻的高空水平层云纹理（拉丝，打破纯渐变的 CG 感）
+  x.globalAlpha = 0.05;
+  for (let i = 0; i < 24; i++) {
+    x.fillStyle = i % 2 ? '#ffffff' : hex(topColor);
+    const y = Math.random() * 200;
+    x.fillRect(0, y, 64, 1 + Math.random() * 2);
+  }
+  x.globalAlpha = 1;
   return new THREE.CanvasTexture(c);
 }
 export function makeCloudTexture() {
@@ -85,6 +99,14 @@ export function camoTexture(nation = 'rus') {
   for (let i = 0; i < 22; i++) {
     const sx = Math.random() * 256;
     x.beginPath(); x.moveTo(sx, Math.random() * 256); x.lineTo(sx + randRange(-6, 6), Math.random() * 256); x.stroke();
+  }
+  // 锈迹：橙棕小斑点集群（旧车金属露底氧化——真实磨损）
+  for (let i = 0; i < 18; i++) {
+    const rx = Math.random() * 256, ry = Math.random() * 256;
+    for (let j = 0; j < 6; j++) {
+      x.fillStyle = `rgba(${120 + Math.random() * 50 | 0}, ${60 + Math.random() * 25 | 0}, ${28 + Math.random() * 14 | 0}, ${0.18 + Math.random() * 0.2})`;
+      x.beginPath(); x.arc(rx + randRange(-7, 7), ry + randRange(-7, 7), 0.8 + Math.random() * 2.6, 0, 7); x.fill();
+    }
   }
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
