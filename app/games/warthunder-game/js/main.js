@@ -2649,6 +2649,7 @@ class Tank {
 
   tryFire(em) {
     if (!this.canFire()) return false;
+    if (this.ammoLimit && this.ammo <= 0) return false;   // 弹尽：去补给区（HUD 由主循环提示）
     const muzzleWorld = this.getMuzzleWorld();
     const dir = this._spread(this.getBarrelDir(), this.fireSpread * (this.crew && this.crew.commander > 0 ? 2 : 1));   // 车长阵亡：无人指示目标，散布×2
     // 下坠自动补偿：炮管瞄哪打哪（瞄准线=炮管线），出膛瞬间按实测/装订距离抬角抵消重力下坠
@@ -2678,6 +2679,7 @@ class Tank {
     // 结算统计:玩家主炮发射按弹种计数(经 em 挂钩,Game 读取)
     if (this.side === 'player') { em.pShells = em.pShells || { ap: 0, apcr: 0, he: 0 }; em.pShells[sh.id] = (em.pShells[sh.id] || 0) + 1; }
     this.reloadTimer = this.reloadTime;
+    if (this.ammoLimit) this.ammo--;
     return true;
   }
 
@@ -4352,6 +4354,7 @@ function setupEnvironment(scene, mode, renderer, isNight = false, isRain = false
   sun.shadow.normalBias = 0.6;   // 法线偏移：消除斜射面上的阴影条纹（acne）
   sun.shadow.camera.updateProjectionMatrix(); // 改过视景边界后必须更新投影矩阵
   scene.add(sun);
+  scene.userData.sun = sun;   // 动态画质：运行时调阴影分辨率用
   // 方向光目标默认在原点，跟随太阳方向照射
 
   // —— 环境反射（PMREM）：给所有 PBR 金属/漆面提供反射来源 ——
@@ -4569,6 +4572,7 @@ function createTerrain(scene, mode, mapId) {
     if (nearZone(x, z)) continue;   // 据点周边留空（散落掩体也别糊点）
     const type = pickType();
     let mesh, radius;
+    trees = trees || [];   // 树实例数据（InstancedMesh 用，循环后统一构建）
     if (type === 'building') {
       const w = randRange(8, 18), h = randRange(7, 22), d = randRange(8, 18);
       mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: buildPal, roughness: 0.9 }));
@@ -4578,13 +4582,9 @@ function createTerrain(scene, mode, mapId) {
       mesh = new THREE.Mesh(new THREE.DodecahedronGeometry(r, 0), new THREE.MeshStandardMaterial({ color: 0x807872, roughness: 1, flatShading: true }));
       mesh.position.set(x, r * 0.7 + terrainHeight(x, z), z); mesh.rotation.set(randRange(0, 1), randRange(0, 1), randRange(0, 1)); radius = r;
     } else if (type === 'tree') {
-      const tree = new THREE.Group();
-      const trunkH = randRange(3, 5);
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.7, trunkH, 6), new THREE.MeshStandardMaterial({ color: 0x5b4127, roughness: 1 }));
-      trunk.position.y = trunkH / 2; trunk.castShadow = true;
-      const leaves = new THREE.Mesh(new THREE.ConeGeometry(randRange(2.5, 4), randRange(5, 8), 7), new THREE.MeshStandardMaterial({ color: theme.leaf || 0x3f6b35, roughness: 1, flatShading: true }));
-      leaves.position.y = trunkH + 3; leaves.castShadow = true;
-      tree.add(trunk, leaves); tree.position.set(x, terrainHeight(x, z), z); mesh = tree; radius = 2.5;
+      // 树改走 InstancedMesh（循环后统一建）：几百棵树从几百 draw call 压成 1 个——性能大头
+      trees.push({ x, z, s: randRange(0.8, 1.5), rot: Math.random() * Math.PI * 2 });
+      radius = 2.5; mesh = null;
     } else if (type === 'wall') {
       const w = randRange(8, 16), h = randRange(1.6, 2.4), d = randRange(1.5, 2.5);
       mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: theme.wall || 0x6b5d3f, roughness: 1, flatShading: true }));
@@ -4594,16 +4594,61 @@ function createTerrain(scene, mode, mapId) {
       mesh = new THREE.Mesh(new THREE.BoxGeometry(w, w, w * 1.4), new THREE.MeshStandardMaterial({ color: 0x3a3530, roughness: 1, metalness: 0.3, flatShading: true }));
       mesh.position.set(x, w * 0.5 + terrainHeight(x, z), z); mesh.rotation.set(randRange(-0.4, 0.4), randRange(0, 6.28), randRange(-0.4, 0.4)); radius = w;
     }
-    mesh.castShadow = true; mesh.receiveShadow = true;
-    group.add(mesh);
-    obstacles.push({ position: new THREE.Vector3(x, 0, z), radius, height: mesh && mesh.geometry && mesh.geometry.parameters && mesh.geometry.parameters.height ? mesh.geometry.parameters.height + terrainHeight(x, z) + 2 : 30, mesh: type === 'tree' ? mesh : null });   // 树带 mesh：可被坦克撞倒；树冠等杂物的近似顶高
+    if (type === 'tree') {
+      // 树实例：障碍项记录 idx（撞倒走 setMatrixAt），高度近似
+      obstacles.push({ position: new THREE.Vector3(x, 0, z), radius, height: terrainHeight(x, z) + 10, treeIdx: trees.length - 1 });
+    } else {
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      group.add(mesh);
+      obstacles.push({ position: new THREE.Vector3(x, 0, z), radius, height: mesh && mesh.geometry && mesh.geometry.parameters && mesh.geometry.parameters.height ? mesh.geometry.parameters.height + terrainHeight(x, z) + 2 : 30 });   // 树冠等杂物的近似顶高
+    }
   }
 
   scene.add(group);
   // 近景草海（坦克模式）：相机周围铺草，跟随重排
   const grass = (mode === 'tank') ? new GrassField(scene, theme) : null;
+  let treeInst = null;
 
-  return { group, obstacles, half, grass };
+  // —— 树 InstancedMesh：单位树几何（干+冠合并）× 每实例缩放/旋转——几百棵树 1 个 draw call ——
+  if (trees && trees.length) {
+    if (!Terrain._treeGeo) {
+      // 单位树：干（高0.4）+ 冠锥（高0.75），原点在树根
+      const trunk = new THREE.CylinderGeometry(0.09, 0.13, 0.42, 5); trunk.translate(0, 0.21, 0);
+      const leaves = new THREE.ConeGeometry(0.42, 0.72, 6); leaves.translate(0, 0.72, 0);
+      const g1 = trunk.attributes, g2 = leaves.attributes;
+      const pos = new Float32Array(g1.position.count * 3 + g2.position.count * 3);
+      pos.set(g1.position.array, 0); pos.set(g2.position.array, g1.position.count * 3);
+      const nor = new Float32Array(g1.normal.count * 3 + g2.normal.count * 3);
+      nor.set(g1.normal.array, 0); nor.set(g2.normal.array, g1.normal.count * 3);
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+      // 干=棕色/冠=主题绿：用顶点色（材质 vertexColors）
+      const col = new Float32Array(pos.length);
+      for (let i = 0; i < g1.position.count; i++) { col[i * 3] = 0.36; col[i * 3 + 1] = 0.26; col[i * 3 + 2] = 0.15; }
+      const lr = ((theme.leaf || 0x3f6b35) >> 16 & 255) / 255, lg = ((theme.leaf || 0x3f6b35) >> 8 & 255) / 255, lb = ((theme.leaf || 0x3f6b35) & 255) / 255;
+      for (let i = g1.position.count; i < col.length / 3; i++) { col[i * 3] = lr; col[i * 3 + 1] = lg; col[i * 3 + 2] = lb; }
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      Terrain._treeGeo = geo;
+      Terrain._treeMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 });
+    }
+    const im = new THREE.InstancedMesh(Terrain._treeGeo, Terrain._treeMat, trees.length);
+    im.castShadow = true; im.receiveShadow = true;
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), ps = new THREE.Vector3();
+    trees.forEach((t, i) => {
+      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), t.rot);
+      ps.set(t.x, terrainHeight(t.x, t.z) - 0.15, t.z);
+      sc.set(t.s, t.s * randRange(0.9, 1.25), t.s);
+      m4.compose(ps, q, sc);
+      im.setMatrixAt(i, m4);
+    });
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);   // 撞倒要改矩阵
+    group.add(im);
+    // 挂到 terrain 供撞树更新
+    treeInst = { im, trees, baseMats: trees.map(() => null) };
+  }
+
+  return { group, obstacles, half, grass, treeInst };
 }
 
 
@@ -4762,7 +4807,7 @@ class Sfx {
 }
 
 class Game {
-  constructor({ canvas, mode = 'tank', difficulty = 'normal', tankType = 'medium', planeType = 'fighter', endless = false, objective = 'battle', mapId = 'open', worldwar = false, solo = false, ownedTanks = ['medium'], ownedPlanes = ['fighter'], hudContainer, onExit, onResult } = {}) {
+  constructor({ canvas, mode = 'tank', difficulty = 'normal', tankType = 'medium', planeType = 'fighter', endless = false, objective = 'battle', mapId = 'open', worldwar = false, solo = false, limitedAmmo = false, ownedTanks = ['medium'], ownedPlanes = ['fighter'], hudContainer, onExit, onResult } = {}) {
     this.canvas = canvas;
     this.mode = mode;
     this.difficulty = difficulty;
@@ -4771,6 +4816,7 @@ class Game {
     this.endless = endless;
     this.objective = mode === 'tank' ? objective : 'battle';   // 'battle'(歼灭) | 'capture'(占领，仅陆战)
     this.solo = solo;   // 无队友模式（成就用）
+    this.limitedAmmo = limitedAmmo;   // 有限弹药模式：主炮备弹40发+地图中央补给区
     this.mapId = mode === 'tank' ? mapId : 'open';             // 地图主题（仅陆战）
     this._isNight = !!(MAPS.find((m) => m.id === this.mapId) || {}).night;   // 夜战：月光+星空+车头灯
     this._isRain = !!(MAPS.find((m) => m.id === this.mapId) || {}).rain;     // 雨天：雨幕+湿滑反光
@@ -4983,6 +5029,13 @@ class Game {
     this._scopeMag = this._scopeMag || 4;             // 倍率偏好跨局保留
     applyDifficulty(this.difficulty); // 按难度重算 CONFIG
     this.terrain = createTerrain(this.scene, this.worldwar ? 'tank' : mode, this.mapId);   // 世界大战永远用坦克地形（不管玩家选飞机还是坦克）
+    if (this.limitedAmmo && (this.worldwar || mode === 'tank')) {   // 有限弹药：中央补给区地面环
+      const ring = new THREE.Mesh(new THREE.RingGeometry(12.5, 14, 40), new THREE.MeshBasicMaterial({ color: 0xffb040, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(0, terrainHeight(0, 0) + 0.35, 0);
+      this.scene.add(ring);
+      this._supplyRing = ring;
+    }
     if (this.em && this.terrain && this.terrain.obstacles) this.em.obstacles = this.terrain.obstacles;   // 障碍物注入 em，供炮弹碰撞检测
     const R = CONFIG.rules;
     this.kills = 0;
@@ -5173,6 +5226,7 @@ class Game {
     if (this.mode === 'tank') {
       this.player = new Tank({ side: 'player', color: (meta.paints || {})[this.tankType] != null ? meta.paints[this.tankType] : 0x4f7a3a, type: this.tankType });   // 涂装色
       if (this._shellPref) this.player.shellKind = this._shellPref;   // 弹种偏好跨重生保留
+      if (this.limitedAmmo) { this.player.ammoLimit = true; this.player.ammo = 40; }   // 有限弹药：备弹 40 发（补给区补充）
       this.player.group.position.copy(base);
       this.player.heading = 0;
       this.em.addTank(this.player);
@@ -5932,7 +5986,46 @@ class Game {
       this.hud.setCrosshairVisible(true);
       this.hud.hideLockPrompt();
     }
+    // —— 有限弹药模式：地图中央补给区（半径 14m）——驶入补弹+小回血；HUD 显示剩余弹数 ——
+    if (this.limitedAmmo && this.player && this.player.alive && this.player.ammoLimit) {
+      const t = this.player;
+      const d = Math.hypot(t.position.x, t.position.z);
+      if (d < 14) {
+        this._supplyT = (this._supplyT || 0) + dt;
+        if (this._supplyT > 0.5) {
+          this._supplyT = 0;
+          if (t.ammo < 40) { t.ammo = Math.min(40, t.ammo + 4); this.hud.addFeed(`📦 补给中 ${t.ammo}/40`, 'info'); }
+          if (t.health < t.maxHealth) t.health = Math.min(t.maxHealth, t.health + t.maxHealth * 0.02);
+        }
+      }
+      // 弹药 HUD（低弹提醒）
+      if (t.ammo <= 5 && t.ammo > 0 && performance.now() - (this._lowAmmoT || 0) > 5000) { this._lowAmmoT = performance.now(); this.hud.addFeed('⚠ 弹药即将耗尽，回中央补给区', 'death'); }
+      if (t.ammo <= 0 && performance.now() - (this._noAmmoT || 0) > 4000) { this._noAmmoT = performance.now(); this.hud.addFeed('📦 主炮弹尽！机枪可用，驶入中央补给区', 'death'); }
+    }
     // —— AI 代打仪表（0.2s 节流）+ 队友面板（0.3s 节流） ——
+    // —— 动态画质自适应：滚动 FPS 每 2.5s 评估，>57 升档吃满画质 / <42 降档保流畅 ——
+    // 档位：0(pr1.2/阴影1024) 1(pr1.5/2048) 2(pr2.0/4096)——好电脑自动拉满，卡了自动让路。
+    this._fpsAcc = (this._fpsAcc || 0) + dt; this._fpsN = (this._fpsN || 0) + 1;
+    if (this._fpsAcc >= 2.5) {
+      const avg = this._fpsN / this._fpsAcc;
+      this._fpsAcc = 0; this._fpsN = 0;
+      const Q = [{ pr: 1.2, sh: 1024 }, { pr: 1.5, sh: 2048 }, { pr: 2.0, sh: 4096 }];
+      this._qLevel = this._qLevel != null ? this._qLevel : 1;
+      let nl = this._qLevel;
+      if (avg > 57 && this._qLevel < 2) nl = this._qLevel + 1;
+      else if (avg < 42 && this._qLevel > 0) nl = this._qLevel - 1;
+      if (nl !== this._qLevel) {
+        this._qLevel = nl;
+        const q = Q[nl];
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pr));
+        const sun = this.scene.userData.sun;
+        if (sun) {
+          sun.shadow.mapSize.set(q.sh, q.sh);
+          if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }   // 释放旧图让 three 按新尺寸重建
+        }
+        this.hud.addFeed(`🎚 画质自适应：${['流畅', '均衡', '高清'][nl]}（${Math.round(avg)}fps）`, 'info');
+      }
+    }
     this._hudT = (this._hudT || 0) - dt;
     if (this._hudT <= 0) {
       this._hudT = 0.25;
@@ -6101,7 +6194,10 @@ class Game {
           else if (h.verdict === 'nopen' || h.verdict === 'splash') this.stats.nopen++;
           else this.stats.pen++;
           if (h.killed && h.crit === '弹药殉爆') this.stats.ammoKills++;
-          if (h.killed) this._lastKillShot = { target: h.target, hitPoint: h.hitPoint, proj: h.proj, verdict: h.verdict, crit: h.crit };   // 终局回放快照：若这是赢下比赛的最后一杀，_end 会用它放全屏弹道跟拍
+          if (h.killed) {
+            this._lastKillShot = { target: h.target, hitPoint: h.hitPoint, proj: h.proj, verdict: h.verdict, crit: h.crit };   // 终局回放快照：若这是赢下比赛的最后一杀，_end 会用它放全屏弹道跟拍
+            h.target._killDist = h.proj && h.proj.launchPos ? Math.round(h.proj.launchPos.distanceTo(h.hitPoint)) : 0;   // 击杀距离（远程狙杀播报用）
+          }
           // 击杀回放触发：击杀播全套（X光+殉爆名场面）；
           // 跳弹（未击杀）也播：小窗看炮弹"叮"一声弹上天的慢镜头——限流 3s 一次且不抢击杀回放，
           // 速射武器连续跳弹也不会疯狂切镜头。
@@ -6286,30 +6382,41 @@ class Game {
   _updateTreeFalls(dt) {
     const obstacles = this.terrain?.obstacles;
     if (!obstacles) return;
+    const ti = this.terrain?.treeInst;
     for (const t of this.em.tanks) {
       if (!t.alive || Math.abs(t.lastThrottle || 0) < 0.3) continue;
       for (let i = obstacles.length - 1; i >= 0; i--) {
         const ob = obstacles[i];
-        if (!ob.mesh || ob.mesh._falling) continue;
+        if (ob.treeIdx === undefined || ob._falling) continue;   // 只撞树（InstancedMesh 实例）
         const dx = t.position.x - ob.position.x, dz = t.position.z - ob.position.z;
         const rr = (t.radius || 3) + ob.radius + 0.6;
         if (dx * dx + dz * dz < rr * rr) {
-          ob.mesh._falling = true;
+          ob._falling = true;
           const len = Math.sqrt(dx * dx + dz * dz) || 1;   // 倒向 = 车撞来的反方向（被推倒）
+          // 实例原始矩阵快照（趴地动画从它起算）
+          const m0 = new THREE.Matrix4();
+          if (ti) ti.im.getMatrixAt(ob.treeIdx, m0);
+          const f = { idx: ob.treeIdx, axis: new THREE.Vector3(dz / len, 0, -dx / len), t: 0, pos: new THREE.Vector3(), quat: new THREE.Quaternion(), scale: new THREE.Vector3() };
+          m0.decompose(f.pos, f.quat, f.scale);
           this._treeFalls = this._treeFalls || [];
-          this._treeFalls.push({ mesh: ob.mesh, axis: new THREE.Vector3(dz / len, 0, -dx / len), t: 0 });
+          this._treeFalls.push(f);
           obstacles.splice(i, 1);   // 不再挡弹/挡 AI
         }
       }
     }
-    if (!this._treeFalls?.length) return;
+    if (!this._treeFalls?.length || !ti) return;
+    const m4 = new THREE.Matrix4(), q2 = new THREE.Quaternion();
     for (let i = this._treeFalls.length - 1; i >= 0; i--) {
       const f = this._treeFalls[i];
       f.t = Math.min(1, f.t + dt * 2.4);
       const e = 1 - Math.pow(1 - f.t, 3);                 // ease-out：越接近地面越慢
       const ang = e * (Math.PI / 2 - 0.12) + Math.sin(f.t * Math.PI) * -0.06;   // 末端轻微回弹
-      f.mesh.quaternion.setFromAxisAngle(f.axis, ang);
-      if (f.t >= 1) this._treeFalls.splice(i, 1);         // 趴定：mesh 留在原地（随地形组销毁）
+      q2.setFromAxisAngle(f.axis, ang);
+      f.quat.premultiply(q2);   // 世界系倾倒叠加到原朝向
+      m4.compose(f.pos, f.quat, f.scale);
+      ti.im.setMatrixAt(f.idx, m4);
+      ti.im.instanceMatrix.needsUpdate = true;
+      if (f.t >= 1) this._treeFalls.splice(i, 1);         // 趴定：实例留在倒地姿态（随地形组销毁）
     }
   }
 
@@ -6746,7 +6853,9 @@ class Game {
         const who = isPlayerKill ? '你击毁 ' : (atk && atk.team === 'blue' ? '友方击毁 ' : '击毁 ');
         // 玩家击杀即时奖励提示：金额=外部结算公式的逐杀值（无尽 150/50，普通 120/40），只提前显示、结算不变
         const bonus = atk === playerRef ? ` +${this.endless ? 150 : 120}💰+${this.endless ? 50 : 40}🔬` : '';
-        this.hud.addFeed(`${who}敌方${label}${tag}${bonus}`, 'kill');
+        const kd = r._killDist || 0;
+        const distTag = isPlayerKill && kd >= 150 ? `　⚡ ${kd}m 远程击杀${kd >= 300 ? '！🎯' : ''}` : '';   // 远距离狙杀排面
+        this.hud.addFeed(`${who}敌方${label}${tag}${bonus}${distTag}`, 'kill');
       } else if (r.team === 'blue') {
         this.hud.addFeed(`友方${label}被击毁${tag}`, 'death');
         if (this.objective === 'capture') this.blueTickets = Math.max(0, this.blueTickets - CONFIG.rules.conquest.killCost);   // 征服：队友阵亡同样扣票
@@ -7257,6 +7366,7 @@ const mapBtn = document.getElementById('btn-map');
 const worldwarBtn = document.getElementById('btn-worldwar');
 const soloBtn = document.getElementById('btn-solo');
 let solo = false;   // 无队友模式
+let limitedAmmo = false;   // 有限弹药模式
 
 // —— 存档：金币 / 已拥有坦克 / 当前选用 ——
 const STORAGE_KEY = 'warthunder_meta_v1';
@@ -7513,6 +7623,7 @@ function startGame(mode) {
     mapId: MAPS[mapIndex].id,
     worldwar,
     solo,
+    limitedAmmo,
     ownedTanks: meta.owned,
     ownedPlanes: meta.ownedPlanes,
     hudContainer,
@@ -7570,6 +7681,10 @@ if (objectiveBtn) objectiveBtn.addEventListener('click', () => { objective = obj
 if (mapBtn) mapBtn.addEventListener('click', () => { mapIndex = (mapIndex + 1) % MAPS.length; renderMapBtn(); renderLoadout(); });
 if (worldwarBtn) worldwarBtn.addEventListener('click', () => { worldwar = !worldwar; renderWorldwarBtn(); renderLoadout(); });
 if (soloBtn) soloBtn.addEventListener('click', () => { solo = !solo; soloBtn.textContent = `👥 队友：${solo ? '无' : '有'}`; soloBtn.classList.toggle('active', solo); renderLoadout(); });
+{
+  const ab = document.getElementById('btn-ammo');
+  if (ab) ab.addEventListener('click', () => { limitedAmmo = !limitedAmmo; ab.textContent = `📦 弹药：${limitedAmmo ? '有限' : '无限'}`; ab.classList.toggle('active', limitedAmmo); renderLoadout(); });
+}
 if (techtreeBtn) techtreeBtn.addEventListener('click', openTechTree);
 {
   const sb = document.getElementById('btn-settings');
