@@ -7,6 +7,7 @@ const _tmpV3 = new THREE.Vector3();   // 通用临时向量（受击方向计算
 const _sfxDir = new THREE.Vector3();  // 音效声像：相机朝向临时向量
 const _aimNdc2 = new THREE.Vector2(); // 直升机准星：鼠标 NDC → 世界射线（raycaster 用）
 const _heliAimV = new THREE.Vector3(); // 直升机 AI 十字方向临时向量
+const _heliAimV2 = new THREE.Vector3(); // 直升机炮手视角瞄准点临时向量
 const _kcTmp = new THREE.Vector3();   // X 光回放临时量（免每帧 new）
 const _scLook = new THREE.Vector3();   // 回放相机平滑视线
 const _projFwd = new THREE.Vector3(0, 0, 1);   // 曳光定向基准
@@ -5582,13 +5583,29 @@ class Game {
     p.mouseAim(-ndc.x * this.settings.planeGain, ny * this.settings.planeGain, dt); // 水平方向校准：光标左移→左转
 
     if (p.isHeli) {
-      // 直升机：鼠标=纯瞄准。准星=世界命中点（吸敌球+地形/障碍），弹从机头指向该点——消视差十字压谁打谁。
+      // 直升机瞄准（两种手感）：
+      // ①炮手视角（C 键）：坦克式增量瞄准——鼠标移动=转动瞄准方向，准星钉在屏幕中心，指针锁定无限转；
+      // ②第三人称：光标绝对位置=准星（世界命中点吸敌球，弹从机头指向该点消视差）。
       // WASD=飞行（W/S 前后倾、A/D 偏航），Shift 爬升 / Space 下降。
-      _aimNdc2.set(ndc.x, ndc.y);
-      this.raycaster.setFromCamera(_aimNdc2, this.camera);
-      const rd = this.raycaster.ray.direction;
-      const rt = this._rayAimHit(this.camera.position.x, this.camera.position.y, this.camera.position.z, rd.x, rd.y, rd.z);
-      p.setAimPoint(_tmpV3.copy(this.camera.position).addScaledVector(rd, rt >= 0 ? rt : 300));
+      if (this.heliGunner) {
+        let mdx, mdy;
+        if (document.pointerLockElement === this.canvas) { const mv = inp.consumeMovement(); mdx = mv.x; mdy = mv.y; }
+        else { inp.consumeMovement(); mdx = inp.mouseX - (this._lastMx ?? inp.mouseX); mdy = inp.mouseY - (this._lastMy ?? inp.mouseY); }
+        this._lastMx = inp.mouseX; this._lastMy = inp.mouseY;
+        this._heliAimYaw = (this._heliAimYaw ?? p.heading) - mdx * 0.0026;                 // 同坦克 YAW_SENS
+        this._heliAimPitch = clamp((this._heliAimPitch ?? -0.2) - mdy * 0.0022, -1.25, 0.5);
+        const nose = p.getMuzzleWorld(_heliAimV);
+        const cp = Math.cos(this._heliAimPitch);
+        const dir = _tmpV3.set(Math.sin(this._heliAimYaw) * cp, Math.sin(this._heliAimPitch), Math.cos(this._heliAimYaw) * cp).normalize();
+        const rt = this._rayAimHit(nose.x, nose.y, nose.z, dir.x, dir.y, dir.z);
+        p.setAimPoint(_heliAimV2.copy(nose).addScaledVector(dir, rt >= 0 ? rt : 400));
+      } else {
+        _aimNdc2.set(ndc.x, ndc.y);
+        this.raycaster.setFromCamera(_aimNdc2, this.camera);
+        const rd = this.raycaster.ray.direction;
+        const rt = this._rayAimHit(this.camera.position.x, this.camera.position.y, this.camera.position.z, rd.x, rd.y, rd.z);
+        p.setAimPoint(_tmpV3.copy(this.camera.position).addScaledVector(rd, rt >= 0 ? rt : 300));
+      }
       // 火箭 CCIP 落点圈：模拟火箭弹道（同 tryFireRockets 物理含下坠补偿）→ 落点投影
       {
         const mz = p.getMuzzleWorld(_heliAimV);
