@@ -5610,6 +5610,12 @@ class Game {
       }
       p.setClimb((inp.isDown('ShiftLeft') || inp.isDown('ShiftRight') ? 1 : 0) + (inp.isDown('Space') ? -1 : 0));
       p.setYawInput((inp.isDown('KeyA') ? 1 : 0) - (inp.isDown('KeyD') ? 1 : 0));
+      // 炮手视角（C 键）：镜头挂机头跟准星看（Shift 已被爬升占用）
+      if (this._consumePress(inp, 'KeyC')) {
+        this.heliGunner = !this.heliGunner;
+        this._snapCam = true;
+        this.hud.addFeed(this.heliGunner ? '🔭 直升机炮手视角' : '第三人称视角', 'info');
+      }
       p.setPitchInput((inp.isDown('KeyW') ? 1 : 0) - (inp.isDown('KeyS') ? 1 : 0));
     } else if (inp.isDown('ShiftLeft') || inp.isDown('ShiftRight')) {
       p.throttle = 1;
@@ -5792,6 +5798,17 @@ class Game {
 
   _updateCameraPlane(dt) {
     const p = this.player;
+    // —— 直升机炮手视角（C 键）：镜头挂在机头，跟准星（_aimPoint）看——所见即所打 ——
+    if (p.isHeli && this.heliGunner) {
+      const nose = p.getMuzzleWorld(_heliAimV).addScaledVector(p.forwardVector(), -1.2).add(new THREE.Vector3(0, 0.9, 0));
+      if (this._snapCam) { this.camera.position.copy(nose); this._snapCam = false; }
+      else this.camera.position.lerp(nose, 1 - Math.pow(0.00001, dt));
+      const aim = p._aimPoint ? p._aimPoint : p.position.clone().addScaledVector(p.forwardVector(), 200);
+      this.camera.lookAt(aim);
+      this._setFov(52, dt);   // 略窄：炮手镜观感
+      this._planeAimNDC = { x: 0, y: 0 };   // 十字画屏幕中心=准星
+      return;
+    }
     const offset = new THREE.Vector3(0, 3.5, -16).applyQuaternion(p.group.quaternion);
     const desired = p.position.clone().add(offset);
     if (this._snapCam) { this.camera.position.copy(desired); this._snapCam = false; }
