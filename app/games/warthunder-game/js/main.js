@@ -3772,9 +3772,7 @@ class Heli {
       });
       _rp.isRocket = true;   // 范围爆炸弹（面杀伤）
       em.addProjectile(_rp);
-      this._rocketCount = (this._rocketCount || 0) + 1;
-      if (this._rocketCount >= 5) { this._rocketCount = 0; this.rocketCd = this.type === 'ah64' ? 2.5 : 4; this._rocketReloaded = true; }   // 5 发一巢：打满装填（AH-64 更快）
-      else this.rocketCd = this.type === 'ah64' ? 0.15 : 0.22;   // 连射节奏
+      this.rocketCd = this.type === 'ah64' ? 0.12 : 0.22;   // AH-64 无限连发（无装填等待，仅射速节奏）；其他机型保留
       return true;
     }
     if (this.missiles <= 0 || this.missileCooldown > 0) return false;
@@ -5672,9 +5670,9 @@ class Game {
     if ((inp.rightMouseDown || inp.isDown('KeyX')) && p.missiles > 0) {
       if (p.tryFireMissile(this.em, this.enemies)) { this.hud.addFeed(p.isHeli ? `🚀 火箭巢 ${p.missiles}/${p.maxMissiles}` : `🚀 导弹 ${p.missiles}/${p.maxMissiles}`, 'info'); this.sfx.missile(p.position); }
     }
-    // AH-64 专属火箭巢（按住 E 逐发连射）：5 发一巢打满自动装填 4s，弹无限
+    // AH-64 专属火箭巢（按住 E 无限连发）：无装填等待，仅 0.12s 射速节奏，弹无限
     if (p.isHeli && p.type === 'ah64' && inp.isDown('KeyE')) {
-      if (p.tryFireRockets(this.em, true) && p.rocketCd >= 4) this.hud.addFeed('🚀 火箭巢装填 4s…', 'info');
+      p.tryFireRockets(this.em, true);
     }
     if (this._consumePress(inp, 'KeyV')) this._markTarget();   // 侦察标记(飞机也能标)
     if (this._consumePress(inp, 'KeyB') && p.bombs > 0) {
