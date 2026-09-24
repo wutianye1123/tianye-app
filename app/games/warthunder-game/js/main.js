@@ -4612,7 +4612,7 @@ function createTerrain(scene, mode, mapId) {
 
   // —— 树 InstancedMesh：单位树几何（干+冠合并）× 每实例缩放/旋转——几百棵树 1 个 draw call ——
   if (trees && trees.length) {
-    if (!Terrain._treeGeo) {
+    if (!createTerrain._treeGeo) {
       // 单位树：干（高0.4）+ 冠锥（高0.75），原点在树根
       const trunk = new THREE.CylinderGeometry(0.09, 0.13, 0.42, 5); trunk.translate(0, 0.21, 0);
       const leaves = new THREE.ConeGeometry(0.42, 0.72, 6); leaves.translate(0, 0.72, 0);
@@ -4630,10 +4630,10 @@ function createTerrain(scene, mode, mapId) {
       const lr = ((theme.leaf || 0x3f6b35) >> 16 & 255) / 255, lg = ((theme.leaf || 0x3f6b35) >> 8 & 255) / 255, lb = ((theme.leaf || 0x3f6b35) & 255) / 255;
       for (let i = g1.position.count; i < col.length / 3; i++) { col[i * 3] = lr; col[i * 3 + 1] = lg; col[i * 3 + 2] = lb; }
       geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-      Terrain._treeGeo = geo;
-      Terrain._treeMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 });
+      createTerrain._treeGeo = geo;
+      createTerrain._treeMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 });
     }
-    const im = new THREE.InstancedMesh(Terrain._treeGeo, Terrain._treeMat, trees.length);
+    const im = new THREE.InstancedMesh(createTerrain._treeGeo, createTerrain._treeMat, trees.length);
     im.castShadow = true; im.receiveShadow = true;
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), ps = new THREE.Vector3();
     trees.forEach((t, i) => {
