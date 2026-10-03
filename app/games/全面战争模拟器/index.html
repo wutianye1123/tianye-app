@@ -107,7 +107,7 @@ button:hover{background:#333d49;border-color:#4a5563}
 
 <div id="battlebar" class="hidden">
   <button id="btnBack">返回部署</button>
-  <span id="btip">战斗进行中 · 可随时暂停观察战局</span>
+  <span id="btip">战斗进行中 · 点击任意士兵操控（WASD 移动 · 点击敌人锁定目标 · F 取消）· 空格暂停</span>
 </div>
 
 <div id="overlay" class="hidden">
@@ -244,6 +244,8 @@ var projectiles = [], particles = [], floaters = [], corpses = [], lightnings = 
 var budget = [2000, 2000];
 var infiniteMoney = false;      // 无限预算模式
 var curType = 'swordsman';
+var controlled = null;         // 玩家操控的士兵
+var keys = {};                 // 键盘状态（WASD/方向键）
 var SPEEDS = [0.5, 1, 2], speedIdx = 1, paused = false;
 var battleTime = 0, kills = [0, 0], startCounts = [0, 0], unitTotals = [0, 0];
 var winner = -1, endT = 0, shake = 0, seq = 1;
@@ -484,6 +486,7 @@ function startBattle() {
     return;
   }
   units = placed.map(spawnUnit);
+  controlled = null;
   projectiles = []; particles = []; floaters = []; corpses = []; lightnings = [];
   kills = [0, 0]; battleTime = 0; winner = -1; endT = 0; paused = false;
   startCounts = [teamCount(0), teamCount(1)];
@@ -491,11 +494,13 @@ function startBattle() {
   state = 'battle';
   overlay.classList.add('hidden');
   floaters.push({ x: W / 2, y: H / 2 - 40, t: 0, life: 1.2, text: '开  战', color: '#ffd76a', size: 64 });
+  toast('战斗中点击任意士兵即可亲自操控（WASD 移动 · 点击敌人锁定目标）');
 }
 function backToPlace() {
   state = 'place';
   overlay.classList.add('hidden');
   paused = false;
+  controlled = null;
   units = []; projectiles = []; floaters = []; corpses = []; particles = []; lightnings = [];
   battleTime = 0; winner = -1;
 }
@@ -568,6 +573,7 @@ function damage(t, raw, src, nx, ny, kb, pierce) {
 function kill(t, src) {
   if (!t.alive) return;
   t.alive = false;
+  if (t === controlled) { controlled = null; toast('你操控的士兵阵亡了，点击其他士兵可继续操控'); }
   if (src && src.team !== undefined && kills[src.team] !== undefined) kills[src.team]++;
   corpses.push({ x: t.x, y: t.y, r: t.r, team: t.team, rot: rand(0, TAU), t: 0 });
   for (var i = 0; i < 10; i++) {
@@ -824,7 +830,43 @@ function simUnits(dt) {
     var edge = d - u.r - t.r;
     var def = u.def, mvx = 0, mvy = 0;
     var spdMult = u.slowT > 0 ? (u.slowFactor || 0.55) : 1;
-    if (def.kind === 'kamikaze') {
+    if (u === controlled) {
+      /* 玩家操控：键盘移动 + 自动攻击（目标=锁定目标或最近敌人） */
+      if (def.kind === 'kamikaze') {
+        if (edge < 24) { kill(u, null); continue; }
+      } else if (def.kind === 'heal') {
+        if (u.cd <= 0) {
+          var pHealed = false;
+          for (var phi = 0; phi < units.length; phi++) {
+            var pha = units[phi];
+            if (!pha.alive || pha.team !== u.team || pha === u) continue;
+            if (pha.hp < pha.maxHp - 4 && hyp(pha.x - u.x, pha.y - u.y) <= def.heal.r) {
+              var pAmt = Math.min(def.heal.amt, pha.maxHp - pha.hp);
+              pha.hp += pAmt; pHealed = true;
+              if (floaters.length < 220) {
+                floaters.push({ x: pha.x + rand(-5, 5), y: pha.y - pha.r - 8, t: 0, life: 0.7, text: '+' + Math.round(pAmt), color: '#7de37d', size: 12 });
+              }
+            }
+          }
+          u.cd = pHealed ? def.cd : 0.4;
+        }
+      } else if (edge <= def.range) {
+        u.face = Math.atan2(dy, dx);
+        if (u.cd <= 0) {
+          if (def.kind === 'ranged') rangedAttack(u, t);
+          else meleeAttack(u, t);
+        }
+      }
+      var ix = 0, iy2 = 0;
+      if (keys.w || keys.arrowup) iy2 -= 1;
+      if (keys.s || keys.arrowdown) iy2 += 1;
+      if (keys.a || keys.arrowleft) ix -= 1;
+      if (keys.d || keys.arrowright) ix += 1;
+      if (ix !== 0 || iy2 !== 0) {
+        var il = hyp(ix, iy2);
+        mvx = ix / il; mvy = iy2 / il;
+      }
+    } else if (def.kind === 'kamikaze') {
       /* 炸弹人：直冲最近敌人，贴脸引爆 */
       if (edge < 24) { kill(u, null); continue; }
       mvx = dx / d; mvy = dy / d;
@@ -1627,6 +1669,38 @@ function drawUnit(u) {
     ctx.fillStyle = pct > 0.5 ? '#67d06b' : pct > 0.25 ? '#e6c53d' : '#e65b5b';
     ctx.fillRect(bx, by, w * pct, 3);
   }
+  /* 玩家操控标记：金色光环 + 浮动箭头 */
+  if (u === controlled && u.alive && state !== 'place') {
+    ctx.save();
+    ctx.translate(u.x, u.y);
+    ctx.setLineDash([7, 5]);
+    ctx.strokeStyle = '#ffd76a'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(0, 0, r + 8, 0, TAU); ctx.stroke();
+    ctx.setLineDash([]);
+    var bob2 = Math.sin(performance.now() / 200) * 3;
+    ctx.fillStyle = '#ffd76a';
+    ctx.beginPath();
+    ctx.moveTo(0, -r - 16 + bob2);
+    ctx.lineTo(-6, -r - 27 + bob2);
+    ctx.lineTo(6, -r - 27 + bob2);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  /* 锁定目标标记：红色四角瞄准框 */
+  if (controlled && controlled.target === u && u.alive && state !== 'place') {
+    ctx.save();
+    ctx.translate(u.x, u.y);
+    ctx.strokeStyle = '#ff6a5a'; ctx.lineWidth = 2;
+    var R2 = r + 9, c2 = 7;
+    [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(function (q) {
+      ctx.beginPath();
+      ctx.moveTo(q[0] * R2, q[1] * R2 - q[1] * c2);
+      ctx.lineTo(q[0] * R2, q[1] * R2);
+      ctx.lineTo(q[0] * R2 - q[0] * c2, q[1] * R2);
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
 }
 function drawCorpse(c) {
   var a = Math.max(0, 1 - c.t / 9);
@@ -1832,6 +1906,32 @@ var mouse = { x: W / 2, y: H / 2, in: false };
 var drag = null;
 cv.addEventListener('pointerdown', function (e) {
   resumeAudio();
+  /* 战斗中：点击士兵操控 / 点击敌人锁定目标 */
+  if (state === 'battle' || state === 'ending') {
+    if (e.button !== 0) return;
+    var wc = toWorld(e.clientX, e.clientY);
+    var pick = null, pd = 1e9;
+    for (var pi = 0; pi < units.length; pi++) {
+      var pu = units[pi];
+      if (!pu.alive) continue;
+      var pdd = hyp(pu.x - wc.x, pu.y - wc.y);
+      if (pdd < pu.r + 10 && pdd < pd) { pd = pdd; pick = pu; }
+    }
+    if (pick) {
+      if (controlled && pick !== controlled && pick.team !== controlled.team) {
+        controlled.target = pick;         // 锁定攻击目标
+        controlled.retarget = 9999;
+        toast('已锁定目标：' + pick.def.name);
+      } else if (pick !== controlled) {
+        controlled = pick;
+        toast('操控中：' + pick.def.name + ' · WASD/方向键移动 · 点击敌人锁定目标 · F 取消');
+      } else {
+        controlled = null;
+        toast('已取消操控');
+      }
+    }
+    return;
+  }
   if (state !== 'place') return;
   var w = toWorld(e.clientX, e.clientY);
   mouse.x = w.x; mouse.y = w.y; mouse.in = true;
@@ -1879,6 +1979,9 @@ cv.addEventListener('pointerenter', function () { mouse.in = true; });
 cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
 window.addEventListener('keydown', function (e) {
+  var k = e.key.toLowerCase();
+  keys[k] = true;
+  if (k === 'f' && controlled) { controlled = null; toast('已取消操控'); }
   if (e.key >= '1' && e.key <= '9') {
     var i = +e.key - 1;
     if (i < DEF_ORDER.length) { curType = DEF_ORDER[i]; refreshCards(); }
@@ -1888,6 +1991,10 @@ window.addEventListener('keydown', function (e) {
     if (state !== 'place') backToPlace();
   }
 });
+window.addEventListener('keyup', function (e) {
+  keys[e.key.toLowerCase()] = false;
+});
+window.addEventListener('blur', function () { keys = {}; });
 
 /* ---------- 按钮 ---------- */
 document.querySelectorAll('.bctrl button').forEach(function (b) {
