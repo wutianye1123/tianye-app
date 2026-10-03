@@ -183,14 +183,25 @@ var DEFS = {
   troll:      { name: '巨魔',     ic: '魔', icColor: '#5e8a4e', cost: 380, hp: 520, dmg: 30, range: 30,  speed: 42,  cd: 1.2,  r: 16, kind: 'melee',  regen: 22, kb: 120, desc: '脱战后疯狂回血' },
   treant:     { name: '树人',     ic: '树', icColor: '#4e6a35', cost: 400, hp: 760, dmg: 20, range: 34,  speed: 22,  cd: 1.5,  r: 18, kind: 'melee',  armor: 2, regen: 6, slow: { dur: 2.2, factor: 0.6 }, desc: '根须缠绕，越打越硬' },
   cyclops:    { name: '独眼巨人', ic: '独', icColor: '#9a8a6a', cost: 450, hp: 600, dmg: 45, range: 42,  speed: 34,  cd: 1.6,  r: 18, kind: 'melee',  aoeMelee: true, kb: 200, desc: '巨棒横扫一片' },
-  dragon:     { name: '远古巨龙', ic: '龙', icColor: '#a03a3a', cost: 900, hp: 820, dmg: 42, range: 55,  speed: 40,  cd: 1.4,  r: 20, kind: 'melee',  aoeMelee: true, burn: { dps: 10, dur: 3 }, armor: 1, desc: '龙息焚烧面前一切' }
+  dragon:     { name: '远古巨龙', ic: '龙', icColor: '#a03a3a', cost: 900, hp: 820, dmg: 42, range: 55,  speed: 40,  cd: 1.4,  r: 20, kind: 'melee',  aoeMelee: true, burn: { dps: 10, dur: 3 }, armor: 1, desc: '龙息焚烧面前一切' },
+  /* ---- 现代战争 ---- */
+  rifleman:   { name: '步枪兵',   ic: '枪', icColor: '#6a7a4e', cost: 90,  hp: 80,  dmg: 6,  range: 240, speed: 50,  cd: 0.35, r: 10, kind: 'ranged', proj: 'bullet', desc: '速射步枪，火力持续' },
+  gunner:     { name: '机枪手',   ic: '机', icColor: '#5a6a55', cost: 180, hp: 110, dmg: 7,  range: 260, speed: 42,  cd: 0.16, r: 11, kind: 'ranged', proj: 'bullet', desc: '泼水般倾泻弹雨' },
+  bazooka:    { name: '火箭兵',   ic: '箭', icColor: '#8a6a3e', cost: 200, hp: 85,  dmg: 38, range: 220, speed: 44,  cd: 2.6,  r: 10, kind: 'ranged', proj: 'rocket', aoe: 50, desc: '火箭弹范围爆破' },
+  sniper:     { name: '狙击手',   ic: '狙', icColor: '#4e5e4e', cost: 240, hp: 70,  dmg: 60, range: 420, speed: 46,  cd: 2.8,  r: 10, kind: 'ranged', proj: 'bullet', spread: 0.008, desc: '超远程一击致命' },
+  medic:      { name: '医疗兵',   ic: '救', icColor: '#c8d8c8', cost: 210, hp: 100, dmg: 0,  range: 0,   speed: 52,  cd: 1.7,  r: 10, kind: 'heal',   heal: { r: 130, amt: 12 }, desc: '战地治疗周围友军' },
+  humvee:     { name: '悍马',     ic: '悍', icColor: '#7a8a5a', cost: 300, hp: 260, dmg: 8,  range: 230, speed: 85,  cd: 0.22, r: 13, kind: 'ranged', proj: 'bullet', armor: 2, desc: '高速机动的机枪车' },
+  tank:       { name: '主战坦克', ic: '坦', icColor: '#5e6a5e', cost: 550, hp: 700, dmg: 60, range: 340, speed: 35,  cd: 3.0,  r: 18, kind: 'ranged', proj: 'shell', aoe: 45, armor: 4, desc: '重甲主炮，开火带后坐' },
+  mlrs:       { name: '火箭炮',   ic: '火', icColor: '#8a5a4e', cost: 650, hp: 200, dmg: 30, range: 520, speed: 18,  cd: 6.5,  r: 16, kind: 'ranged', proj: 'rock', aoe: 55, minRange: 150, multirock: { n: 5, spread: 65 }, armor: 1, desc: '多管齐射覆盖大片区域' },
+  heli:       { name: '武装直升机', ic: '升', icColor: '#4a5e6e', cost: 750, hp: 380, dmg: 7, range: 260, speed: 95,  cd: 0.18, r: 14, kind: 'ranged', proj: 'bullet', armor: 1, desc: '低空掠袭的机炮平台' }
 };
 /* 兵种系列（卡片分组 + 热键 1-9 = 王国军团） */
 var SERIES = [
   { name: '王国军团', color: '#6ea8ff', types: ['farmer', 'swordsman', 'pikeman', 'shield', 'archer', 'javelineer', 'knight', 'king', 'catapult'] },
   { name: '黑暗军团', color: '#f08a9a', types: ['skeleton', 'assassin', 'berserker', 'bomber', 'gargoyle', 'vampire', 'darkknight', 'necromancer', 'lich'] },
   { name: '元素魔法', color: '#6ad0d8', types: ['mage', 'icemage', 'pyromancer', 'stormmage', 'earthwarden', 'druid', 'priest', 'summoner'] },
-  { name: '远古巨兽', color: '#d8b88a', types: ['warbear', 'minotaur', 'troll', 'treant', 'cyclops', 'giant', 'dragon'] }
+  { name: '远古巨兽', color: '#d8b88a', types: ['warbear', 'minotaur', 'troll', 'treant', 'cyclops', 'giant', 'dragon'] },
+  { name: '现代战争', color: '#b8d86a', types: ['rifleman', 'gunner', 'bazooka', 'sniper', 'medic', 'humvee', 'tank', 'mlrs', 'heli'] }
 ];
 var DEF_ORDER = [];
 SERIES.forEach(function (s) { DEF_ORDER = DEF_ORDER.concat(s.types); });
@@ -216,7 +227,14 @@ var PRESETS = [
   { name: '巨兽横行', comp: { troll: 1, minotaur: 2, cyclops: 1 } },
   { name: '巨龙苏醒', comp: { dragon: 1, skeleton: 8 } },
   { name: '石像守望', comp: { gargoyle: 4, lich: 1, skeleton: 2 } },
-  { name: '熊蛮冲锋', comp: { warbear: 4, minotaur: 1 } }
+  { name: '熊蛮冲锋', comp: { warbear: 4, minotaur: 1 } },
+  { name: '机械步兵', comp: { rifleman: 4, humvee: 1, medic: 1 } },
+  { name: '装甲突击', comp: { tank: 2, rifleman: 3, bazooka: 1 } },
+  { name: '火力覆盖', comp: { mlrs: 1, sniper: 2, gunner: 2 } },
+  { name: '空中支援', comp: { heli: 2, rifleman: 4 } },
+  { name: '现代化军', comp: { tank: 1, humvee: 1, heli: 1, rifleman: 3, medic: 1 } },
+  { name: '钢铁洪流', comp: { tank: 3 } },
+  { name: '狙击小队', comp: { sniper: 4, medic: 1 } }
 ];
 
 /* ---------- 状态 ---------- */
@@ -657,33 +675,54 @@ function rangedAttack(u, t) {
   var dmg = def.dmg * auraMult(u);
   if (def.chain) { castChain(u, t, dmg); return; }
   if (def.proj === 'rock') {
-    /* 投石车：抛物线落石，只落在预测落点 */
-    var dist0 = hyp(t.x - u.x, t.y - u.y);
-    var dur = 0.8 + dist0 / 260;
-    var rtx = clamp(t.x + Math.cos(t.face) * t.spd * dur * 0.6, 20, W - 20);
-    var rty = clamp(t.y + Math.sin(t.face) * t.spd * dur * 0.6, 20, H - 20);
-    projectiles.push({
-      kind: 'rock', sx: u.x + Math.cos(u.face) * u.r, sy: u.y + Math.sin(u.face) * u.r,
-      tx: rtx, ty: rty, t: 0, dur: dur, x: u.x, y: u.y,
-      dmg: dmg, aoe: def.aoe, team: u.team, src: u
-    });
+    /* 投石车/火箭炮：抛物线弹，只落在预测落点；multirock = 多管齐射 */
+    var n = def.multirock ? def.multirock.n : 1;
+    for (var mi = 0; mi < n; mi++) {
+      var dist0 = hyp(t.x - u.x, t.y - u.y);
+      var lead0 = 0.8 + dist0 / 260;
+      var rtx = t.x + Math.cos(t.face) * t.spd * lead0 * 0.6;
+      var rty = t.y + Math.sin(t.face) * t.spd * lead0 * 0.6;
+      if (def.multirock) { rtx += rand(-def.multirock.spread, def.multirock.spread); rty += rand(-def.multirock.spread, def.multirock.spread); }
+      rtx = clamp(rtx, 20, W - 20); rty = clamp(rty, 20, H - 20);
+      var distJ = hyp(rtx - u.x, rty - u.y);
+      projectiles.push({
+        kind: 'rock', sx: u.x + Math.cos(u.face) * u.r, sy: u.y + Math.sin(u.face) * u.r,
+        tx: rtx, ty: rty, t: -mi * 0.08, dur: 0.8 + distJ / 300 + rand(0, 0.2), x: u.x, y: u.y,
+        dmg: dmg, aoe: def.aoe, team: u.team, src: u
+      });
+    }
     sfx('fire');
     return;
   }
-  var straight = (def.proj === 'arrow' || def.proj === 'spear' || def.proj === 'ice' || def.proj === 'bolt' || def.proj === 'shadow');
+  var straight = (def.proj === 'arrow' || def.proj === 'spear' || def.proj === 'ice' || def.proj === 'bolt' || def.proj === 'shadow' ||
+                  def.proj === 'bullet' || def.proj === 'shell' || def.proj === 'rocket');
   if (straight) {
-    var sp = def.proj === 'spear' ? 360 : 420;
+    var spMap = { arrow: 420, spear: 360, ice: 420, bolt: 420, shadow: 420, bullet: 900, shell: 700, rocket: 300 };
+    var sp = spMap[def.proj] || 420;
     var lead = hyp(t.x - u.x, t.y - u.y) / sp;
     var tx = t.x + Math.cos(t.face) * t.spd * lead;
     var ty = t.y + Math.sin(t.face) * t.spd * lead;
-    var spread = def.proj === 'spear' ? 0.03 : 0.05;
+    var spread = def.spread !== undefined ? def.spread : (def.proj === 'spear' ? 0.03 : def.proj === 'bullet' ? 0.02 : 0.05);
     var ang = Math.atan2(ty - u.y, tx - u.x) + rand(-spread, spread);
     projectiles.push({
       kind: def.proj, x: u.x + Math.cos(ang) * u.r, y: u.y + Math.sin(ang) * u.r,
       vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
-      dmg: dmg, team: u.team, life: 1.6, src: u, pierce: !!def.pierce
+      dmg: dmg, aoe: def.aoe, team: u.team, life: def.proj === 'bullet' ? 0.9 : 1.6, src: u, pierce: !!def.pierce
     });
-    sfx(def.proj === 'arrow' ? 'arrow' : 'fire');
+    if (def.proj === 'shell') {           // 坦克主炮：后坐力 + 炮口焰
+      u.kb.x -= Math.cos(ang) * 170;
+      u.kb.y -= Math.sin(ang) * 170;
+      shake += 1.5;
+      for (var fz = 0; fz < 8; fz++) {
+        if (particles.length > 600) break;
+        particles.push({
+          x: u.x + Math.cos(ang) * (u.r + 16), y: u.y + Math.sin(ang) * (u.r + 16),
+          vx: Math.cos(ang) * rand(40, 160) + rand(-30, 30), vy: Math.sin(ang) * rand(40, 160) + rand(-30, 30),
+          life: rand(0.15, 0.3), maxLife: 0.3, size: rand(2, 4), color: '#ffe9a8'
+        });
+      }
+    }
+    sfx(def.proj === 'arrow' || def.proj === 'bullet' ? 'arrow' : 'fire');
   } else {
     var spf = 230;
     var tt = hyp(t.x - u.x, t.y - u.y) / spf;
@@ -917,12 +956,14 @@ function simProjectiles(dt) {
     var p = projectiles[i];
     var dead = false;
     if (p.kind === 'rock') {
-      /* 抛石：沿抛物线飞向落点，途中无碰撞 */
+      /* 抛石/火箭齐射：沿抛物线飞向落点，途中无碰撞；t<0 为待发射 */
       p.t += dt / p.dur;
-      var tt = Math.min(1, p.t);
-      p.x = lerp(p.sx, p.tx, tt);
-      p.y = lerp(p.sy, p.ty, tt);
-      if (p.t >= 1) { explode(p); dead = true; }
+      if (p.t >= 0) {
+        var tt = Math.min(1, p.t);
+        p.x = lerp(p.sx, p.tx, tt);
+        p.y = lerp(p.sy, p.ty, tt);
+        if (p.t >= 1) { explode(p); dead = true; }
+      }
     } else {
       p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
       dead = p.life <= 0;
@@ -930,14 +971,17 @@ function simProjectiles(dt) {
         particles.push({ x: p.x, y: p.y, vx: rand(-15, 15), vy: rand(-15, 15), life: 0.3, maxLife: 0.3, size: 3, color: '#f2a13c' });
         if (hyp(p.tx - p.x, p.ty - p.y) < 12) { explode(p); dead = true; }
       }
+      if ((p.kind === 'rocket' || p.kind === 'shell') && particles.length < 600) {   // 尾焰
+        particles.push({ x: p.x, y: p.y, vx: rand(-20, 20), vy: rand(-20, 20), life: 0.22, maxLife: 0.22, size: 2.5, color: '#f2a13c' });
+      }
       if (!dead) {
         for (var j = 0; j < units.length; j++) {
           var e = units[j];
           if (!e.alive || e.team === p.team) continue;
-          var rr = e.r + (p.kind === 'fire' ? 8 : p.kind === 'spear' ? 6 : 4);
+          var rr = e.r + (p.kind === 'fire' ? 8 : p.kind === 'spear' ? 6 : p.kind === 'shell' ? 7 : p.kind === 'rocket' ? 6 : 4);
           var ex = e.x - p.x, ey = e.y - p.y;
           if (ex * ex + ey * ey < rr * rr) {
-            if (p.kind === 'fire') { explode(p); }
+            if (p.kind === 'fire' || p.kind === 'rocket' || p.kind === 'shell') { explode(p); }
             else {
               var v = Math.max(1, hyp(p.vx, p.vy));
               damage(e, p.dmg * rand(0.9, 1.1), p.src, p.vx / v, p.vy / v, 40, p.pierce);
@@ -1067,6 +1111,16 @@ function drawHuman(u, c, swing) {
   if (u.type === 'lich') skin = '#d8d0e8';
   ctx.fillStyle = skin;
   ctx.beginPath(); ctx.arc(r * 0.2, 0, r * 0.42, 0, TAU); ctx.fill();
+  /* 现代兵种：钢盔（覆盖脑后） */
+  if (u.type === 'rifleman' || u.type === 'gunner' || u.type === 'sniper' || u.type === 'bazooka' || u.type === 'medic') {
+    ctx.strokeStyle = '#55643e'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(r * 0.2, 0, r * 0.46, Math.PI * 0.62, Math.PI * 1.38); ctx.stroke();
+  }
+  if (u.type === 'medic') {               // 红十字袖标
+    ctx.fillStyle = '#e05050';
+    ctx.fillRect(-1.5, -r * 0.42, 3, r * 0.84);
+    ctx.fillRect(-r * 0.28, -1.5, r * 0.56, 3);
+  }
   if (u.type === 'skeleton') {             // 黑眼窝
     ctx.fillStyle = '#1a1a1a';
     ctx.beginPath(); ctx.arc(r * 0.28, -r * 0.14, r * 0.09, 0, TAU); ctx.fill();
@@ -1253,6 +1307,24 @@ function drawHuman(u, c, swing) {
     for (var gcs = -1; gcs <= 1; gcs += 2) {
       seg(r * 0.5, gcs * 3, r + 12, gcs * 5, '#b8bcc4', 2.5);
     }
+  } else if (u.type === 'rifleman') {     // 步枪
+    seg(r * 0.2, 3, r + 16, 3, '#3a3f45', 3);
+    seg(r + 6, 3, r + 6, 7, '#2a2e33', 2);          // 弹匣
+  } else if (u.type === 'gunner') {       // 机枪 + 支架
+    seg(0, 2, r + 22, 2, '#2e3338', 4);
+    seg(r + 14, 2, r + 20, 7, '#2e3338', 2);
+    seg(r + 14, 2, r + 20, -3, '#2e3338', 2);
+  } else if (u.type === 'sniper') {       // 长狙 + 瞄准镜
+    seg(-r * 0.2, 2, r + 30, 2, '#3a3f45', 3);
+    ctx.fillStyle = '#5a7a9a';
+    ctx.beginPath(); ctx.arc(r + 8, -2, 2.5, 0, TAU); ctx.fill();
+  } else if (u.type === 'bazooka') {      // 肩扛火箭筒
+    seg(-r * 0.3, -r * 0.35, r + 18, -r * 0.2, '#4e5a4e', 5.5);
+    ctx.fillStyle = '#e8722a';
+    ctx.beginPath(); ctx.arc(r + 18, -r * 0.2, 2.5, 0, TAU); ctx.fill();
+  } else if (u.type === 'medic') {        // 医疗包
+    ctx.fillStyle = '#e8e8e0'; ctx.strokeStyle = '#a8a8a0'; ctx.lineWidth = 1;
+    ctx.fillRect(r * 0.5, -3, 7, 6); ctx.strokeRect(r * 0.5, -3, 7, 6);
   }
   ctx.restore();
 }
@@ -1418,6 +1490,93 @@ function drawDragon(u, c, swing) {
     ctx.closePath(); ctx.fill();
   }
 }
+function drawHumvee(u, c, swing) {
+  var r = u.r, s;
+  ctx.fillStyle = '#33382e';               // 四轮
+  for (s = -1; s <= 1; s += 2) {
+    ctx.beginPath(); ctx.arc(r * 0.72, s * r * 0.78, r * 0.3, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(-r * 0.72, s * r * 0.78, r * 0.3, 0, TAU); ctx.fill();
+  }
+  ctx.fillStyle = c.main; ctx.strokeStyle = c.dark; ctx.lineWidth = 2.5;
+  ctx.beginPath();                         // 车身
+  ctx.moveTo(r * 1.15, 0);
+  ctx.lineTo(r * 0.6, -r * 0.68); ctx.lineTo(-r * 1.0, -r * 0.6);
+  ctx.lineTo(-r * 1.15, 0); ctx.lineTo(-r * 1.0, r * 0.6); ctx.lineTo(r * 0.6, r * 0.68);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#2e3540';               // 驾驶舱窗
+  ctx.fillRect(r * 0.1, -r * 0.38, r * 0.5, r * 0.76);
+  ctx.save();                              // 顶装机枪
+  ctx.rotate(-0.25 + swing * 1.2);
+  seg(r * 0.1, 0, r + 15, 0, '#2a2e33', 3);
+  ctx.restore();
+}
+function drawTank(u, c, swing) {
+  var r = u.r, s, w;
+  ctx.fillStyle = '#33382e';               // 履带
+  for (s = -1; s <= 1; s += 2) ctx.fillRect(-r * 1.05, s * r * 0.72 - r * 0.28, r * 2.1, r * 0.56);
+  ctx.fillStyle = '#20241c';
+  for (s = -1; s <= 1; s += 2) {
+    for (w = -1; w <= 1; w++) { ctx.beginPath(); ctx.arc(w * r * 0.6, s * r * 0.72, r * 0.14, 0, TAU); ctx.fill(); }
+  }
+  ctx.fillStyle = c.main; ctx.strokeStyle = c.dark; ctx.lineWidth = 2.5;
+  ctx.beginPath();                         // 车体
+  ctx.moveTo(r * 1.05, 0);
+  ctx.lineTo(r * 0.5, -r * 0.6); ctx.lineTo(-r * 0.95, -r * 0.55);
+  ctx.lineTo(-r * 1.05, 0); ctx.lineTo(-r * 0.95, r * 0.55); ctx.lineTo(r * 0.5, r * 0.6);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  var rec = swing > 0 ? swing * 5 : 0;     // 开炮后坐缩管
+  seg(r * 0.3 - rec, 0, r * 1.95 - rec, 0, '#3a3f45', 5);
+  ctx.fillStyle = c.main; ctx.strokeStyle = c.dark; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, r * 0.5, 0, TAU); ctx.fill(); ctx.stroke();   // 炮塔
+  if (swing > 0.6) {                       // 炮口闪光
+    ctx.fillStyle = 'rgba(255,220,120,' + swing + ')';
+    ctx.beginPath(); ctx.arc(r * 2.0, 0, 8 * swing, 0, TAU); ctx.fill();
+  }
+}
+function drawMLRS(u, c, swing) {
+  var r = u.r, s;
+  ctx.fillStyle = '#33382e';
+  for (s = -1; s <= 1; s += 2) ctx.fillRect(-r * 0.95, s * r * 0.66 - r * 0.24, r * 1.9, r * 0.48);
+  ctx.fillStyle = c.main; ctx.strokeStyle = c.dark; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(r * 0.95, 0);
+  ctx.lineTo(r * 0.45, -r * 0.55); ctx.lineTo(-r * 0.85, -r * 0.5);
+  ctx.lineTo(-r * 0.95, 0); ctx.lineTo(-r * 0.85, r * 0.5); ctx.lineTo(r * 0.45, r * 0.55);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.save();                              // 抬升的火箭巢
+  ctx.rotate(-0.35 + swing * 0.5);
+  ctx.fillStyle = '#4e4438'; ctx.strokeStyle = '#332b22'; ctx.lineWidth = 2;
+  ctx.fillRect(-r * 0.3, -r * 0.5, r * 1.15, r);
+  ctx.strokeRect(-r * 0.3, -r * 0.5, r * 1.15, r);
+  ctx.fillStyle = '#1e1a14';
+  for (s = -1; s <= 1; s += 2) {
+    ctx.beginPath(); ctx.arc(r * 0.85, s * r * 0.24, r * 0.14, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+function drawHeli(u, c, swing) {
+  var r = u.r, b;
+  seg(-r * 0.9, 0, -r * 1.8, r * 0.15, c.dark, 4);        // 尾梁
+  ctx.fillStyle = c.dark;
+  ctx.beginPath(); ctx.arc(-r * 1.8, r * 0.15, r * 0.18, 0, TAU); ctx.fill();   // 尾桨毂
+  seg(r * 0.15, -r * 0.68, r * 0.15, r * 0.68, c.dark, 3);   // 短翼
+  ctx.fillStyle = c.main; ctx.strokeStyle = c.dark; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.ellipse(0, 0, r * 1.15, r * 0.72, 0, 0, TAU); ctx.fill(); ctx.stroke();   // 机身
+  ctx.fillStyle = '#2e3540';                              // 座舱玻璃
+  ctx.beginPath(); ctx.arc(r * 0.72, 0, r * 0.34, -1.1, 1.1); ctx.closePath(); ctx.fill();
+  if (swing > 0.5) {                                      // 机炮火光
+    ctx.fillStyle = 'rgba(255,230,150,' + ((swing - 0.5) * 2) + ')';
+    ctx.beginPath(); ctx.arc(r * 1.05, r * 0.15, 4.5, 0, TAU); ctx.fill();
+  }
+  ctx.save();                                             // 主旋翼
+  ctx.globalAlpha = 0.5;
+  ctx.rotate(performance.now() / 40);
+  for (b = 0; b < 3; b++) {
+    ctx.rotate(TAU / 3);
+    seg(0, 0, r * 1.55, 0, '#c8d0d8', 2.5);
+  }
+  ctx.restore();
+}
 function previewUnit(p) {
   var def = DEFS[p.type];
   return {
@@ -1451,6 +1610,10 @@ function drawUnit(u) {
   else if (u.type === 'treant') drawTreant(u, c, swing);
   else if (u.type === 'cyclops') drawCyclops(u, c, swing);
   else if (u.type === 'dragon') drawDragon(u, c, swing);
+  else if (u.type === 'humvee') drawHumvee(u, c, swing);
+  else if (u.type === 'tank') drawTank(u, c, swing);
+  else if (u.type === 'mlrs') drawMLRS(u, c, swing);
+  else if (u.type === 'heli') drawHeli(u, c, swing);
   else drawHuman(u, c, swing);
   if (u.poisonT > 0) {                     // 中毒绿罩
     ctx.fillStyle = 'rgba(110,220,110,0.22)';
@@ -1499,6 +1662,7 @@ function drawProj(p) {
     return;
   }
   if (p.kind === 'rock') {
+    if (p.t <= 0) return;                 // 齐射待发射
     var tt = Math.min(1, p.t);
     var hgt = Math.sin(Math.PI * tt) * 90;
     ctx.setLineDash([6, 6]);                // 落点预警圈
@@ -1516,18 +1680,25 @@ function drawProj(p) {
   /* 直线投射物：箭 / 矛 / 冰锥 / 奥术弹 */
   var v = Math.max(1, hyp(p.vx, p.vy));
   var nx = p.vx / v, ny = p.vy / v;
-  var len = p.kind === 'spear' ? 22 : 14;
+  var len = p.kind === 'spear' ? 22 : p.kind === 'shell' ? 16 : p.kind === 'rocket' ? 14 : 14;
   var shaft = p.kind === 'arrow' ? '#6b5844'
     : p.kind === 'spear' ? '#8a6b4a'
     : p.kind === 'ice' ? '#7fc4e8'
-    : p.kind === 'shadow' ? '#6a3e9e' : '#9a6ae0';
+    : p.kind === 'shadow' ? '#6a3e9e'
+    : p.kind === 'bullet' ? '#ffe9a8'
+    : p.kind === 'shell' ? '#ffd76a'
+    : p.kind === 'rocket' ? '#e8722a' : '#9a6ae0';
   var tipC = p.kind === 'arrow' ? '#e6ebf0'
     : p.kind === 'spear' ? '#cfd6dd'
     : p.kind === 'ice' ? '#ffffff'
-    : p.kind === 'shadow' ? '#c9a8f0' : '#d8c2f5';
+    : p.kind === 'shadow' ? '#c9a8f0'
+    : p.kind === 'bullet' ? '#ffffff'
+    : p.kind === 'shell' ? '#ffffff'
+    : p.kind === 'rocket' ? '#ffe9a8' : '#d8c2f5';
+  var lw = p.kind === 'shell' ? 3.5 : p.kind === 'bullet' ? 2 : p.kind === 'spear' ? 3 : 2.5;
   ctx.fillStyle = 'rgba(0,0,0,0.12)';
   ctx.beginPath(); ctx.arc(p.x + 4, p.y + 6, 2, 0, TAU); ctx.fill();
-  seg(p.x - nx * len, p.y - ny * len, p.x, p.y, shaft, p.kind === 'spear' ? 3 : 2.5);
+  seg(p.x - nx * len, p.y - ny * len, p.x, p.y, shaft, lw);
   ctx.fillStyle = tipC;
   ctx.beginPath(); ctx.arc(p.x, p.y, p.kind === 'spear' ? 2.4 : 1.8, 0, TAU); ctx.fill();
 }
