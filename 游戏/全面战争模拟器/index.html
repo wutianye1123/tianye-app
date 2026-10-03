@@ -30,15 +30,18 @@ button{background:#262d36;border:1px solid #3a434e;color:#e8eaed;border-radius:8
 button:hover{background:#333d49;border-color:#4a5563}
 #bottombar{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);display:flex;flex-direction:column;
   gap:8px;align-items:center;z-index:10;max-width:98vw}
-#cards{display:flex;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:14px;
-  padding:10px;max-width:94vw;overflow-x:auto}
-.card{width:76px;flex:0 0 auto;background:#232a33;border:2px solid #333d49;border-radius:10px;
-  padding:8px 4px;text-align:center;cursor:pointer;transition:.12s}
+#cards{display:flex;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  padding:10px;max-width:96vw;overflow-x:auto}
+.cgroup{display:flex;flex-direction:column;gap:5px;flex:0 0 auto}
+.ghead{font-size:11px;letter-spacing:2px;border-left:3px solid;padding-left:6px;opacity:.95;white-space:nowrap}
+.grow{display:flex;gap:6px}
+.card{width:68px;flex:0 0 auto;background:#232a33;border:2px solid #333d49;border-radius:10px;
+  padding:7px 3px;text-align:center;cursor:pointer;transition:.12s}
 .card:hover{transform:translateY(-2px);border-color:#4a5563}
 .card.sel{border-color:var(--gold);background:#2e3540;box-shadow:0 0 0 1px var(--gold)}
-.card .ic{width:36px;height:36px;border-radius:50%;margin:0 auto 5px;display:flex;align-items:center;
-  justify-content:center;font-size:17px;font-weight:700;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.55)}
-.card .nm{font-size:12px}
+.card .ic{width:32px;height:32px;border-radius:50%;margin:0 auto 4px;display:flex;align-items:center;
+  justify-content:center;font-size:16px;font-weight:700;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.55)}
+.card .nm{font-size:11px;white-space:nowrap}
 .card .ct{font-size:11px;color:var(--gold);margin-top:1px}
 #actionrow{display:flex;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);
   border-radius:12px;padding:8px 12px;flex-wrap:wrap;justify-content:center}
@@ -83,6 +86,7 @@ button:hover{background:#333d49;border-color:#4a5563}
     <div class="bctrl place-only"><button data-bt="1" data-d="-250">预算 -</button><button data-bt="1" data-d="250">预算 +</button></div>
   </div>
   <div id="ctrls">
+    <button id="btnMoney">预算 正常</button>
     <button id="btnSound">音效 开</button>
     <button id="btnPause" class="battle-only hidden">暂停</button>
     <button id="btnSpeed" class="battle-only hidden">速度 1x</button>
@@ -99,7 +103,7 @@ button:hover{background:#333d49;border-color:#4a5563}
     <button id="btnClear">清空本方</button>
     <button id="btnFight">开 战</button>
   </div>
-  <div id="hint">左键 放置 / 拖动 · 右键 移除 · 数字键 1-9 快选前 9 个兵种 · Q 切换队伍 · 空格 暂停 · ESC 返回部署</div>
+  <div id="hint">左键 放置 / 拖动 · 右键 移除 · 数字键 1-9 快选王国军团 · Q 切换队伍 · 顶部可开无限预算 · 空格 暂停 · ESC 返回部署</div>
 </div>
 
 <div id="battlebar" class="hidden">
@@ -161,10 +165,35 @@ var DEFS = {
   bomber:     { name: '炸弹人', ic: '炸', icColor: '#3d3d3d', cost: 150, hp: 60,  dmg: 75, range: 0,   speed: 75,  cd: 0,    r: 10, kind: 'kamikaze', aoe: 66, desc: '冲入敌阵自爆' },
   king:       { name: '国王',   ic: '王', icColor: '#e0b13c', cost: 300, hp: 280, dmg: 20, range: 26,  speed: 50,  cd: 0.9,  r: 12, kind: 'melee',  aura: { r: 150, mult: 1.3 }, armor: 1, desc: '周围友军伤害+30%' },
   summoner:   { name: '召唤师', ic: '召', icColor: '#6a4fa0', cost: 300, hp: 80,  dmg: 10, range: 200, speed: 42,  cd: 2.0,  r: 10, kind: 'ranged', proj: 'bolt', summon: { type: 'farmer', interval: 5.5, per: 2, max: 6 }, desc: '不断召唤农夫援军' },
-  catapult:   { name: '投石车', ic: '炮', icColor: '#8a7351', cost: 420, hp: 190, dmg: 55, range: 480, speed: 15,  cd: 4.2,  r: 17, kind: 'ranged', proj: 'rock', aoe: 70, minRange: 130, armor: 1, desc: '超远程抛石范围杀伤' }
+  catapult:   { name: '投石车', ic: '炮', icColor: '#8a7351', cost: 420, hp: 190, dmg: 55, range: 480, speed: 15,  cd: 4.2,  r: 17, kind: 'ranged', proj: 'rock', aoe: 70, minRange: 130, armor: 1, desc: '超远程抛石范围杀伤' },
+  /* ---- 黑暗军团 ---- */
+  skeleton:   { name: '骷髅兵',   ic: '骷', icColor: '#b8b8a8', cost: 50,  hp: 60,  dmg: 9,  range: 24,  speed: 62,  cd: 0.6,  r: 9,  kind: 'melee',  deathBurst: { aoe: 48, dmg: 12 }, desc: '死亡时爆出骨刺' },
+  gargoyle:   { name: '石像鬼',   ic: '翼', icColor: '#7d8288', cost: 170, hp: 230, dmg: 14, range: 26,  speed: 44,  cd: 0.9,  r: 12, kind: 'melee',  armor: 2, regen: 8, desc: '脱战后石化自愈' },
+  darkknight: { name: '黑骑士',   ic: '黑', icColor: '#3a3a44', cost: 280, hp: 240, dmg: 22, range: 30,  speed: 92,  cd: 0.9,  r: 13, kind: 'melee',  charge: true, kb: 170, lifesteal: 0.35, desc: '冲锋且吸血的重骑' },
+  necromancer:{ name: '死灵法师', ic: '灵', icColor: '#5a8a4e', cost: 260, hp: 75,  dmg: 10, range: 190, speed: 40,  cd: 2.2,  r: 10, kind: 'ranged', proj: 'shadow', slow: { dur: 1.5, factor: 0.75 }, summon: { type: 'skeleton', interval: 6, per: 1, max: 5 }, desc: '不停召唤骷髅兵' },
+  lich:       { name: '巫妖',     ic: '巫', icColor: '#6a4e8a', cost: 320, hp: 90,  dmg: 26, range: 230, speed: 40,  cd: 2.4,  r: 10, kind: 'ranged', proj: 'shadow', slow: { dur: 2, factor: 0.65 }, desc: '暗影弹减速远处敌人' },
+  /* ---- 元素魔法 ---- */
+  pyromancer: { name: '火焰术士', ic: '焰', icColor: '#c46a2a', cost: 210, hp: 70,  dmg: 20, range: 200, speed: 44,  cd: 2.0,  r: 10, kind: 'ranged', proj: 'fire', aoe: 45, burn: { dps: 8, dur: 2.5 }, desc: '火球爆炸并点燃敌人' },
+  stormmage:  { name: '雷电法师', ic: '雷', icColor: '#4a7ab8', cost: 250, hp: 70,  dmg: 22, range: 210, speed: 44,  cd: 1.9,  r: 10, kind: 'ranged', chain: { count: 3, range: 120, falloff: 0.7 }, desc: '闪电链弹射多个敌人' },
+  earthwarden:{ name: '大地祭司', ic: '地', icColor: '#8a7a4e', cost: 240, hp: 130, dmg: 10, range: 24,  speed: 46,  cd: 1.0,  r: 11, kind: 'melee',  auraArmor: { r: 140, armor: 3 }, desc: '光环：周围友军+3护甲' },
+  druid:      { name: '德鲁伊',   ic: '藤', icColor: '#4e8a4e', cost: 220, hp: 90,  dmg: 12, range: 26,  speed: 50,  cd: 0.9,  r: 10, kind: 'melee',  slowAura: { r: 130, factor: 0.5 }, slow: { dur: 2, factor: 0.5 }, desc: '藤蔓领域持续减速敌人' },
+  /* ---- 远古巨兽 ---- */
+  warbear:    { name: '战熊',     ic: '熊', icColor: '#7a5a3a', cost: 190, hp: 300, dmg: 20, range: 26,  speed: 60,  cd: 0.9,  r: 13, kind: 'melee',  kb: 100, desc: '皮糙肉厚的中型巨兽' },
+  minotaur:   { name: '牛头怪',   ic: '牛', icColor: '#8a5a3a', cost: 320, hp: 330, dmg: 28, range: 28,  speed: 86,  cd: 1.0,  r: 13, kind: 'melee',  charge: true, kb: 260, desc: '蛮角冲锋，撞飞敌人' },
+  troll:      { name: '巨魔',     ic: '魔', icColor: '#5e8a4e', cost: 380, hp: 520, dmg: 30, range: 30,  speed: 42,  cd: 1.2,  r: 16, kind: 'melee',  regen: 22, kb: 120, desc: '脱战后疯狂回血' },
+  treant:     { name: '树人',     ic: '树', icColor: '#4e6a35', cost: 400, hp: 760, dmg: 20, range: 34,  speed: 22,  cd: 1.5,  r: 18, kind: 'melee',  armor: 2, regen: 6, slow: { dur: 2.2, factor: 0.6 }, desc: '根须缠绕，越打越硬' },
+  cyclops:    { name: '独眼巨人', ic: '独', icColor: '#9a8a6a', cost: 450, hp: 600, dmg: 45, range: 42,  speed: 34,  cd: 1.6,  r: 18, kind: 'melee',  aoeMelee: true, kb: 200, desc: '巨棒横扫一片' },
+  dragon:     { name: '远古巨龙', ic: '龙', icColor: '#a03a3a', cost: 900, hp: 820, dmg: 42, range: 55,  speed: 40,  cd: 1.4,  r: 20, kind: 'melee',  aoeMelee: true, burn: { dps: 10, dur: 3 }, armor: 1, desc: '龙息焚烧面前一切' }
 };
-var DEF_ORDER = ['farmer', 'swordsman', 'pikeman', 'shield', 'archer', 'berserker', 'knight', 'mage', 'giant',
-                 'javelineer', 'priest', 'assassin', 'icemage', 'vampire', 'bomber', 'king', 'summoner', 'catapult'];
+/* 兵种系列（卡片分组 + 热键 1-9 = 王国军团） */
+var SERIES = [
+  { name: '王国军团', color: '#6ea8ff', types: ['farmer', 'swordsman', 'pikeman', 'shield', 'archer', 'javelineer', 'knight', 'king', 'catapult'] },
+  { name: '黑暗军团', color: '#f08a9a', types: ['skeleton', 'assassin', 'berserker', 'bomber', 'gargoyle', 'vampire', 'darkknight', 'necromancer', 'lich'] },
+  { name: '元素魔法', color: '#6ad0d8', types: ['mage', 'icemage', 'pyromancer', 'stormmage', 'earthwarden', 'druid', 'priest', 'summoner'] },
+  { name: '远古巨兽', color: '#d8b88a', types: ['warbear', 'minotaur', 'troll', 'treant', 'cyclops', 'giant', 'dragon'] }
+];
+var DEF_ORDER = [];
+SERIES.forEach(function (s) { DEF_ORDER = DEF_ORDER.concat(s.types); });
 
 var PRESETS = [
   { name: '均衡军团', comp: { swordsman: 3, archer: 2, shield: 1, javelineer: 1 } },
@@ -179,15 +208,24 @@ var PRESETS = [
   { name: '火力压制', comp: { catapult: 2, shield: 2, archer: 3 } },
   { name: '自爆浪潮', comp: { bomber: 5, knight: 2 } },
   { name: '无尽军团', comp: { summoner: 2, priest: 1, farmer: 6 } },
-  { name: '王者亲征', comp: { king: 1, knight: 2, priest: 1, javelineer: 2 } }
+  { name: '王者亲征', comp: { king: 1, knight: 2, priest: 1, javelineer: 2 } },
+  { name: '白骨军团', comp: { skeleton: 6, necromancer: 1 } },
+  { name: '暗影降临', comp: { assassin: 3, vampire: 2, darkknight: 1, lich: 1 } },
+  { name: '雷暴秘术', comp: { stormmage: 2, icemage: 2, pyromancer: 2, earthwarden: 1 } },
+  { name: '自然之怒', comp: { treant: 1, druid: 2, warbear: 3 } },
+  { name: '巨兽横行', comp: { troll: 1, minotaur: 2, cyclops: 1 } },
+  { name: '巨龙苏醒', comp: { dragon: 1, skeleton: 8 } },
+  { name: '石像守望', comp: { gargoyle: 4, lich: 1, skeleton: 2 } },
+  { name: '熊蛮冲锋', comp: { warbear: 4, minotaur: 1 } }
 ];
 
 /* ---------- 状态 ---------- */
 var state = 'place';           // place | battle | ending | over
 var placed = [];               // 布阵 {type,team,x,y}
 var units = [];                // 战斗单位
-var projectiles = [], particles = [], floaters = [], corpses = [];
+var projectiles = [], particles = [], floaters = [], corpses = [], lightnings = [];
 var budget = [2000, 2000];
+var infiniteMoney = false;      // 无限预算模式
 var curTeam = 0, curType = 'swordsman';
 var SPEEDS = [0.5, 1, 2], speedIdx = 1, paused = false;
 var battleTime = 0, kills = [0, 0], startCounts = [0, 0], unitTotals = [0, 0];
@@ -303,22 +341,37 @@ var otitle = $('otitle'), ostats = $('ostats');
 var btnPause = $('btnPause'), btnSpeed = $('btnSpeed'), btnSound = $('btnSound');
 var btnTeamB = $('btnTeamB'), btnTeamR = $('btnTeamR');
 
-/* ---------- 兵种卡片 ---------- */
+/* ---------- 兵种卡片（按系列分组） ---------- */
 (function buildCards() {
   var box = $('cards');
-  DEF_ORDER.forEach(function (id, i) {
-    var d = DEFS[id];
-    var el = document.createElement('div');
-    el.className = 'card' + (id === curType ? ' sel' : '');
-    el.setAttribute('data-type', id);
-    el.title = d.name + ' · ' + d.cost + '金 · 生命' + d.hp + ' · 伤害' + d.dmg + ' · ' + d.desc + (i < 9 ? '（快捷键 ' + (i + 1) + '）' : '');
-    el.innerHTML = '<div class="ic" style="background:' + d.icColor + '">' + d.ic + '</div>' +
-      '<div class="nm">' + d.name + '</div><div class="ct">' + d.cost + '</div>';
-    el.addEventListener('click', function () {
-      curType = id;
-      document.querySelectorAll('.card').forEach(function (c) { c.classList.toggle('sel', c.getAttribute('data-type') === id); });
+  SERIES.forEach(function (s) {
+    var g = document.createElement('div');
+    g.className = 'cgroup';
+    var h = document.createElement('div');
+    h.className = 'ghead';
+    h.textContent = s.name;
+    h.style.color = s.color;
+    h.style.borderColor = s.color;
+    var row = document.createElement('div');
+    row.className = 'grow';
+    s.types.forEach(function (id) {
+      var i = DEF_ORDER.indexOf(id);
+      var d = DEFS[id];
+      var el = document.createElement('div');
+      el.className = 'card' + (id === curType ? ' sel' : '');
+      el.setAttribute('data-type', id);
+      el.title = d.name + ' · ' + d.cost + '金 · 生命' + d.hp + ' · 伤害' + d.dmg + ' · ' + d.desc + (i < 9 ? '（快捷键 ' + (i + 1) + '）' : '');
+      el.innerHTML = '<div class="ic" style="background:' + d.icColor + '">' + d.ic + '</div>' +
+        '<div class="nm">' + d.name + '</div><div class="ct">' + d.cost + '</div>';
+      el.addEventListener('click', function () {
+        curType = id;
+        document.querySelectorAll('.card').forEach(function (c) { c.classList.toggle('sel', c.getAttribute('data-type') === id); });
+      });
+      row.appendChild(el);
     });
-    box.appendChild(el);
+    g.appendChild(h);
+    g.appendChild(row);
+    box.appendChild(g);
   });
 })();
 function refreshCards() {
@@ -327,7 +380,7 @@ function refreshCards() {
 
 /* ---------- 预算 / 队伍 ---------- */
 function spent(t) { var s = 0; for (var i = 0; i < placed.length; i++) if (placed[i].team === t) s += DEFS[placed[i].type].cost; return s; }
-function remaining(t) { return budget[t] - spent(t); }
+function remaining(t) { return infiniteMoney ? 1e9 : budget[t] - spent(t); }
 function teamCount(t) { var n = 0; for (var i = 0; i < placed.length; i++) if (placed[i].team === t) n++; return n; }
 function toggleTeam() {
   curTeam = 1 - curTeam;
@@ -346,7 +399,7 @@ function canPlaceAt(team, type, x, y) {
   if (x < 40 || x > W - 40 || y < 40 || y > H - 40) return { ok: false, reason: '超出战场范围' };
   var wrongHalf = team === 0 ? x > W / 2 - 30 : x < W / 2 + 30;
   if (wrongHalf) return { ok: false, reason: team === 0 ? '蓝军只能部署在左半场' : '红军只能部署在右半场' };
-  if (remaining(team) < def.cost) return { ok: false, reason: '预算不足（剩余 ' + remaining(team) + '）' };
+  if (!infiniteMoney && remaining(team) < def.cost) return { ok: false, reason: '预算不足（剩余 ' + remaining(team) + '）' };
   if (placed.length >= 300) return { ok: false, reason: '单位数量已达上限' };
   return { ok: true };
 }
@@ -369,7 +422,7 @@ function removeNear(x, y) {
 function randomDeploy(team) {
   placed = placed.filter(function (p) { return p.team !== team; });
   var preset = PRESETS[Math.floor(Math.random() * PRESETS.length)];
-  var money = budget[team], list = [], guard = 0;
+  var money = infiniteMoney ? 12000 : budget[team], list = [], guard = 0;
   var entries = Object.keys(preset.comp).map(function (k) { return [k, preset.comp[k]]; });
   while (guard++ < 500) {
     var afford = entries.filter(function (e) { return DEFS[e[0]].cost <= money; });
@@ -412,6 +465,8 @@ function spawnUnit(p) {
     face: p.team === 0 ? 0 : Math.PI, anim: 0, walk: Math.random() * 10, spd: 0,
     kb: { x: 0, y: 0 }, fallen: 0, alive: true,
     slowT: 0, slowFactor: 0.55, poisonT: 0, poisonDps: 0, poisonTick: 0, poisonSrc: null,
+    burnT: 0, burnDps: 0, burnTick: 0, burnSrc: null,
+    lastHurt: -99, regenTick: 0,
     blinkCd: rand(1, 2), summonCd: def.summon ? def.summon.interval : 0, summons: []
   };
 }
@@ -421,7 +476,7 @@ function startBattle() {
     return;
   }
   units = placed.map(spawnUnit);
-  projectiles = []; particles = []; floaters = []; corpses = [];
+  projectiles = []; particles = []; floaters = []; corpses = []; lightnings = [];
   kills = [0, 0]; battleTime = 0; winner = -1; endT = 0; paused = false;
   startCounts = [teamCount(0), teamCount(1)];
   unitTotals = [startCounts[0], startCounts[1]];
@@ -433,7 +488,7 @@ function backToPlace() {
   state = 'place';
   overlay.classList.add('hidden');
   paused = false;
-  units = []; projectiles = []; floaters = []; corpses = []; particles = [];
+  units = []; projectiles = []; floaters = []; corpses = []; particles = []; lightnings = [];
   battleTime = 0; winner = -1;
 }
 
@@ -450,13 +505,24 @@ function nearestEnemy(u) {
 }
 function aliveCount(t) { var n = 0; for (var i = 0; i < units.length; i++) if (units[i].alive && units[i].team === t) n++; return n; }
 
+/* 大地祭司等护甲光环：目标有效护甲加成 */
+function auraArmorOf(t) {
+  var bonus = 0;
+  for (var i = 0; i < units.length; i++) {
+    var a = units[i];
+    if (a === t || !a.alive || a.team !== t.team || !a.def.auraArmor) continue;
+    if (hyp(a.x - t.x, a.y - t.y) <= a.def.auraArmor.r && a.def.auraArmor.armor > bonus) bonus = a.def.auraArmor.armor;
+  }
+  return bonus;
+}
 function damage(t, raw, src, nx, ny, kb, pierce) {
   if (!t.alive) return;
-  var dmg = pierce ? raw : Math.max(1, raw - (t.def.armor || 0));
+  var dmg = pierce ? raw : Math.max(1, raw - ((t.def.armor || 0) + auraArmorOf(t)));
   var crit = Math.random() < 0.08;
   if (crit) dmg *= 1.7;
   dmg = Math.round(dmg);
   t.hp -= dmg;
+  t.lastHurt = battleTime;
   var res = 1 - (t.def.knockRes || 0);
   t.kb.x += (nx || 0) * (kb || 0) * res;
   t.kb.y += (ny || 0) * (kb || 0) * res;
@@ -486,6 +552,7 @@ function damage(t, raw, src, nx, ny, kb, pierce) {
       }
     }
     if (src.def.poison && t.alive) { t.poisonT = src.def.poison.dur; t.poisonDps = src.def.poison.dps; t.poisonSrc = src; t.poisonTick = 0.6; }
+    if (src.def.burn && t.alive) { t.burnT = src.def.burn.dur; t.burnDps = src.def.burn.dps; t.burnSrc = src; t.burnTick = 0.6; }
     if (src.def.slow && t.alive) { t.slowT = Math.max(t.slowT, src.def.slow.dur); t.slowFactor = src.def.slow.factor; }
   }
   if (t.hp <= 0) kill(t, src);
@@ -503,19 +570,20 @@ function kill(t, src) {
     });
   }
   sfx('death');
-  if (t.type === 'giant') shake += 6;
+  if (t.type === 'giant') shake += 1.5;
   if (t.def.kamikaze) doExplosion(t, t.x, t.y, t.def.aoe, t.def.dmg, t);   // 炸弹人亡语自爆
+  if (t.def.deathBurst) doExplosion(t, t.x, t.y, t.def.deathBurst.aoe, t.def.deathBurst.dmg, t, '#e8e8d8');   // 骷髅亡语骨刺
 }
-function doExplosion(src, x, y, aoe, dmg, credit) {
-  shake += 6; sfx('boom');
-  ringFx(x, y, aoe, '#f0a24a');
+function doExplosion(src, x, y, aoe, dmg, credit, fxColor) {
+  shake += 1.2; sfx('boom');   // 轻微震屏，不影响观战
+  ringFx(x, y, aoe, fxColor || '#f0a24a');
   for (var i = 0; i < 30; i++) {
     if (particles.length > 600) break;
     var a = rand(0, TAU), s = rand(50, 240);
     particles.push({
       x: x, y: y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
       life: rand(0.3, 0.7), maxLife: 0.7, size: rand(2, 5),
-      color: Math.random() < 0.5 ? '#f2b13c' : '#e86a2a'
+      color: fxColor ? (Math.random() < 0.5 ? fxColor : '#c8c8b0') : (Math.random() < 0.5 ? '#f2b13c' : '#e86a2a')
     });
   }
   for (var j = 0; j < units.length; j++) {
@@ -571,7 +639,7 @@ function meleeAttack(u, t) {
       if (d <= def.range + u.r + e.r) { damage(e, dmg * rand(0.9, 1.1), u, nx, ny, def.kb || 180, def.pierce); hitAny = true; }
     }
     if (hitAny) {
-      shake += 5;
+      shake += 1.5;
       ringFx(u.x + nx * def.range * 0.6, u.y + ny * def.range * 0.6, def.range, '#c9b48a');
       sfx('smash');
     }
@@ -587,6 +655,7 @@ function rangedAttack(u, t) {
   u.cd = def.cd * rand(0.92, 1.08); u.anim = 1;
   u.face = Math.atan2(t.y - u.y, t.x - u.x);
   var dmg = def.dmg * auraMult(u);
+  if (def.chain) { castChain(u, t, dmg); return; }
   if (def.proj === 'rock') {
     /* 投石车：抛物线落石，只落在预测落点 */
     var dist0 = hyp(t.x - u.x, t.y - u.y);
@@ -601,7 +670,7 @@ function rangedAttack(u, t) {
     sfx('fire');
     return;
   }
-  var straight = (def.proj === 'arrow' || def.proj === 'spear' || def.proj === 'ice' || def.proj === 'bolt');
+  var straight = (def.proj === 'arrow' || def.proj === 'spear' || def.proj === 'ice' || def.proj === 'bolt' || def.proj === 'shadow');
   if (straight) {
     var sp = def.proj === 'spear' ? 360 : 420;
     var lead = hyp(t.x - u.x, t.y - u.y) / sp;
@@ -629,6 +698,28 @@ function rangedAttack(u, t) {
     sfx('fire');
   }
 }
+/* 闪电链：命中后向附近敌人弹射，伤害逐跳衰减 */
+function castChain(u, t, baseDmg) {
+  var def = u.def;
+  var px = u.x, py = u.y, cur = t, d = baseDmg;
+  var hit = [];
+  for (var c = 0; c < def.chain.count && cur; c++) {
+    lightnings.push({ x1: px, y1: py, x2: cur.x, y2: cur.y, t: 0 });
+    damage(cur, d * rand(0.9, 1.1), u, (cur.x - px) / Math.max(1, hyp(cur.x - px, cur.y - py)), (cur.y - py) / Math.max(1, hyp(cur.x - px, cur.y - py)), 20);
+    hit.push(cur);
+    px = cur.x; py = cur.y;
+    d *= def.chain.falloff;
+    var next = null, nd = 1e9;
+    for (var i = 0; i < units.length; i++) {
+      var e = units[i];
+      if (!e.alive || e.team === u.team || hit.indexOf(e) >= 0) continue;
+      var dd = hyp(e.x - px, e.y - py);
+      if (dd <= def.chain.range && dd < nd) { nd = dd; next = e; }
+    }
+    cur = next;
+  }
+  sfx('fire');
+}
 
 function simUnits(dt) {
   var i, j, u, t;
@@ -654,7 +745,43 @@ function simUnits(dt) {
       }
       if (u.hp <= 0) { kill(u, u.poisonSrc); continue; }
     }
+    /* 状态效果：燃烧 */
+    if (u.burnT > 0) {
+      u.burnT -= dt; u.hp -= u.burnDps * dt; u.burnTick -= dt;
+      if (u.burnTick <= 0) {
+        u.burnTick = 0.6;
+        if (floaters.length < 220) {
+          floaters.push({ x: u.x + rand(-5, 5), y: u.y - u.r - 6, t: 0, life: 0.6, text: '' + Math.max(1, Math.round(u.burnDps * 0.6)), color: '#f2a13c', size: 11 });
+        }
+        if (particles.length < 600) {
+          particles.push({ x: u.x + rand(-4, 4), y: u.y - u.r, vx: rand(-10, 10), vy: rand(-40, -15), life: 0.4, maxLife: 0.4, size: 2.5, color: '#f2a13c' });
+        }
+      }
+      if (u.hp <= 0) { kill(u, u.burnSrc); continue; }
+    }
     if (u.slowT > 0) u.slowT -= dt;
+    /* 脱战回血（巨魔/石像鬼/树人） */
+    if (u.def.regen && battleTime - u.lastHurt > 3 && u.hp < u.maxHp) {
+      u.hp = Math.min(u.maxHp, u.hp + u.def.regen * dt);
+      u.regenTick -= dt;
+      if (u.regenTick <= 0) {
+        u.regenTick = 1.2;
+        if (floaters.length < 220) {
+          floaters.push({ x: u.x + rand(-5, 5), y: u.y - u.r - 8, t: 0, life: 0.6, text: '+' + u.def.regen, color: '#aef2ae', size: 11 });
+        }
+      }
+    }
+    /* 藤蔓领域：持续减速周围敌人 */
+    if (u.def.slowAura) {
+      for (var vi0 = 0; vi0 < units.length; vi0++) {
+        var ve = units[vi0];
+        if (!ve.alive || ve.team === u.team) continue;
+        if (hyp(ve.x - u.x, ve.y - u.y) <= u.def.slowAura.r) {
+          ve.slowT = Math.max(ve.slowT, 0.15);
+          ve.slowFactor = Math.min(ve.slowT > 0 ? ve.slowFactor : 1, u.def.slowAura.factor);
+        }
+      }
+    }
     if (u.fallen > 0) { u.fallen -= dt; u.spd = lerp(u.spd, 0, Math.min(1, 10 * dt)); continue; }
     u.retarget -= dt;
     if (!u.target || !u.target.alive || u.retarget <= 0) {
@@ -856,6 +983,10 @@ function updateFx(dt) {
     corpses[c].t += dt;
     if (corpses[c].t > 9) corpses.splice(c, 1);
   }
+  for (var l = lightnings.length - 1; l >= 0; l--) {
+    lightnings[l].t += dt;
+    if (lightnings[l].t > 0.22) lightnings.splice(l, 1);
+  }
 }
 
 /* ---------- 渲染 ---------- */
@@ -915,13 +1046,58 @@ function seg(x1, y1, x2, y2, color, w) {
 }
 function drawHuman(u, c, swing) {
   var r = u.r;
+  if (u.type === 'gargoyle') {             // 石翼（画在身体之下）
+    ctx.fillStyle = 'rgba(118,124,134,0.95)';
+    ctx.strokeStyle = '#565b63'; ctx.lineWidth = 1.5;
+    for (var gs = -1; gs <= 1; gs += 2) {
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.25, gs * r * 0.45);
+      ctx.lineTo(-r * 1.55, gs * r * 1.15);
+      ctx.lineTo(-r * 0.55, gs * r * 0.1);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+  }
   ctx.fillStyle = c.main; ctx.strokeStyle = c.dark; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill(); ctx.stroke();
   var skin = '#f0cda3';
   if (u.type === 'assassin') skin = '#3a3a45';
   if (u.type === 'vampire') skin = '#e8d8dc';
+  if (u.type === 'skeleton') skin = '#e8e8dc';
+  if (u.type === 'necromancer') skin = '#c8e0b0';
+  if (u.type === 'lich') skin = '#d8d0e8';
   ctx.fillStyle = skin;
   ctx.beginPath(); ctx.arc(r * 0.2, 0, r * 0.42, 0, TAU); ctx.fill();
+  if (u.type === 'skeleton') {             // 黑眼窝
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath(); ctx.arc(r * 0.28, -r * 0.14, r * 0.09, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(r * 0.28, r * 0.14, r * 0.09, 0, TAU); ctx.fill();
+  }
+  if (u.type === 'minotaur') {             // 双角
+    ctx.fillStyle = '#e8e0d0'; ctx.strokeStyle = '#a8a090'; ctx.lineWidth = 1;
+    for (var ms = -1; ms <= 1; ms += 2) {
+      ctx.beginPath();
+      ctx.moveTo(r * 0.2, ms * r * 0.4);
+      ctx.lineTo(r * 0.05, ms * r * 0.95);
+      ctx.lineTo(r * 0.42, ms * r * 0.5);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+    ctx.fillStyle = '#e8e0d0';
+    ctx.beginPath(); ctx.arc(r * 0.55, 0, r * 0.16, 0, TAU); ctx.fill();   // 鼻环
+  }
+  if (u.type === 'druid') {                // 头顶绿叶
+    ctx.fillStyle = '#5aa04e';
+    for (var ds = -1; ds <= 1; ds += 2) {
+      ctx.beginPath();
+      ctx.moveTo(r * 0.15, 0);
+      ctx.lineTo(r * 0.15 + ds * r * 0.32, -r * 0.4);
+      ctx.lineTo(r * 0.15 + ds * r * 0.12, -r * 0.02);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+  if (u.type === 'lich') {                 // 骨白冠
+    ctx.strokeStyle = '#d8d8e8'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(r * 0.2, 0, r * 0.52, -2.2, -0.9); ctx.stroke();
+  }
   /* 固定装备（不随攻击摆动） */
   if (u.type === 'shield') {
     ctx.fillStyle = '#9aa5b1'; ctx.strokeStyle = '#5c6774'; ctx.lineWidth = 2;
@@ -1030,11 +1206,59 @@ function drawHuman(u, c, swing) {
     ctx.fillStyle = '#d8c2f5';
     ctx.beginPath(); ctx.arc(0, 0, 2.2, 0, TAU); ctx.fill();
     ctx.restore();
+  } else if (u.type === 'skeleton') {     // 锈剑
+    seg(r * 0.5, 0, r + 14, 0, '#9a8a6a', 2.5);
+  } else if (u.type === 'pyromancer') {   // 火焰法杖
+    seg(-r * 0.4, r * 0.45, r + 10, -r * 0.25, '#8a5c3e', 2.5);
+    var pg = 5 + Math.sin(performance.now() / 110) * 2;
+    ctx.fillStyle = 'rgba(242,161,60,0.4)';
+    ctx.beginPath(); ctx.arc(r + 10, -r * 0.25, pg + 2, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#f2a13c';
+    ctx.beginPath(); ctx.arc(r + 10, -r * 0.25, 3.2, 0, TAU); ctx.fill();
+  } else if (u.type === 'stormmage') {    // 雷电法杖
+    seg(-r * 0.4, r * 0.45, r + 10, -r * 0.25, '#5a7a9a', 2.5);
+    ctx.fillStyle = 'rgba(180,220,255,0.35)';
+    ctx.beginPath(); ctx.arc(r + 10, -r * 0.25, 6.5, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#e8f4ff'; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(r + 5, -r * 0.25 - 3); ctx.lineTo(r + 8, -r * 0.25);
+    ctx.lineTo(r + 5, -r * 0.25 + 2); ctx.lineTo(r + 9, -r * 0.25 + 4);
+    ctx.stroke();
+  } else if (u.type === 'necromancer') {  // 骷髅头法杖
+    seg(-r * 0.4, r * 0.45, r + 10, -r * 0.25, '#4e6a3e', 2.5);
+    ctx.fillStyle = '#d8e8c8';
+    ctx.beginPath(); ctx.arc(r + 10, -r * 0.25, 3.5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#2a2a2a';
+    ctx.beginPath(); ctx.arc(r + 8.8, -r * 0.25 - 1, 0.9, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(r + 11.2, -r * 0.25 - 1, 0.9, 0, TAU); ctx.fill();
+  } else if (u.type === 'lich') {         // 巫妖法杖
+    seg(-r * 0.4, r * 0.45, r + 12, -r * 0.25, '#6a4e8a', 2.5);
+    var lg = 5 + Math.sin(performance.now() / 140) * 1.5;
+    ctx.fillStyle = 'rgba(201,168,240,0.4)';
+    ctx.beginPath(); ctx.arc(r + 12, -r * 0.25, lg, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#c9a8f0';
+    ctx.beginPath(); ctx.arc(r + 12, -r * 0.25, 3, 0, TAU); ctx.fill();
+  } else if (u.type === 'earthwarden') {  // 石图腾
+    seg(0, r * 0.4, r + 8, -r * 0.1, '#6a4e2e', 4.5);
+    ctx.fillStyle = '#9a938a'; ctx.strokeStyle = '#6b655c'; ctx.lineWidth = 1.5;
+    ctx.fillRect(r + 2, -r * 0.42, 7, 7);
+    ctx.strokeRect(r + 2, -r * 0.42, 7, 7);
+  } else if (u.type === 'druid') {        // 缠藤木杖
+    seg(-r * 0.4, r * 0.45, r + 10, -r * 0.25, '#5e4630', 2.5);
+    ctx.strokeStyle = '#5aa04e'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(r + 10, -r * 0.25, 3.5, 0, TAU); ctx.stroke();
+    ctx.fillStyle = '#8ae06a';
+    ctx.beginPath(); ctx.arc(r + 10, -r * 0.25, 1.8, 0, TAU); ctx.fill();
+  } else if (u.type === 'gargoyle') {     // 石爪
+    for (var gcs = -1; gcs <= 1; gcs += 2) {
+      seg(r * 0.5, gcs * 3, r + 12, gcs * 5, '#b8bcc4', 2.5);
+    }
   }
   ctx.restore();
 }
 function drawKnight(u, c, swing) {
   var r = u.r;
+  if (u.type === 'darkknight') c = { main: '#33333f', dark: '#1f1f29', light: '#6a6a80' };
   ctx.fillStyle = c.dark; ctx.strokeStyle = '#20262e'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.ellipse(0, 0, r * 1.45, r * 0.92, 0, 0, TAU); ctx.fill(); ctx.stroke();
   seg(-r * 1.35, 0, -r * 1.72, 0, '#3a3f47', 3);
@@ -1042,10 +1266,16 @@ function drawKnight(u, c, swing) {
   ctx.beginPath(); ctx.arc(r * 1.35, 0, r * 0.42, 0, TAU); ctx.fill(); ctx.stroke();
   ctx.beginPath(); ctx.arc(0, 0, r * 0.62, 0, TAU); ctx.fill(); ctx.stroke();
   ctx.fillStyle = '#f0cda3';
+  if (u.type === 'darkknight') ctx.fillStyle = '#c8c8d4';   // 苍白面容
   ctx.beginPath(); ctx.arc(0, 0, r * 0.28, 0, TAU); ctx.fill();
+  if (u.type === 'darkknight') {             // 红眼
+    ctx.fillStyle = '#e04040';
+    ctx.beginPath(); ctx.arc(r * 0.08, -r * 0.08, 1.4, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(r * 0.08, r * 0.08, 1.4, 0, TAU); ctx.fill();
+  }
   ctx.save();
   ctx.rotate(-0.15 + swing * 0.5);
-  seg(0, r * 0.5, r * 2.2, r * 0.5, '#cfd6dd', 2.5);
+  seg(0, r * 0.5, r * 2.2, r * 0.5, u.type === 'darkknight' ? '#8a4a4a' : '#cfd6dd', 2.5);
   ctx.fillStyle = '#e6ebf0';
   ctx.beginPath();
   ctx.moveTo(r * 2.2, r * 0.5 - 4); ctx.lineTo(r * 2.32, r * 0.5); ctx.lineTo(r * 2.2, r * 0.5 + 4);
@@ -1085,6 +1315,109 @@ function drawCatapult(u, c, swing) {
   ctx.fillStyle = c.main;
   ctx.fillRect(-r * 0.2, -r * 1.35, r * 0.55, r * 0.35);
 }
+function drawBear(u, c, swing) {
+  var r = u.r, s;
+  ctx.fillStyle = c.main; ctx.strokeStyle = c.dark; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.ellipse(0, 0, r * 1.2, r * 0.85, 0, 0, TAU); ctx.fill(); ctx.stroke();
+  for (s = -1; s <= 1; s += 2) {          // 耳朵
+    ctx.beginPath(); ctx.arc(r * 0.8, s * r * 0.42, r * 0.16, 0, TAU); ctx.fill(); ctx.stroke();
+  }
+  ctx.beginPath(); ctx.arc(r * 1.0, 0, r * 0.45, 0, TAU); ctx.fill(); ctx.stroke();   // 头
+  ctx.fillStyle = '#2a2a2a';              // 鼻子
+  ctx.beginPath(); ctx.arc(r * 1.28, 0, r * 0.1, 0, TAU); ctx.fill();
+  var claw = swing > 0 ? swing * r * 0.5 : 0;   // 前爪挥击
+  for (s = -1; s <= 1; s += 2) {
+    ctx.strokeStyle = '#e8e0d0'; ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(r * 0.4 + claw, s * r * 0.55);
+    ctx.lineTo(r * 0.95 + claw, s * r * 0.55);
+    ctx.stroke();
+  }
+}
+function drawTroll(u, c, swing) {
+  var r = u.r, s;
+  ctx.save();
+  ctx.rotate(-0.3 + swing * 1.0);          // 大木棒
+  seg(r * 0.3, 0, r * 1.6, 0, '#6a4e2e', 6);
+  ctx.restore();
+  ctx.fillStyle = c.main; ctx.strokeStyle = c.dark; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill(); ctx.stroke();
+  for (s = -1; s <= 1; s += 2) {          // 两个头
+    ctx.fillStyle = '#7aa860'; ctx.strokeStyle = '#4e7038'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(r * 0.45, s * r * 0.42, r * 0.34, 0, TAU); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath(); ctx.arc(r * 0.58, s * r * 0.42 - r * 0.08, r * 0.06, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(r * 0.58, s * r * 0.42 + r * 0.08, r * 0.06, 0, TAU); ctx.fill();
+  }
+}
+function drawTreant(u, c, swing) {
+  var r = u.r, s;
+  ctx.fillStyle = '#4e7a37'; ctx.strokeStyle = '#35522a'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(-r * 0.35, 0, r * 1.05, 0, TAU); ctx.fill(); ctx.stroke();   // 树冠
+  ctx.fillStyle = '#6a4e2e'; ctx.strokeStyle = '#4a3620'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.ellipse(r * 0.15, 0, r * 0.95, r * 0.7, 0, 0, TAU); ctx.fill(); ctx.stroke();   // 树干
+  ctx.fillStyle = '#2a2a1a';              // 树脸
+  ctx.beginPath(); ctx.arc(r * 0.45, -r * 0.18, r * 0.08, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(r * 0.45, r * 0.18, r * 0.08, 0, TAU); ctx.fill();
+  var arm = swing > 0 ? swing * r * 0.6 : 0;   // 枝臂
+  for (s = -1; s <= 1; s += 2) {
+    ctx.strokeStyle = '#5a4028'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(r * 0.3, s * r * 0.55);
+    ctx.lineTo(r * 1.0 + arm, s * (r * 0.75 - arm * 0.4));
+    ctx.stroke();
+  }
+}
+function drawCyclops(u, c, swing) {
+  var r = u.r;
+  ctx.save();
+  ctx.rotate(-0.5 + swing * 1.2);          // 巨棒
+  seg(r * 0.5, 0, r * 1.8, 0, '#6a4e2e', 7);
+  ctx.fillStyle = '#5a4028';
+  ctx.beginPath(); ctx.arc(r * 1.8, 0, 6, 0, TAU); ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = c.main; ctx.strokeStyle = c.dark; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#d8b88a';               // 独眼
+  ctx.beginPath(); ctx.arc(r * 0.42, 0, r * 0.3, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#1a1a1a';
+  ctx.beginPath(); ctx.arc(r * 0.52, 0, r * 0.12, 0, TAU); ctx.fill();
+}
+function drawDragon(u, c, swing) {
+  var r = u.r, s;
+  seg(-r * 1.0, 0, -r * 1.9, r * 0.4, c.dark, 6);   // 尾
+  ctx.fillStyle = c.dark; ctx.strokeStyle = '#3a1a1a'; ctx.lineWidth = 2;   // 双翼
+  for (s = -1; s <= 1; s += 2) {
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.1, s * r * 0.5);
+    ctx.lineTo(-r * 1.3, s * r * 1.55);
+    ctx.lineTo(-r * 0.4, s * r * 0.15);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  ctx.fillStyle = c.main; ctx.strokeStyle = c.dark; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.ellipse(0, 0, r * 1.15, r * 0.9, 0, 0, TAU); ctx.fill(); ctx.stroke();   // 身体
+  seg(r * 0.85, -r * 0.15, r * 1.5, -r * 0.5, c.main, r * 0.5);   // 脖子
+  ctx.fillStyle = c.main; ctx.strokeStyle = c.dark; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(r * 1.62, -r * 0.52, r * 0.38, 0, TAU); ctx.fill(); ctx.stroke();   // 头
+  ctx.fillStyle = '#ffd76a';               // 眼
+  ctx.beginPath(); ctx.arc(r * 1.72, -r * 0.6, 2.5, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#d8d0c0';               // 双角
+  for (s = -1; s <= 1; s += 2) {
+    ctx.beginPath();
+    ctx.moveTo(r * 1.5, -r * 0.52 + s * r * 0.12);
+    ctx.lineTo(r * 1.25, -r * 0.52 + s * r * 0.45);
+    ctx.lineTo(r * 1.42, -r * 0.52 + s * r * 0.18);
+    ctx.closePath(); ctx.fill();
+  }
+  if (swing > 0) {                         // 龙息
+    ctx.fillStyle = 'rgba(242,161,60,' + (0.55 * swing) + ')';
+    ctx.beginPath();
+    ctx.moveTo(r * 1.85, -r * 0.62);
+    ctx.lineTo(r * 2.9 + swing * r * 0.6, -r * 0.95);
+    ctx.lineTo(r * 2.9 + swing * r * 0.6, -r * 0.2);
+    ctx.closePath(); ctx.fill();
+  }
+}
 function previewUnit(p) {
   var def = DEFS[p.type];
   return {
@@ -1110,12 +1443,21 @@ function drawUnit(u) {
     ctx.strokeStyle = 'rgba(232,182,76,0.35)'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(0, 0, u.def.aura.r, 0, TAU); ctx.stroke();
   }
-  if (u.type === 'knight') drawKnight(u, c, swing);
+  if (u.type === 'knight' || u.type === 'darkknight') drawKnight(u, c, swing);
   else if (u.type === 'giant') drawGiant(u, c, swing);
   else if (u.type === 'catapult') drawCatapult(u, c, swing);
+  else if (u.type === 'warbear') drawBear(u, c, swing);
+  else if (u.type === 'troll') drawTroll(u, c, swing);
+  else if (u.type === 'treant') drawTreant(u, c, swing);
+  else if (u.type === 'cyclops') drawCyclops(u, c, swing);
+  else if (u.type === 'dragon') drawDragon(u, c, swing);
   else drawHuman(u, c, swing);
   if (u.poisonT > 0) {                     // 中毒绿罩
     ctx.fillStyle = 'rgba(110,220,110,0.22)';
+    ctx.beginPath(); ctx.arc(0, 0, r * 1.15, 0, TAU); ctx.fill();
+  }
+  if (u.burnT > 0) {                       // 燃烧橙罩
+    ctx.fillStyle = 'rgba(242,161,60,0.25)';
     ctx.beginPath(); ctx.arc(0, 0, r * 1.15, 0, TAU); ctx.fill();
   }
   if (u.slowT > 0) {                       // 冰缓蓝罩
@@ -1177,15 +1519,33 @@ function drawProj(p) {
   var len = p.kind === 'spear' ? 22 : 14;
   var shaft = p.kind === 'arrow' ? '#6b5844'
     : p.kind === 'spear' ? '#8a6b4a'
-    : p.kind === 'ice' ? '#7fc4e8' : '#9a6ae0';
+    : p.kind === 'ice' ? '#7fc4e8'
+    : p.kind === 'shadow' ? '#6a3e9e' : '#9a6ae0';
   var tipC = p.kind === 'arrow' ? '#e6ebf0'
     : p.kind === 'spear' ? '#cfd6dd'
-    : p.kind === 'ice' ? '#ffffff' : '#d8c2f5';
+    : p.kind === 'ice' ? '#ffffff'
+    : p.kind === 'shadow' ? '#c9a8f0' : '#d8c2f5';
   ctx.fillStyle = 'rgba(0,0,0,0.12)';
   ctx.beginPath(); ctx.arc(p.x + 4, p.y + 6, 2, 0, TAU); ctx.fill();
   seg(p.x - nx * len, p.y - ny * len, p.x, p.y, shaft, p.kind === 'spear' ? 3 : 2.5);
   ctx.fillStyle = tipC;
   ctx.beginPath(); ctx.arc(p.x, p.y, p.kind === 'spear' ? 2.4 : 1.8, 0, TAU); ctx.fill();
+}
+function drawLightnings() {
+  lightnings.forEach(function (L) {
+    var a = clamp(1 - L.t / 0.22, 0, 1);
+    var mx = (L.x1 + L.x2) / 2 + rand(-8, 8), my = (L.y1 + L.y2) / 2 + rand(-8, 8);
+    ctx.globalAlpha = a;
+    ctx.strokeStyle = 'rgba(200,230,255,0.9)'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(L.x1, L.y1);
+    ctx.lineTo(mx, my);
+    ctx.lineTo(L.x2, L.y2);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  });
 }
 function drawParticles() {
   particles.forEach(function (p) {
@@ -1243,8 +1603,9 @@ function draw() {
   ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
   ctx.fillStyle = '#151a12';
   ctx.fillRect(0, 0, innerWidth, innerHeight);
+  var sv = Math.min(shake, 2.5);   // 绘制侧兜底钳制，视觉位移不超 2.5px
   var sx = 0, sy = 0;
-  if (shake > 0.1) { sx = rand(-shake, shake); sy = rand(-shake, shake); }
+  if (sv > 0.1) { sx = rand(-sv, sv); sy = rand(-sv, sv); }
   ctx.save();
   ctx.translate(view.ox + sx * view.scale, view.oy + sy * view.scale);
   ctx.scale(view.scale, view.scale);
@@ -1258,6 +1619,7 @@ function draw() {
   list.forEach(drawUnit);
   if (state !== 'place') projectiles.forEach(drawProj);
   drawParticles();
+  drawLightnings();
   drawFloaters();
   if (state === 'place') drawGhost();
   ctx.restore();
@@ -1269,8 +1631,13 @@ function updateHUD() {
     : state === 'battle' ? '战斗中'
     : state === 'ending' ? '结算中' : '战斗结束';
   if (state === 'place') {
-    blueInfo.textContent = '预算 ' + budget[0] + ' · 剩余 ' + remaining(0);
-    redInfo.textContent = '预算 ' + budget[1] + ' · 剩余 ' + remaining(1);
+    if (infiniteMoney) {
+      blueInfo.textContent = '预算 无限 · 单位 ' + teamCount(0);
+      redInfo.textContent = '预算 无限 · 单位 ' + teamCount(1);
+    } else {
+      blueInfo.textContent = '预算 ' + budget[0] + ' · 剩余 ' + remaining(0);
+      redInfo.textContent = '预算 ' + budget[1] + ' · 剩余 ' + remaining(1);
+    }
     timerEl.textContent = '--:--';
   } else {
     timerEl.textContent = fmtTime(battleTime);
@@ -1359,9 +1726,17 @@ window.addEventListener('keydown', function (e) {
 /* ---------- 按钮 ---------- */
 document.querySelectorAll('.bctrl button').forEach(function (b) {
   b.addEventListener('click', function () {
+    if (infiniteMoney) { toast('无限预算模式中，无需调整预算'); return; }
     var t = +b.getAttribute('data-bt'), d = +b.getAttribute('data-d');
     budget[t] = clamp(budget[t] + d, 500, 6000);
   });
+});
+var btnMoney = $('btnMoney');
+btnMoney.addEventListener('click', function () {
+  infiniteMoney = !infiniteMoney;
+  btnMoney.textContent = infiniteMoney ? '预算 无限' : '预算 正常';
+  btnMoney.style.borderColor = infiniteMoney ? '#e8b64c' : '';
+  toast(infiniteMoney ? '无限预算已开启：随意放置，随机部署也会拉满' : '已恢复正常预算模式');
 });
 btnTeamB.addEventListener('click', function () { if (curTeam !== 0) toggleTeam(); });
 btnTeamR.addEventListener('click', function () { if (curTeam !== 1) toggleTeam(); });
@@ -1391,7 +1766,7 @@ function frame(now) {
   var rdt = Math.min(0.05, (now - lastT) / 1000);
   lastT = now;
   sndBudget = Math.min(10, sndBudget + 12 * rdt);
-  shake = Math.max(0, shake - rdt * 14);
+  shake = clamp(shake - rdt * 30, 0, 3);   // 快速衰减 + 上限，爆炸不再晃瞎眼
 
   if (state === 'battle' || state === 'ending') {
     var ts = 1;
@@ -1406,6 +1781,7 @@ function frame(now) {
       simUnits(sdt);
       simProjectiles(sdt);
       checkWin();
+      shake = Math.min(shake, 3);   // 模拟后立即钳制
     }
     updateFx(paused ? rdt * 0.3 : Math.max(sdt, rdt * 0.3));
   } else if (state === 'over') {
