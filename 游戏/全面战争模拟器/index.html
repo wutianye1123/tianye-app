@@ -46,8 +46,6 @@ button:hover{background:#333d49;border-color:#4a5563}
 #actionrow{display:flex;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);
   border-radius:12px;padding:8px 12px;flex-wrap:wrap;justify-content:center}
 #actionrow .sep{width:1px;align-self:stretch;background:#3a434e}
-#btnTeamB.sel{background:#2b5cb8;border-color:#7ba7f2;color:#fff}
-#btnTeamR.sel{background:#b02a2a;border-color:#f08a8a;color:#fff}
 #btnFight{background:linear-gradient(180deg,#f3c96b,#d99b2b);border:1px solid #b8860b;color:#3a2a05;
   font-weight:800;font-size:16px;padding:10px 30px;border-radius:10px;text-shadow:0 1px 0 rgba(255,255,255,.4)}
 #btnFight:hover{filter:brightness(1.08)}
@@ -96,14 +94,15 @@ button:hover{background:#333d49;border-color:#4a5563}
 <div id="bottombar">
   <div id="cards"></div>
   <div id="actionrow">
-    <button id="btnTeamB" class="sel">蓝军</button>
-    <button id="btnTeamR">红军</button>
+    <button id="btnRandomB">随机蓝军</button>
+    <button id="btnRandomR">随机红军</button>
     <span class="sep"></span>
-    <button id="btnRandom">随机部署</button>
-    <button id="btnClear">清空本方</button>
+    <button id="btnClearB">清空蓝军</button>
+    <button id="btnClearR">清空红军</button>
+    <span class="sep"></span>
     <button id="btnFight">开 战</button>
   </div>
-  <div id="hint">左键 放置 / 拖动 · 右键 移除 · 数字键 1-9 快选王国军团 · Q 切换队伍 · 顶部可开无限预算 · 空格 暂停 · ESC 返回部署</div>
+  <div id="hint">左半场放置 = 蓝军 · 右半场放置 = 红军 · 拖动过中线自动换队 · 右键 移除 · 数字键 1-9 快选王国军团 · 顶部可开无限预算</div>
 </div>
 
 <div id="battlebar" class="hidden">
@@ -244,7 +243,7 @@ var units = [];                // 战斗单位
 var projectiles = [], particles = [], floaters = [], corpses = [], lightnings = [];
 var budget = [2000, 2000];
 var infiniteMoney = false;      // 无限预算模式
-var curTeam = 0, curType = 'swordsman';
+var curType = 'swordsman';
 var SPEEDS = [0.5, 1, 2], speedIdx = 1, paused = false;
 var battleTime = 0, kills = [0, 0], startCounts = [0, 0], unitTotals = [0, 0];
 var winner = -1, endT = 0, shake = 0, seq = 1;
@@ -357,7 +356,6 @@ var blueInfo = $('blueInfo'), redInfo = $('redInfo'), phaseEl = $('phase'), time
 var bottombar = $('bottombar'), battlebar = $('battlebar'), overlay = $('overlay');
 var otitle = $('otitle'), ostats = $('ostats');
 var btnPause = $('btnPause'), btnSpeed = $('btnSpeed'), btnSound = $('btnSound');
-var btnTeamB = $('btnTeamB'), btnTeamR = $('btnTeamR');
 
 /* ---------- 兵种卡片（按系列分组） ---------- */
 (function buildCards() {
@@ -396,33 +394,25 @@ function refreshCards() {
   document.querySelectorAll('.card').forEach(function (c) { c.classList.toggle('sel', c.getAttribute('data-type') === curType); });
 }
 
-/* ---------- 预算 / 队伍 ---------- */
+/* ---------- 预算 ---------- */
 function spent(t) { var s = 0; for (var i = 0; i < placed.length; i++) if (placed[i].team === t) s += DEFS[placed[i].type].cost; return s; }
 function remaining(t) { return infiniteMoney ? 1e9 : budget[t] - spent(t); }
 function teamCount(t) { var n = 0; for (var i = 0; i < placed.length; i++) if (placed[i].team === t) n++; return n; }
-function toggleTeam() {
-  curTeam = 1 - curTeam;
-  btnTeamB.classList.toggle('sel', curTeam === 0);
-  btnTeamR.classList.toggle('sel', curTeam === 1);
-}
 
-/* ---------- 布阵操作 ---------- */
-function clampPos(team, x, y) {
-  var xMin = team === 0 ? 40 : W / 2 + 36;
-  var xMax = team === 0 ? W / 2 - 36 : W - 40;
-  return { x: clamp(x, xMin, xMax), y: clamp(y, 40, H - 40) };
-}
+/* ---------- 布阵操作：位置决定队伍（左蓝右红） ---------- */
+function teamAt(x) { return x < W / 2 ? 0 : 1; }
+function clampField(x, y) { return { x: clamp(x, 40, W - 40), y: clamp(y, 40, H - 40) }; }
 function canPlaceAt(team, type, x, y) {
   var def = DEFS[type];
   if (x < 40 || x > W - 40 || y < 40 || y > H - 40) return { ok: false, reason: '超出战场范围' };
-  var wrongHalf = team === 0 ? x > W / 2 - 30 : x < W / 2 + 30;
-  if (wrongHalf) return { ok: false, reason: team === 0 ? '蓝军只能部署在左半场' : '红军只能部署在右半场' };
-  if (!infiniteMoney && remaining(team) < def.cost) return { ok: false, reason: '预算不足（剩余 ' + remaining(team) + '）' };
+  if (!infiniteMoney && remaining(team) < def.cost) {
+    return { ok: false, reason: (team === 0 ? '蓝军' : '红军') + '预算不足（剩余 ' + remaining(team) + '）' };
+  }
   if (placed.length >= 300) return { ok: false, reason: '单位数量已达上限' };
   return { ok: true };
 }
 function placeAt(team, type, x, y) {
-  var p = clampPos(team, x, y);
+  var p = clampField(x, y);
   placed.push({ type: type, team: team, x: p.x, y: p.y });
   sfx('place');
 }
@@ -1752,10 +1742,11 @@ function drawFloaters() {
 function drawGhost() {
   if (!mouse.in || !curType) return;
   var def = DEFS[curType];
-  var chk = canPlaceAt(curTeam, curType, mouse.x, mouse.y);
+  var gt = teamAt(mouse.x);               // 位置决定队伍：左蓝右红
+  var chk = canPlaceAt(gt, curType, mouse.x, mouse.y);
   ctx.save();
   ctx.globalAlpha = 0.55;
-  ctx.fillStyle = chk.ok ? TEAMC[curTeam].main : '#c0392b';
+  ctx.fillStyle = chk.ok ? TEAMC[gt].main : '#c0392b';
   ctx.beginPath(); ctx.arc(mouse.x, mouse.y, def.r, 0, TAU); ctx.fill();
   ctx.strokeStyle = chk.ok ? '#ffffff' : '#c0392b'; ctx.lineWidth = 2; ctx.stroke();
   if (!chk.ok) {
@@ -1854,9 +1845,10 @@ cv.addEventListener('pointerdown', function (e) {
     if (d < DEFS[p.type].r + 10 && d < hd) { hd = d; hit = i; }
   }
   if (hit >= 0) { drag = { mode: 'move', i: hit }; return; }
-  var chk = canPlaceAt(curTeam, curType, w.x, w.y);
+  var team = teamAt(w.x);
+  var chk = canPlaceAt(team, curType, w.x, w.y);
   if (chk.ok) {
-    placeAt(curTeam, curType, w.x, w.y);
+    placeAt(team, curType, w.x, w.y);
     drag = { mode: 'paint', lx: w.x, ly: w.y };
   } else if (chk.reason) toast(chk.reason);
 });
@@ -1866,12 +1858,17 @@ window.addEventListener('pointermove', function (e) {
   if (drag && state === 'place') {
     if (drag.mode === 'move') {
       var p = placed[drag.i];
-      if (p) { var c = clampPos(p.team, w.x, w.y); p.x = c.x; p.y = c.y; }
+      if (p) {
+        var c = clampField(w.x, w.y);
+        p.x = c.x; p.y = c.y;
+        p.team = teamAt(p.x);              // 拖过中线自动换队
+      }
     } else if (drag.mode === 'paint') {
       var def = DEFS[curType];
       if (hyp(w.x - drag.lx, w.y - drag.ly) > def.r * 2.2 + 4) {
-        var chk = canPlaceAt(curTeam, curType, w.x, w.y);
-        if (chk.ok) { placeAt(curTeam, curType, w.x, w.y); drag.lx = w.x; drag.ly = w.y; }
+        var pt = teamAt(w.x);
+        var chk = canPlaceAt(pt, curType, w.x, w.y);
+        if (chk.ok) { placeAt(pt, curType, w.x, w.y); drag.lx = w.x; drag.ly = w.y; }
       }
     }
   }
@@ -1885,8 +1882,6 @@ window.addEventListener('keydown', function (e) {
   if (e.key >= '1' && e.key <= '9') {
     var i = +e.key - 1;
     if (i < DEF_ORDER.length) { curType = DEF_ORDER[i]; refreshCards(); }
-  } else if (e.key === 'q' || e.key === 'Q') {
-    if (state === 'place') toggleTeam();
   } else if (e.key === ' ') {
     if (state === 'battle' || state === 'ending') { e.preventDefault(); paused = !paused; }
   } else if (e.key === 'Escape') {
@@ -1909,13 +1904,15 @@ btnMoney.addEventListener('click', function () {
   btnMoney.style.borderColor = infiniteMoney ? '#e8b64c' : '';
   toast(infiniteMoney ? '无限预算已开启：随意放置，随机部署也会拉满' : '已恢复正常预算模式');
 });
-btnTeamB.addEventListener('click', function () { if (curTeam !== 0) toggleTeam(); });
-btnTeamR.addEventListener('click', function () { if (curTeam !== 1) toggleTeam(); });
-$('btnRandom').addEventListener('click', function () { randomDeploy(curTeam); });
-$('btnClear').addEventListener('click', function () {
-  var t = curTeam;
-  placed = placed.filter(function (p) { return p.team !== t; });
-  toast((t === 0 ? '蓝军' : '红军') + '阵型已清空');
+$('btnRandomB').addEventListener('click', function () { randomDeploy(0); });
+$('btnRandomR').addEventListener('click', function () { randomDeploy(1); });
+$('btnClearB').addEventListener('click', function () {
+  placed = placed.filter(function (p) { return p.team !== 0; });
+  toast('蓝军阵型已清空');
+});
+$('btnClearR').addEventListener('click', function () {
+  placed = placed.filter(function (p) { return p.team !== 1; });
+  toast('红军阵型已清空');
 });
 $('btnFight').addEventListener('click', startBattle);
 $('btnBack').addEventListener('click', backToPlace);
@@ -1967,7 +1964,7 @@ requestAnimationFrame(frame);
 
 /* ---------- 开场引导 ---------- */
 setTimeout(function () {
-  toast('选择下方兵种卡，在左半场部署蓝军；再切到红军或点「随机部署」安排敌军');
+  toast('选兵种后在左半场点击放置蓝军；放到右半场自动成为红军，或点「随机红军」快速安排敌军');
 }, 600);
 </script>
 </body>
