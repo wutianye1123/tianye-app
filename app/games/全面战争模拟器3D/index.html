@@ -1,0 +1,1742 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>全面战争模拟器 3D</title>
+<style>
+:root{--panel:rgba(17,21,26,.9);--line:#2c333c;--gold:#e8b64c}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:#0e131a;
+  font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:#e8eaed;
+  -webkit-user-select:none;user-select:none}
+#view{position:fixed;inset:0}
+#view canvas{display:block}
+#fx{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:5}
+.fl{position:absolute;font-weight:700;font-size:14px;text-shadow:0 1px 3px #000,0 0 6px #000;
+  transform:translate(-50%,-50%);white-space:nowrap;will-change:transform,opacity}
+#topbar{position:fixed;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:10px;
+  align-items:stretch;z-index:10;flex-wrap:wrap;justify-content:center;max-width:98vw}
+.tp{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 14px;min-width:172px;text-align:center}
+.tp .tn{font-size:12px;letter-spacing:3px;opacity:.8}
+.tp .ti{font-size:15px;font-weight:600;margin-top:2px;white-space:nowrap}
+.tp.blue{border-bottom:3px solid #4f8df0}
+.tp.red{border-bottom:3px solid #f05252}
+.tp .bctrl{display:flex;gap:6px;justify-content:center;margin-top:5px}
+.tp .bctrl button{padding:2px 9px;font-size:11px}
+#mid{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 18px;text-align:center;min-width:132px}
+#phase{font-size:12px;color:var(--gold);letter-spacing:3px}
+#timer{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+#ctrls{display:flex;gap:8px;align-items:center;background:var(--panel);border:1px solid var(--line);
+  border-radius:12px;padding:8px 12px}
+button{background:#262d36;border:1px solid #3a434e;color:#e8eaed;border-radius:8px;padding:6px 12px;
+  font-size:13px;cursor:pointer;font-family:inherit;transition:.15s;white-space:nowrap}
+button:hover{background:#333d49;border-color:#4a5563}
+#bottombar{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);display:flex;flex-direction:column;
+  gap:8px;align-items:center;z-index:10;max-width:98vw}
+#cards{display:flex;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  padding:10px;max-width:96vw;overflow-x:auto}
+.cgroup{display:flex;flex-direction:column;gap:5px;flex:0 0 auto}
+.ghead{font-size:11px;letter-spacing:2px;border-left:3px solid;padding-left:6px;opacity:.95;white-space:nowrap}
+.grow{display:flex;gap:6px}
+.card{width:68px;flex:0 0 auto;background:#232a33;border:2px solid #333d49;border-radius:10px;
+  padding:7px 3px;text-align:center;cursor:pointer;transition:.12s}
+.card:hover{transform:translateY(-2px);border-color:#4a5563}
+.card.sel{border-color:var(--gold);background:#2e3540;box-shadow:0 0 0 1px var(--gold)}
+.card .ic{width:32px;height:32px;border-radius:50%;margin:0 auto 4px;display:flex;align-items:center;
+  justify-content:center;font-size:16px;font-weight:700;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.55)}
+.card .nm{font-size:11px;white-space:nowrap}
+.card .ct{font-size:11px;color:var(--gold);margin-top:1px}
+#actionrow{display:flex;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);
+  border-radius:12px;padding:8px 12px;flex-wrap:wrap;justify-content:center}
+#actionrow .sep{width:1px;align-self:stretch;background:#3a434e}
+#btnFight{background:linear-gradient(180deg,#f3c96b,#d99b2b);border:1px solid #b8860b;color:#3a2a05;
+  font-weight:800;font-size:16px;padding:10px 30px;border-radius:10px;text-shadow:0 1px 0 rgba(255,255,255,.4)}
+#btnFight:hover{filter:brightness(1.08)}
+#hint{font-size:11px;color:#aab3bd;text-shadow:0 1px 2px #000;text-align:center}
+#battlebar{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:12px;align-items:center;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:9px 16px;z-index:10}
+#btip{font-size:12px;color:#aab3bd}
+#overlay{position:fixed;inset:0;background:rgba(8,10,14,.62);display:flex;align-items:center;justify-content:center;z-index:20}
+#opanel{background:#1a2027;border:1px solid #333d49;border-radius:16px;padding:34px 48px;text-align:center;
+  box-shadow:0 20px 60px rgba(0,0,0,.5)}
+#otitle{font-size:42px;font-weight:800;letter-spacing:8px;margin-bottom:10px}
+#otitle.b{color:#6ea8ff}#otitle.r{color:#ff7b7b}#otitle.d{color:#e8eaed}
+#ostats{color:#aab3bd;margin-bottom:24px;line-height:1.9;font-size:14px}
+.orow{display:flex;gap:12px;justify-content:center}
+#btnRetry{background:#2e5c34;border-color:#4e9457}
+#btnRetry:hover{background:#387040}
+#toast{position:fixed;top:92px;left:50%;transform:translateX(-50%);background:rgba(10,12,16,.88);
+  border:1px solid #3a434e;padding:8px 18px;border-radius:10px;font-size:13px;opacity:0;
+  transition:opacity .25s;pointer-events:none;z-index:30;white-space:nowrap}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<div id="view"></div>
+<div id="fx"></div>
+
+<div id="topbar">
+  <div class="tp blue">
+    <div class="tn">蓝 军</div>
+    <div class="ti" id="blueInfo"></div>
+    <div class="bctrl place-only"><button data-bt="0" data-d="-250">预算 -</button><button data-bt="0" data-d="250">预算 +</button></div>
+  </div>
+  <div id="mid"><div id="phase">部署阶段</div><div id="timer">--:--</div></div>
+  <div class="tp red">
+    <div class="tn">红 军</div>
+    <div class="ti" id="redInfo"></div>
+    <div class="bctrl place-only"><button data-bt="1" data-d="-250">预算 -</button><button data-bt="1" data-d="250">预算 +</button></div>
+  </div>
+  <div id="ctrls">
+    <button id="btnMoney">预算 正常</button>
+    <button id="btnSound">音效 开</button>
+    <button id="btnPause" class="battle-only hidden">暂停</button>
+    <button id="btnSpeed" class="battle-only hidden">速度 1x</button>
+  </div>
+</div>
+
+<div id="bottombar">
+  <div id="cards"></div>
+  <div id="actionrow">
+    <button id="btnRandomB">随机蓝军</button>
+    <button id="btnRandomR">随机红军</button>
+    <span class="sep"></span>
+    <button id="btnClearB">清空蓝军</button>
+    <button id="btnClearR">清空红军</button>
+    <span class="sep"></span>
+    <button id="btnFight">开 战</button>
+  </div>
+  <div id="hint">左半场放置 = 蓝军 · 右半场 = 红军 · 右键删除 · 左键拖动旋转视角 · 右键拖动平移 · 滚轮缩放 · 数字键 1-9 选王国军团</div>
+</div>
+
+<div id="battlebar" class="hidden">
+  <button id="btnBack">返回部署</button>
+  <span id="btip">战斗进行中 · 拖动旋转 / 滚轮缩放 · 可暂停观察战局</span>
+</div>
+
+<div id="overlay" class="hidden">
+  <div id="opanel">
+    <div id="otitle"></div>
+    <div id="ostats"></div>
+    <div class="orow"><button id="btnRetry">再战一场</button><button id="btnEdit">调整阵容</button></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="three.min.js"></script>
+<script>
+'use strict';
+/* ============================================================
+   全面战争模拟器 3D
+   与 2D 版同源的战斗模拟（x-z 平面数学一致），
+   渲染层为 Three.js：自由视角、3D 兵种、投射物与特效
+   ============================================================ */
+
+/* ---------- 工具 ---------- */
+var TAU = Math.PI * 2, S = 0.1;               // S: 2D 数值 -> 3D 世界 缩放
+var W3 = 160, D3 = 90;                        // 战场 160 x 90
+function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function rand(a, b) { return a + Math.random() * (b - a); }
+function hyp(x, y) { return Math.sqrt(x * x + y * y); }
+function fmtTime(t) {
+  var m = Math.floor(t / 60), s = Math.floor(t % 60);
+  return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+/* ---------- 兵种定义（与 2D 版一致） ---------- */
+var DEFS = {
+  farmer:     { name: '农夫',   ic: '农', icColor: '#7d8a4e', cost: 40,  hp: 55,  dmg: 7,  range: 24,  speed: 60,  cd: 0.55, r: 9,  kind: 'melee',  desc: '廉价炮灰，人海战术的基石' },
+  swordsman:  { name: '剑士',   ic: '剑', icColor: '#6e7f8f', cost: 90,  hp: 120, dmg: 14, range: 26,  speed: 55,  cd: 0.75, r: 11, kind: 'melee',  desc: '均衡可靠的近战主力' },
+  pikeman:    { name: '长枪兵', ic: '枪', icColor: '#8f7f5e', cost: 100, hp: 110, dmg: 15, range: 48,  speed: 50,  cd: 1.0,  r: 11, kind: 'melee',  antiCav: true, desc: '出手距离长，克制骑士' },
+  shield:     { name: '盾卫',   ic: '盾', icColor: '#5e7391', cost: 140, hp: 320, dmg: 9,  range: 24,  speed: 38,  cd: 0.95, r: 13, kind: 'melee',  armor: 3, knockRes: 0.75, desc: '高血高甲的钢铁肉盾' },
+  archer:     { name: '弓箭手', ic: '弓', icColor: '#5e8f6e', cost: 110, hp: 70,  dmg: 15, range: 270, speed: 46,  cd: 1.5,  r: 10, kind: 'ranged', proj: 'arrow', desc: '远程输出，近身脆弱' },
+  berserker:  { name: '狂战士', ic: '狂', icColor: '#915e5e', cost: 160, hp: 150, dmg: 14, range: 26,  speed: 78,  cd: 0.4,  r: 11, kind: 'melee',  desc: '攻速极快的杀戮机器' },
+  knight:     { name: '骑士',   ic: '骑', icColor: '#7e5e91', cost: 240, hp: 220, dmg: 24, range: 30,  speed: 100, cd: 0.85, r: 13, kind: 'melee',  charge: true, kb: 150, desc: '冲锋伤害翻倍，撞击击飞' },
+  mage:       { name: '法师',   ic: '法', icColor: '#8a5fb0', cost: 280, hp: 65,  dmg: 34, range: 230, speed: 42,  cd: 2.6,  r: 10, kind: 'ranged', proj: 'fire', aoe: 58, desc: '火球范围杀伤' },
+  giant:      { name: '巨人',   ic: '巨', icColor: '#6e675e', cost: 550, hp: 950, dmg: 65, range: 44,  speed: 30,  cd: 1.7,  r: 22, kind: 'melee',  aoeMelee: true, armor: 2, knockRes: 0.9, kb: 320, desc: '一锤一片，势不可挡' },
+  javelineer: { name: '掷矛兵', ic: '矛', icColor: '#a08a5a', cost: 130, hp: 85,  dmg: 32, range: 150, speed: 48,  cd: 2.2,  r: 10, kind: 'ranged', proj: 'spear', pierce: true, desc: '中距重掷，无视护甲' },
+  priest:     { name: '牧师',   ic: '医', icColor: '#cfcfcf', cost: 200, hp: 90,  dmg: 0,  range: 0,   speed: 52,  cd: 1.8,  r: 10, kind: 'heal',   heal: { r: 135, amt: 14 }, desc: '持续治疗周围伤员' },
+  assassin:   { name: '刺客',   ic: '刺', icColor: '#4a4a55', cost: 180, hp: 95,  dmg: 30, range: 24,  speed: 88,  cd: 0.8,  r: 10, kind: 'melee',  blink: true, poison: { dps: 6, dur: 3 }, desc: '闪现突进，淬毒双刃' },
+  icemage:    { name: '冰法师', ic: '冰', icColor: '#5aa8d6', cost: 230, hp: 65,  dmg: 12, range: 220, speed: 42,  cd: 1.4,  r: 10, kind: 'ranged', proj: 'ice', slow: { dur: 2.2, factor: 0.55 }, desc: '冰锥减速敌人' },
+  vampire:    { name: '吸血鬼', ic: '血', icColor: '#7a3030', cost: 260, hp: 150, dmg: 18, range: 26,  speed: 66,  cd: 0.55, r: 11, kind: 'melee',  lifesteal: 0.7, desc: '伤害的70%化为生命' },
+  bomber:     { name: '炸弹人', ic: '炸', icColor: '#3d3d3d', cost: 150, hp: 60,  dmg: 75, range: 0,   speed: 75,  cd: 0,    r: 10, kind: 'kamikaze', aoe: 66, desc: '冲入敌阵自爆' },
+  king:       { name: '国王',   ic: '王', icColor: '#e0b13c', cost: 300, hp: 280, dmg: 20, range: 26,  speed: 50,  cd: 0.9,  r: 12, kind: 'melee',  aura: { r: 150, mult: 1.3 }, armor: 1, desc: '周围友军伤害+30%' },
+  summoner:   { name: '召唤师', ic: '召', icColor: '#6a4fa0', cost: 300, hp: 80,  dmg: 10, range: 200, speed: 42,  cd: 2.0,  r: 10, kind: 'ranged', proj: 'bolt', summon: { type: 'farmer', interval: 5.5, per: 2, max: 6 }, desc: '不断召唤农夫援军' },
+  catapult:   { name: '投石车', ic: '炮', icColor: '#8a7351', cost: 420, hp: 190, dmg: 55, range: 480, speed: 15,  cd: 4.2,  r: 17, kind: 'ranged', proj: 'rock', aoe: 70, minRange: 130, armor: 1, desc: '超远程抛石范围杀伤' },
+  skeleton:   { name: '骷髅兵',   ic: '骷', icColor: '#b8b8a8', cost: 50,  hp: 60,  dmg: 9,  range: 24,  speed: 62,  cd: 0.6,  r: 9,  kind: 'melee',  deathBurst: { aoe: 48, dmg: 12 }, desc: '死亡时爆出骨刺' },
+  gargoyle:   { name: '石像鬼',   ic: '翼', icColor: '#7d8288', cost: 170, hp: 230, dmg: 14, range: 26,  speed: 44,  cd: 0.9,  r: 12, kind: 'melee',  armor: 2, regen: 8, desc: '脱战后石化自愈' },
+  darkknight: { name: '黑骑士',   ic: '黑', icColor: '#3a3a44', cost: 280, hp: 240, dmg: 22, range: 30,  speed: 92,  cd: 0.9,  r: 13, kind: 'melee',  charge: true, kb: 170, lifesteal: 0.35, desc: '冲锋且吸血的重骑' },
+  necromancer:{ name: '死灵法师', ic: '灵', icColor: '#5a8a4e', cost: 260, hp: 75,  dmg: 10, range: 190, speed: 40,  cd: 2.2,  r: 10, kind: 'ranged', proj: 'shadow', slow: { dur: 1.5, factor: 0.75 }, summon: { type: 'skeleton', interval: 6, per: 1, max: 5 }, desc: '不停召唤骷髅兵' },
+  lich:       { name: '巫妖',     ic: '巫', icColor: '#6a4e8a', cost: 320, hp: 90,  dmg: 26, range: 230, speed: 40,  cd: 2.4,  r: 10, kind: 'ranged', proj: 'shadow', slow: { dur: 2, factor: 0.65 }, desc: '暗影弹减速远处敌人' },
+  pyromancer: { name: '火焰术士', ic: '焰', icColor: '#c46a2a', cost: 210, hp: 70,  dmg: 20, range: 200, speed: 44,  cd: 2.0,  r: 10, kind: 'ranged', proj: 'fire', aoe: 45, burn: { dps: 8, dur: 2.5 }, desc: '火球爆炸并点燃敌人' },
+  stormmage:  { name: '雷电法师', ic: '雷', icColor: '#4a7ab8', cost: 250, hp: 70,  dmg: 22, range: 210, speed: 44,  cd: 1.9,  r: 10, kind: 'ranged', chain: { count: 3, range: 120, falloff: 0.7 }, desc: '闪电链弹射多个敌人' },
+  earthwarden:{ name: '大地祭司', ic: '地', icColor: '#8a7a4e', cost: 240, hp: 130, dmg: 10, range: 24,  speed: 46,  cd: 1.0,  r: 11, kind: 'melee',  auraArmor: { r: 140, armor: 3 }, desc: '光环：周围友军+3护甲' },
+  druid:      { name: '德鲁伊',   ic: '藤', icColor: '#4e8a4e', cost: 220, hp: 90,  dmg: 12, range: 26,  speed: 50,  cd: 0.9,  r: 10, kind: 'melee',  slowAura: { r: 130, factor: 0.5 }, slow: { dur: 2, factor: 0.5 }, desc: '藤蔓领域持续减速敌人' },
+  warbear:    { name: '战熊',     ic: '熊', icColor: '#7a5a3a', cost: 190, hp: 300, dmg: 20, range: 26,  speed: 60,  cd: 0.9,  r: 13, kind: 'melee',  kb: 100, desc: '皮糙肉厚的中型巨兽' },
+  minotaur:   { name: '牛头怪',   ic: '牛', icColor: '#8a5a3a', cost: 320, hp: 330, dmg: 28, range: 28,  speed: 86,  cd: 1.0,  r: 13, kind: 'melee',  charge: true, kb: 260, desc: '蛮角冲锋，撞飞敌人' },
+  troll:      { name: '巨魔',     ic: '魔', icColor: '#5e8a4e', cost: 380, hp: 520, dmg: 30, range: 30,  speed: 42,  cd: 1.2,  r: 16, kind: 'melee',  regen: 22, kb: 120, desc: '脱战后疯狂回血' },
+  treant:     { name: '树人',     ic: '树', icColor: '#4e6a35', cost: 400, hp: 760, dmg: 20, range: 34,  speed: 22,  cd: 1.5,  r: 18, kind: 'melee',  armor: 2, regen: 6, slow: { dur: 2.2, factor: 0.6 }, desc: '根须缠绕，越打越硬' },
+  cyclops:    { name: '独眼巨人', ic: '独', icColor: '#9a8a6a', cost: 450, hp: 600, dmg: 45, range: 42,  speed: 34,  cd: 1.6,  r: 18, kind: 'melee',  aoeMelee: true, kb: 200, desc: '巨棒横扫一片' },
+  dragon:     { name: '远古巨龙', ic: '龙', icColor: '#a03a3a', cost: 900, hp: 820, dmg: 42, range: 55,  speed: 40,  cd: 1.4,  r: 20, kind: 'melee',  aoeMelee: true, burn: { dps: 10, dur: 3 }, armor: 1, desc: '龙息焚烧面前一切' },
+  rifleman:   { name: '步枪兵',   ic: '枪', icColor: '#6a7a4e', cost: 90,  hp: 80,  dmg: 6,  range: 240, speed: 50,  cd: 0.35, r: 10, kind: 'ranged', proj: 'bullet', desc: '速射步枪，火力持续' },
+  gunner:     { name: '机枪手',   ic: '机', icColor: '#5a6a55', cost: 180, hp: 110, dmg: 7,  range: 260, speed: 42,  cd: 0.16, r: 11, kind: 'ranged', proj: 'bullet', desc: '泼水般倾泻弹雨' },
+  bazooka:    { name: '火箭兵',   ic: '箭', icColor: '#8a6a3e', cost: 200, hp: 85,  dmg: 38, range: 220, speed: 44,  cd: 2.6,  r: 10, kind: 'ranged', proj: 'rocket', aoe: 50, desc: '火箭弹范围爆破' },
+  sniper:     { name: '狙击手',   ic: '狙', icColor: '#4e5e4e', cost: 240, hp: 70,  dmg: 60, range: 420, speed: 46,  cd: 2.8,  r: 10, kind: 'ranged', proj: 'bullet', spread: 0.008, desc: '超远程一击致命' },
+  medic:      { name: '医疗兵',   ic: '救', icColor: '#c8d8c8', cost: 210, hp: 100, dmg: 0,  range: 0,   speed: 52,  cd: 1.7,  r: 10, kind: 'heal',   heal: { r: 130, amt: 12 }, desc: '战地治疗周围友军' },
+  humvee:     { name: '悍马',     ic: '悍', icColor: '#7a8a5a', cost: 300, hp: 260, dmg: 8,  range: 230, speed: 85,  cd: 0.22, r: 13, kind: 'ranged', proj: 'bullet', armor: 2, desc: '高速机动的机枪车' },
+  tank:       { name: '主战坦克', ic: '坦', icColor: '#5e6a5e', cost: 550, hp: 700, dmg: 60, range: 340, speed: 35,  cd: 3.0,  r: 18, kind: 'ranged', proj: 'shell', aoe: 45, armor: 4, desc: '重甲主炮，开火带后坐' },
+  mlrs:       { name: '火箭炮',   ic: '火', icColor: '#8a5a4e', cost: 650, hp: 200, dmg: 30, range: 520, speed: 18,  cd: 6.5,  r: 16, kind: 'ranged', proj: 'rock', aoe: 55, minRange: 150, multirock: { n: 5, spread: 65 }, armor: 1, desc: '多管齐射覆盖大片区域' },
+  heli:       { name: '武装直升机', ic: '升', icColor: '#4a5e6e', cost: 750, hp: 380, dmg: 7, range: 260, speed: 95,  cd: 0.18, r: 14, kind: 'ranged', proj: 'bullet', armor: 1, desc: '低空掠袭的机炮平台' }
+};
+var SERIES = [
+  { name: '王国军团', color: '#6ea8ff', types: ['farmer', 'swordsman', 'pikeman', 'shield', 'archer', 'javelineer', 'knight', 'king', 'catapult'] },
+  { name: '黑暗军团', color: '#f08a9a', types: ['skeleton', 'assassin', 'berserker', 'bomber', 'gargoyle', 'vampire', 'darkknight', 'necromancer', 'lich'] },
+  { name: '元素魔法', color: '#6ad0d8', types: ['mage', 'icemage', 'pyromancer', 'stormmage', 'earthwarden', 'druid', 'priest', 'summoner'] },
+  { name: '远古巨兽', color: '#d8b88a', types: ['warbear', 'minotaur', 'troll', 'treant', 'cyclops', 'giant', 'dragon'] },
+  { name: '现代战争', color: '#b8d86a', types: ['rifleman', 'gunner', 'bazooka', 'sniper', 'medic', 'humvee', 'tank', 'mlrs', 'heli'] }
+];
+var DEF_ORDER = [];
+SERIES.forEach(function (s) { DEF_ORDER = DEF_ORDER.concat(s.types); });
+
+var PRESETS = [
+  { name: '均衡军团', comp: { swordsman: 3, archer: 2, shield: 1, javelineer: 1 } },
+  { name: '箭雨齐发', comp: { archer: 5, shield: 1, pikeman: 2 } },
+  { name: '重装铁壁', comp: { shield: 3, swordsman: 2, mage: 1, priest: 1 } },
+  { name: '狂暴蛮袭', comp: { berserker: 4, knight: 1 } },
+  { name: '铁蹄冲锋', comp: { knight: 3, farmer: 4 } },
+  { name: '巨像降临', comp: { giant: 1, archer: 3, farmer: 4 } },
+  { name: '农民起义', comp: { farmer: 10 } },
+  { name: '圣光庇护', comp: { priest: 2, king: 1, swordsman: 3, icemage: 2 } },
+  { name: '暗夜獠牙', comp: { assassin: 4, vampire: 2 } },
+  { name: '火力压制', comp: { catapult: 2, shield: 2, archer: 3 } },
+  { name: '自爆浪潮', comp: { bomber: 5, knight: 2 } },
+  { name: '无尽军团', comp: { summoner: 2, priest: 1, farmer: 6 } },
+  { name: '王者亲征', comp: { king: 1, knight: 2, priest: 1, javelineer: 2 } },
+  { name: '白骨军团', comp: { skeleton: 6, necromancer: 1 } },
+  { name: '暗影降临', comp: { assassin: 3, vampire: 2, darkknight: 1, lich: 1 } },
+  { name: '雷暴秘术', comp: { stormmage: 2, icemage: 2, pyromancer: 2, earthwarden: 1 } },
+  { name: '自然之怒', comp: { treant: 1, druid: 2, warbear: 3 } },
+  { name: '巨兽横行', comp: { troll: 1, minotaur: 2, cyclops: 1 } },
+  { name: '巨龙苏醒', comp: { dragon: 1, skeleton: 8 } },
+  { name: '石像守望', comp: { gargoyle: 4, lich: 1, skeleton: 2 } },
+  { name: '熊蛮冲锋', comp: { warbear: 4, minotaur: 1 } },
+  { name: '机械步兵', comp: { rifleman: 4, humvee: 1, medic: 1 } },
+  { name: '装甲突击', comp: { tank: 2, rifleman: 3, bazooka: 1 } },
+  { name: '火力覆盖', comp: { mlrs: 1, sniper: 2, gunner: 2 } },
+  { name: '空中支援', comp: { heli: 2, rifleman: 4 } },
+  { name: '现代化军', comp: { tank: 1, humvee: 1, heli: 1, rifleman: 3, medic: 1 } },
+  { name: '钢铁洪流', comp: { tank: 3 } },
+  { name: '狙击小队', comp: { sniper: 4, medic: 1 } }
+];
+
+/* ---------- 状态 ---------- */
+var state = 'place';
+var placed = [];
+var units = [];
+var projectiles = [], floaters = [], lightnings = [];
+var budget = [2000, 2000];
+var infiniteMoney = false;
+var curType = 'swordsman';
+var SPEEDS = [0.5, 1, 2], speedIdx = 1, paused = false;
+var battleTime = 0, kills = [0, 0], startCounts = [0, 0], unitTotals = [0, 0];
+var winner = -1, endT = 0, seq = 1;
+
+/* ---------- 音效（WebAudio 合成，与 2D 版一致） ---------- */
+var actx = null, master = null, noiseB = null, audioOn = true, sndBudget = 8;
+function ac() {
+  if (!actx) {
+    try {
+      actx = new (window.AudioContext || window.webkitAudioContext)();
+      master = actx.createGain(); master.gain.value = 0.55; master.connect(actx.destination);
+    } catch (e) { actx = null; }
+  }
+  return actx;
+}
+function resumeAudio() { var c = ac(); if (c && c.state === 'suspended') c.resume(); }
+function noiseS() {
+  var c = ac(); if (!c) return null;
+  if (!noiseB) {
+    noiseB = c.createBuffer(1, 8820, 44100);
+    var d = noiseB.getChannelData(0);
+    for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  return noiseB;
+}
+function tone(f0, f1, dur, type, vol) {
+  var c = ac(); if (!c) return;
+  var t0 = c.currentTime;
+  var o = c.createOscillator(), g = c.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t0);
+  o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t0 + dur);
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+  o.connect(g); g.connect(master); o.start(t0); o.stop(t0 + dur + 0.02);
+}
+function noiseSfx(dur, vol, fType, freq) {
+  var c = ac(); if (!c) return;
+  var t0 = c.currentTime;
+  var s = c.createBufferSource(); s.buffer = noiseS(); s.loop = true;
+  var f = c.createBiquadFilter(); f.type = fType; f.frequency.value = freq;
+  var g = c.createGain();
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+  s.connect(f); f.connect(g); g.connect(master);
+  s.start(t0); s.stop(t0 + dur + 0.02);
+}
+function sfx(name) {
+  if (!audioOn || sndBudget < 1) return;
+  if (!ac()) return;
+  sndBudget -= 1;
+  try {
+    switch (name) {
+      case 'hit':    noiseSfx(0.05, 0.14, 'bandpass', 900); tone(150, 90, 0.07, 'square', 0.1); break;
+      case 'arrow':  noiseSfx(0.1, 0.09, 'highpass', 2500); break;
+      case 'fire':   noiseSfx(0.16, 0.1, 'bandpass', 600); break;
+      case 'boom':   tone(100, 38, 0.4, 'sine', 0.5); noiseSfx(0.3, 0.3, 'lowpass', 500); break;
+      case 'smash':  tone(80, 40, 0.25, 'sine', 0.5); noiseSfx(0.12, 0.2, 'lowpass', 300); break;
+      case 'death':  tone(200, 70, 0.16, 'sawtooth', 0.07); break;
+      case 'place':  tone(660, 880, 0.07, 'sine', 0.08); break;
+      case 'win':    tone(523, 523, 0.14, 'sine', 0.16);
+                     setTimeout(function () { tone(659, 659, 0.14, 'sine', 0.16); }, 130);
+                     setTimeout(function () { tone(784, 784, 0.2, 'sine', 0.18); }, 260);
+                     setTimeout(function () { tone(1047, 1047, 0.3, 'sine', 0.16); }, 390); break;
+    }
+  } catch (e) {}
+}
+
+/* ---------- DOM ---------- */
+var toastEl = document.getElementById('toast'), toastTimer = null;
+function toast(msg) {
+  toastEl.textContent = msg;
+  toastEl.style.opacity = '1';
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { toastEl.style.opacity = '0'; }, 1900);
+}
+var $ = function (id) { return document.getElementById(id); };
+var blueInfo = $('blueInfo'), redInfo = $('redInfo'), phaseEl = $('phase'), timerEl = $('timer');
+var bottombar = $('bottombar'), battlebar = $('battlebar'), overlay = $('overlay');
+var otitle = $('otitle'), ostats = $('ostats');
+var btnPause = $('btnPause'), btnSpeed = $('btnSpeed'), btnSound = $('btnSound');
+
+/* ---------- Three.js 场景 ---------- */
+var TEAM3 = [
+  { main: 0x4f8df0, dark: 0x2b5cb8 },
+  { main: 0xf05252, dark: 0xb02a2a }
+];
+var renderer, scene, camera;
+(function initScene() {
+  var box = $('view');
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setClearColor(0x87b5e0);
+  box.appendChild(renderer.domElement);
+  scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x87b5e0, 150, 380);
+  camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.5, 800);
+
+  scene.add(new THREE.HemisphereLight(0xe8f2ff, 0x5a7a45, 1.05));
+  var sun = new THREE.DirectionalLight(0xfff2d8, 0.85);
+  sun.position.set(-40, 80, -30);
+  scene.add(sun);
+
+  /* 草地 */
+  var ground = new THREE.Mesh(new THREE.PlaneGeometry(340, 240), new THREE.MeshLambertMaterial({ color: 0x77a748 }));
+  ground.rotation.x = -Math.PI / 2;
+  scene.add(ground);
+  /* 条纹草坪 */
+  for (var i = 0; i < 8; i++) {
+    if (i % 2 === 0) continue;
+    var strip = new THREE.Mesh(new THREE.PlaneGeometry(W3 / 8, D3), new THREE.MeshLambertMaterial({ color: 0x7fae4d }));
+    strip.rotation.x = -Math.PI / 2;
+    strip.position.set(i * W3 / 8 + W3 / 16, 0.02, D3 / 2);
+    scene.add(strip);
+  }
+  /* 边框 */
+  var bordMat = new THREE.MeshLambertMaterial({ color: 0x4e6a30 });
+  [[W3 / 2, -1, W3 + 4, 2], [W3 / 2, D3 + 1, W3 + 4, 2], [-1, D3 / 2, 2, D3 + 4], [W3 + 1, D3 / 2, 2, D3 + 4]].forEach(function (b) {
+    var m = new THREE.Mesh(new THREE.BoxGeometry(b[2], 1.2, b[3]), bordMat);
+    m.position.set(b[0], 0.6, b[1]);
+    scene.add(m);
+  });
+  /* 树与石头 */
+  var trunkG = new THREE.CylinderGeometry(0.35, 0.5, 2.2, 8);
+  var leafG = new THREE.ConeGeometry(1.8, 3.4, 8);
+  var trunkM = new THREE.MeshLambertMaterial({ color: 0x6a4e2e });
+  var leafM = new THREE.MeshLambertMaterial({ color: 0x4e7a37 });
+  for (var t = 0; t < 46; t++) {
+    var tx, tz;
+    if (t < 30) { tx = rand(-24, W3 + 24); tz = Math.random() < 0.5 ? rand(-22, -4) : rand(D3 + 4, D3 + 22); }
+    else { tx = Math.random() < 0.5 ? rand(-24, -6) : rand(W3 + 6, W3 + 24); tz = rand(-8, D3 + 8); }
+    var sc = rand(0.7, 1.5);
+    var tr = new THREE.Mesh(trunkG, trunkM);
+    tr.position.set(tx, 1.1 * sc, tz); tr.scale.setScalar(sc);
+    var lf = new THREE.Mesh(leafG, leafM);
+    lf.position.set(tx, 3.6 * sc, tz); lf.scale.setScalar(sc);
+    scene.add(tr); scene.add(lf);
+  }
+  var rockG = new THREE.SphereGeometry(1, 8, 6);
+  var rockM = new THREE.MeshLambertMaterial({ color: 0x9aa0a6 });
+  for (var r = 0; r < 14; r++) {
+    var rk = new THREE.Mesh(rockG, rockM);
+    rk.position.set(rand(-20, W3 + 20), 0.3, Math.random() < 0.5 ? rand(-16, -4) : rand(D3 + 4, D3 + 16));
+    rk.scale.set(rand(0.5, 1.6), rand(0.4, 1), rand(0.5, 1.6));
+    scene.add(rk);
+  }
+})();
+
+/* 部署半场提示 */
+var deployMarks = new THREE.Group();
+(function initDeployMarks() {
+  var pb = new THREE.Mesh(new THREE.PlaneGeometry(W3 / 2, D3), new THREE.MeshBasicMaterial({ color: 0x4f8df0, transparent: true, opacity: 0.1, depthWrite: false }));
+  pb.rotation.x = -Math.PI / 2; pb.position.set(W3 / 4, 0.03, D3 / 2);
+  var pr = new THREE.Mesh(new THREE.PlaneGeometry(W3 / 2, D3), new THREE.MeshBasicMaterial({ color: 0xf05252, transparent: true, opacity: 0.1, depthWrite: false }));
+  pr.rotation.x = -Math.PI / 2; pr.position.set(W3 * 3 / 4, 0.03, D3 / 2);
+  var line = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.05, D3), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 }));
+  line.position.set(W3 / 2, 0.06, D3 / 2);
+  deployMarks.add(pb); deployMarks.add(pr); deployMarks.add(line);
+  scene.add(deployMarks);
+})();
+
+/* ---------- 相机（轨道控制） ---------- */
+var cam = { yaw: Math.PI * 0.92, pitch: 0.95, dist: 95, tx: W3 / 2, tz: D3 / 2 };
+function applyCam() {
+  cam.pitch = clamp(cam.pitch, 0.18, 1.45);
+  cam.dist = clamp(cam.dist, 22, 230);
+  cam.tx = clamp(cam.tx, -30, W3 + 30);
+  cam.tz = clamp(cam.tz, -30, D3 + 30);
+  var cp = Math.cos(cam.pitch);
+  camera.position.set(
+    cam.tx + cam.dist * cp * Math.cos(cam.yaw),
+    cam.dist * Math.sin(cam.pitch),
+    cam.tz + cam.dist * cp * Math.sin(cam.yaw)
+  );
+  camera.lookAt(cam.tx, 0, cam.tz);
+}
+applyCam();
+
+/* ---------- 模型工厂 ---------- */
+var MATC = {};
+function M(c) { if (!MATC[c]) MATC[c] = new THREE.MeshLambertMaterial({ color: c }); return MATC[c]; }
+var GEOC = {};
+function G(kind) {
+  if (!GEOC[kind]) {
+    if (kind === 'box') GEOC[kind] = new THREE.BoxGeometry(1, 1, 1);
+    else if (kind === 'cyl') GEOC[kind] = new THREE.CylinderGeometry(0.5, 0.5, 1, 10);
+    else if (kind === 'cone') GEOC[kind] = new THREE.ConeGeometry(0.5, 1, 10);
+    else if (kind === 'sph') GEOC[kind] = new THREE.SphereGeometry(0.5, 12, 9);
+    else if (kind === 'cap') GEOC[kind] = new THREE.CapsuleGeometry(0.5, 1, 3, 8);
+  }
+  return GEOC[kind];
+}
+function part(parent, kind, color, sx, sy, sz, x, y, z) {
+  var m = new THREE.Mesh(G(kind), M(color));
+  m.scale.set(sx, sy, sz);
+  m.position.set(x, y, z);
+  parent.add(m);
+  return m;
+}
+function skinOf(type) {
+  if (type === 'assassin') return 0x3a3a45;
+  if (type === 'vampire') return 0xe8d8dc;
+  if (type === 'skeleton') return 0xe8e8dc;
+  if (type === 'necromancer') return 0xc8e0b0;
+  if (type === 'lich') return 0xd8d0e8;
+  if (type === 'darkknight') return 0xc8c8d4;
+  return 0xf0cda3;
+}
+var STAFF_TYPES = { mage: 1, icemage: 1, pyromancer: 1, stormmage: 1, necromancer: 1, lich: 1, summoner: 1, druid: 1 };
+function buildWeapon(g, type, r) {
+  if (type === 'pikeman' || type === 'javelineer') {
+    part(g, 'cyl', 0xb9c0c8, 0.12, r * 2.6, 0.12, r * 0.3 + r * 1.3, 0, 0).rotation.z = Math.PI / 2;
+  } else if (type === 'archer') {
+    part(g, 'cyl', 0x8a6b4a, 0.09, r * 1.9, 0.09, r * 0.5 + r * 0.95, 0, 0);
+  } else if (STAFF_TYPES[type]) {
+    part(g, 'cyl', 0x7a5c3e, 0.09, r * 2.2, 0.09, r * 0.4 + r * 1.1, 0, 0);
+    var orbC = type === 'icemage' ? 0x9fd7f7 : type === 'pyromancer' ? 0xf2a13c : type === 'stormmage' ? 0xcfe8ff :
+               type === 'necromancer' || type === 'druid' ? 0x8ae06a : type === 'lich' ? 0xc9a8f0 : type === 'summoner' ? 0xb49ae0 : 0x9fd7f7;
+    var orb = new THREE.Mesh(G('sph'), new THREE.MeshBasicMaterial({ color: orbC }));
+    orb.scale.setScalar(r * 0.5);
+    orb.position.set(r * 1.9, r * 0.4, 0);
+    g.add(orb);
+  } else if (type === 'earthwarden') {
+    part(g, 'cyl', 0x6a4e2e, 0.18, r * 2, 0.18, r * 0.4 + r, 0, 0);
+    part(g, 'box', 0x9a938a, r * 0.5, r * 0.5, r * 0.5, r * 2, r * 0.4, 0);
+  } else if (type === 'rifleman' || type === 'sniper') {
+    part(g, 'box', 0x3a3f45, r * (type === 'sniper' ? 2.1 : 1.4), 0.13, 0.13, r * 0.7 + r * 0.7, 0, 0);
+  } else if (type === 'gunner') {
+    part(g, 'box', 0x2e3338, r * 1.8, 0.2, 0.2, r * 0.7 + r * 0.9, 0, 0);
+  } else if (type === 'bazooka') {
+    part(g, 'cyl', 0x4e5a4e, 0.26, r * 1.9, 0.26, r * 0.4 + r * 0.95, r * 0.55, 0).rotation.z = Math.PI / 2;
+  } else if (type === 'medic') {
+    part(g, 'box', 0xe8e8e0, r * 0.6, r * 0.45, r * 0.35, r * 1, 0, 0);
+  } else if (type === 'bomber') {
+    part(g, 'sph', 0x2b2b30, r * 0.75, r * 0.75, r * 0.75, r * 0.95, 0, 0);
+    part(g, 'cyl', 0x8a7351, 0.05, r * 0.4, 0.05, r * 1.35, r * 0.5, 0);
+  } else if (type === 'berserker') {
+    part(g, 'cyl', 0x8a6b4a, 0.09, r * 1.4, 0.09, r * 0.4 + r * 0.7, 0, 0);
+    part(g, 'box', 0xc8ced6, r * 0.45, r * 0.35, 0.09, r * 1.1, 0, 0);
+  } else if (type === 'farmer') {
+    part(g, 'cyl', 0xa08050, 0.09, r * 1.6, 0.09, r * 0.4 + r * 0.8, 0, 0);
+  } else if (type === 'assassin') {
+    part(g, 'box', 0xd8dce2, r * 0.9, 0.09, 0.2, r * 0.5 + r * 0.45, r * 0.15, 0);
+  } else if (type === 'gargoyle') {
+    part(g, 'cone', 0xb8bcc4, 0.14, r * 0.9, 0.14, r * 1, 0, 0).rotation.z = -Math.PI / 2;
+  } else {
+    var swC = type === 'king' ? 0xe8c96a : type === 'skeleton' ? 0x9a8a6a : 0xcfd6dd;
+    var len = type === 'shield' || type === 'vampire' ? r * 1.1 : r * 1.6;
+    part(g, 'box', swC, len, 0.15, 0.06, r * 0.55 + len / 2, 0, 0);
+    part(g, 'box', 0x8a6b4a, 0.18, 0.36, 0.22, r * 0.6, 0, 0);
+  }
+  return g;
+}
+var MODERN_HELMET = { rifleman: 1, gunner: 1, sniper: 1, bazooka: 1, medic: 1 };
+function buildHumanoid(u) {
+  var g = new THREE.Group(), r = u.r;
+  var tc = TEAM3[u.team];
+  var bodyH = r * 1.7;
+  var body = part(g, 'cap', tc.main, r * 1.5, bodyH - r, r * 1.5, 0, bodyH / 2 + r * 0.2, 0);
+  var head = part(g, 'sph', skinOf(u.type), r * 0.9, r * 0.9, r * 0.9, 0, bodyH + r * 0.55, 0);
+  if (MODERN_HELMET[u.type]) {
+    part(head, 'sph', 0x55643e, r * 0.6, r * 0.32, r * 0.6, 0, r * 0.07, -r * 0.15);
+  }
+  if (u.type === 'shield') {
+    var sh = part(g, 'cyl', 0x9aa5b1, r * 1.15, 0.1, r * 1.15, 0, bodyH * 0.55, -r * 0.7);
+    sh.rotation.x = Math.PI / 2;
+  }
+  if (u.type === 'gargoyle') {
+    for (var s = -1; s <= 1; s += 2) {
+      var w = part(g, 'box', 0x7a7f88, r * 1.6, 0.12, r * 0.9, -r * 0.3, bodyH * 0.75, s * r * 0.9);
+      w.rotation.x = s * 0.5;
+    }
+  }
+  if (u.type === 'vampire') {
+    part(g, 'box', 0x601422, 0.14, bodyH * 0.9, r * 1.6, -r * 0.45, bodyH * 0.55, 0);
+  }
+  if (u.type === 'king') {
+    part(head, 'cyl', 0xe8b64c, r * 0.4, r * 0.2, r * 0.4, 0, r * 0.28, 0);
+  }
+  if (u.type === 'minotaur') {
+    for (var h = -1; h <= 1; h += 2) {
+      var horn = part(head, 'cone', 0xe8e0d0, 0.24, r * 0.9, 0.24, 0, r * 0.15, h * r * 0.38);
+      horn.rotation.x = -h * 0.7;
+    }
+  }
+  var hand = new THREE.Group();
+  hand.position.set(0, bodyH * 0.72, r * 0.55);
+  buildWeapon(hand, u.type, r);
+  g.add(hand);
+  u.parts = { body: body, head: head, hand: hand };
+  return g;
+}
+function buildBig(u) {
+  var g = new THREE.Group(), r = u.r, tc = TEAM3[u.team];
+  if (u.type === 'dragon') {
+    var body = part(g, 'cap', tc.main, r * 1.1, r * 2, r * 1.1, 0, r * 1.3, 0);
+    body.rotation.z = Math.PI / 2;
+    var head = part(g, 'sph', tc.main, r * 0.95, r * 0.8, r * 0.85, r * 2, r * 1.9, 0);
+    part(head, 'cone', 0xd8d0c0, 0.22, r * 0.8, 0.22, r * 0.45, r * 0.1, 0).rotation.z = -Math.PI / 2;
+    part(head, 'sph', 0xffd76a, r * 0.22, r * 0.22, r * 0.22, r * 0.2, r * 0.28, r * 0.34);
+    part(head, 'sph', 0xffd76a, r * 0.22, r * 0.22, r * 0.22, r * 0.2, r * 0.28, -r * 0.34);
+    var tail = part(g, 'cone', tc.dark, r * 0.62, r * 2.4, r * 0.62, -r * 2, r * 0.8, 0);
+    tail.rotation.z = Math.PI / 2 + 0.25;
+    var wl = part(g, 'box', tc.dark, r * 2.4, 0.18, r * 1.4, -r * 0.2, r * 1.7, r * 0.95);
+    wl.rotation.x = 0.55;
+    var wr = part(g, 'box', tc.dark, r * 2.4, 0.18, r * 1.4, -r * 0.2, r * 1.7, -r * 0.95);
+    wr.rotation.x = -0.55;
+    u.parts = { body: body, head: head };
+    return g;
+  }
+  if (u.type === 'treant') {
+    var trunk = part(g, 'cyl', 0x6a4e2e, r * 1.15, r * 2.6, r * 1.15, 0, r * 1.3, 0);
+    var crown = part(g, 'cone', 0x4e7a37, r * 2.3, r * 2.6, r * 2.3, 0, r * 3.4, 0);
+    part(g, 'sph', 0x2a2a1a, r * 0.2, r * 0.2, r * 0.2, r * 0.55, r * 1.7, r * 0.38);
+    part(g, 'sph', 0x2a2a1a, r * 0.2, r * 0.2, r * 0.2, r * 0.55, r * 1.7, -r * 0.38);
+    var arm = new THREE.Group();
+    arm.position.set(0, r * 1.6, r * 0.7);
+    part(arm, 'cyl', 0x5a4028, 0.32, r * 1.7, 0.32, r * 0.7, 0, 0).rotation.z = Math.PI / 2 - 0.3;
+    g.add(arm);
+    u.parts = { body: trunk, head: crown, hand: arm };
+    return g;
+  }
+  var bodyH = r * 1.8;
+  var body = part(g, 'cap', tc.main, r * 1.5, bodyH - r, r * 1.5, 0, bodyH / 2 + r * 0.2, 0);
+  var head = part(g, 'sph', u.type === 'troll' ? 0x7aa860 : 0xe8bd8f, r * 0.9, r * 0.9, r * 0.9, 0, bodyH + r * 0.55, 0);
+  if (u.type === 'troll') {
+    part(g, 'sph', 0x7aa860, r * 0.62, r * 0.62, r * 0.62, r * 0.25, bodyH + r * 0.5, r * 0.62);
+    part(g, 'sph', 0x7aa860, r * 0.62, r * 0.62, r * 0.62, r * 0.25, bodyH + r * 0.5, -r * 0.62);
+  }
+  if (u.type === 'cyclops') {
+    part(head, 'sph', 0xffffff, r * 0.45, r * 0.45, r * 0.22, r * 0.4, 0, 0);
+    part(head, 'sph', 0x1a1a1a, r * 0.17, r * 0.17, r * 0.12, r * 0.55, 0, 0);
+  }
+  if (u.type === 'giant') {
+    part(g, 'sph', tc.main, r * 0.78, r * 0.78, r * 0.78, 0, bodyH * 0.6, r * 1.1);
+    part(g, 'sph', tc.main, r * 0.78, r * 0.78, r * 0.78, 0, bodyH * 0.6, -r * 1.1);
+  }
+  var hand = new THREE.Group();
+  hand.position.set(0, bodyH * 0.7, r * 0.6);
+  if (u.type === 'cyclops' || u.type === 'troll') {
+    part(hand, 'cyl', 0x6a4e2e, r * 0.34, r * 2.6, r * 0.34, r * 0.8 + r * 1.3, 0, 0).rotation.z = Math.PI / 2;
+  } else {
+    part(hand, 'box', 0xcfd6dd, r * 1.3, 0.28, 0.12, r * 0.6 + r * 0.65, 0, 0);
+  }
+  g.add(hand);
+  u.parts = { body: body, head: head, hand: hand };
+  return g;
+}
+function buildVehicle(u) {
+  var g = new THREE.Group(), r = u.r, tc = TEAM3[u.team];
+  if (u.type === 'knight' || u.type === 'darkknight') {
+    var horseC = u.type === 'darkknight' ? 0x33333f : tc.dark;
+    var horse = part(g, 'box', horseC, r * 2.4, r * 1.0, r * 1.1, 0, r * 1.0, 0);
+    part(g, 'box', horseC, r * 0.75, r * 0.75, r * 0.6, r * 1.45, r * 1.35, 0);
+    for (var lk = 0; lk < 4; lk++) {
+      part(g, 'cyl', 0x3a3f47, r * 0.22, r * 0.95, r * 0.22, (lk < 2 ? 0.85 : -0.85) * r, r * 0.48, (lk % 2 ? 0.55 : -0.55) * r);
+    }
+    part(g, 'cap', tc.main, r * 0.8, r * 0.9, r * 0.8, 0, r * 1.9, 0);
+    var rh = part(g, 'sph', skinOf(u.type), r * 0.46, r * 0.46, r * 0.46, 0, r * 2.6, 0);
+    var lance = new THREE.Group();
+    lance.position.set(0, r * 1.9, r * 0.4);
+    part(lance, 'cyl', u.type === 'darkknight' ? 0x8a4a4a : 0xcfd6dd, 0.13, r * 3.2, 0.13, r * 1.6, 0, 0).rotation.z = Math.PI / 2;
+    g.add(lance);
+    u.parts = { body: horse, head: rh, hand: lance };
+    return g;
+  }
+  if (u.type === 'tank') {
+    var hull = part(g, 'box', tc.main, r * 2.2, r * 0.75, r * 1.5, 0, r * 0.75, 0);
+    part(g, 'box', 0x33382e, r * 2.3, r * 0.55, 0.45, 0, r * 0.35, r * 0.85);
+    part(g, 'box', 0x33382e, r * 2.3, r * 0.55, 0.45, 0, r * 0.35, -r * 0.85);
+    part(g, 'cyl', tc.dark, r * 1.05, r * 0.6, r * 1.05, 0, r * 1.45, 0);
+    var barrel = new THREE.Group();
+    barrel.position.set(0, r * 1.45, 0);
+    part(barrel, 'cyl', 0x3a3f45, 0.26, r * 2.8, 0.26, r * 1.4, 0, 0).rotation.z = Math.PI / 2;
+    g.add(barrel);
+    u.parts = { body: hull, hand: barrel };
+    return g;
+  }
+  if (u.type === 'mlrs') {
+    var hull2 = part(g, 'box', tc.main, r * 2.1, r * 0.7, r * 1.4, 0, r * 0.7, 0);
+    for (var wk = 0; wk < 4; wk++) {
+      part(g, 'cyl', 0x33382e, 0.55, 0.32, 0.55, (wk < 2 ? 0.7 : -0.7) * r, r * 0.3, (wk % 2 ? 0.7 : -0.7) * r).rotation.x = Math.PI / 2;
+    }
+    var pod = new THREE.Group();
+    pod.position.set(0, r * 1.4, 0);
+    pod.rotation.x = -0.4;
+    part(pod, 'box', 0x4e4438, r * 1.3, r * 0.85, r * 1.1, r * 0.3, 0, 0);
+    for (var tk = -1; tk <= 1; tk += 2) {
+      part(pod, 'cyl', 0x1e1a14, 0.32, r * 0.9, 0.32, r * 1, tk * r * 0.28, 0).rotation.z = Math.PI / 2;
+    }
+    g.add(pod);
+    u.parts = { body: hull2, hand: pod };
+    return g;
+  }
+  if (u.type === 'humvee') {
+    var body3 = part(g, 'box', tc.main, r * 2.1, r * 0.75, r * 1.5, 0, r * 0.85, 0);
+    part(g, 'box', 0x2e3540, r * 0.85, r * 0.5, r * 1.25, r * 0.35, r * 1.5, 0);
+    for (var hk = 0; hk < 4; hk++) {
+      part(g, 'cyl', 0x33382e, 0.55, 0.36, 0.55, (hk < 2 ? 0.75 : -0.75) * r, r * 0.36, (hk % 2 ? 0.7 : -0.7) * r).rotation.x = Math.PI / 2;
+    }
+    var gun = new THREE.Group();
+    gun.position.set(0, r * 1.45, 0);
+    part(gun, 'cyl', 0x2a2e33, 0.15, r * 1.6, 0.15, r * 0.85, 0, 0).rotation.z = Math.PI / 2;
+    g.add(gun);
+    u.parts = { body: body3, hand: gun };
+    return g;
+  }
+  if (u.type === 'catapult') {
+    var base = part(g, 'box', 0x8a7351, r * 1.9, r * 0.5, r * 1.4, 0, r * 0.6, 0);
+    for (var ck = 0; ck < 4; ck++) {
+      part(g, 'cyl', 0x6b5436, 0.62, 0.32, 0.62, (ck < 2 ? 0.7 : -0.7) * r, r * 0.32, (ck % 2 ? 0.65 : -0.65) * r).rotation.x = Math.PI / 2;
+    }
+    var arm = new THREE.Group();
+    arm.position.set(0, r * 0.85, 0);
+    arm.rotation.z = 0.85;
+    part(arm, 'box', 0x7a5c3e, r * 2.6, 0.32, 0.32, r * 0.6 + r * 1.3, r * 1.2, 0);
+    part(arm, 'sph', 0x9aa0a6, 0.75, 0.75, 0.75, r * 1.85, r * 1.2, 0);
+    g.add(arm);
+    part(g, 'box', tc.main, 0.16, r * 1.2, r * 0.8, -r * 0.75, r * 1.5, 0);
+    u.parts = { body: base, hand: arm };
+    return g;
+  }
+  if (u.type === 'heli') {
+    var fus = part(g, 'cap', tc.main, r * 1.05, r * 1.8, r * 0.85, 0, 0, 0);
+    fus.rotation.z = Math.PI / 2;
+    part(g, 'sph', 0x2e3540, r * 0.6, r * 0.55, r * 0.55, r * 1.35, 0.15, 0);
+    part(g, 'box', tc.dark, r * 2, 0.2, 0.38, -r * 1.75, 0.35, 0);
+    part(g, 'box', tc.dark, r * 0.5, 0.16, r * 2.2, -r * 2.65, 0.55, 0);
+    part(g, 'box', tc.dark, 0.26, 0.16, r * 1.6, 0, -0.1, 0);
+    var rotor = new THREE.Group();
+    rotor.position.set(0, r * 1.05, 0);
+    part(rotor, 'box', 0xc8d0d8, r * 4.4, 0.09, 0.42, 0, 0, 0);
+    part(rotor, 'box', 0xc8d0d8, 0.42, 0.09, r * 4.4, 0, 0, 0);
+    g.add(rotor);
+    part(g, 'cyl', 0x3a3f45, 0.1, r * 2.2, 0.1, 0, -r * 0.85, r * 0.7).rotation.z = Math.PI / 2;
+    part(g, 'cyl', 0x3a3f45, 0.1, r * 2.2, 0.1, 0, -r * 0.85, -r * 0.7).rotation.z = Math.PI / 2;
+    u.parts = { body: fus, hand: rotor, rotor: true };
+    u.flyH = 3.2;
+    return g;
+  }
+  if (u.type === 'warbear') {
+    var bb = part(g, 'cap', tc.main, r * 1.15, r * 1.6, r * 1.15, 0, r * 1.0, 0);
+    bb.rotation.z = Math.PI / 2;
+    var bh = part(g, 'sph', tc.main, r * 0.8, r * 0.7, r * 0.78, r * 1.2, r * 1.15, 0);
+    part(bh, 'sph', 0x2a2a2a, r * 0.16, r * 0.16, r * 0.16, r * 0.4, 0, 0);
+    part(bh, 'sph', tc.dark, r * 0.24, r * 0.24, r * 0.24, 0, r * 0.4, r * 0.36);
+    part(bh, 'sph', tc.dark, r * 0.24, r * 0.24, r * 0.24, 0, r * 0.4, -r * 0.36);
+    u.parts = { body: bb, head: bh };
+    return g;
+  }
+  return buildHumanoid(u);
+}
+function buildUnitMesh(u) {
+  var g;
+  if (u.type === 'knight' || u.type === 'darkknight' || u.type === 'tank' || u.type === 'mlrs' ||
+      u.type === 'humvee' || u.type === 'catapult' || u.type === 'heli' || u.type === 'warbear') g = buildVehicle(u);
+  else if (u.r >= 1.4) g = buildBig(u);
+  else g = buildHumanoid(u);
+  /* 脚下阴影圈 */
+  var blob = new THREE.Mesh(new THREE.CircleGeometry(u.r * 1.15, 14), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false }));
+  blob.rotation.x = -Math.PI / 2;
+  blob.position.y = 0.05;
+  g.add(blob);
+  /* 血条 */
+  var barW = Math.max(1.6, u.r * 1.4);
+  var barBg = new THREE.Mesh(new THREE.PlaneGeometry(barW, 0.24), new THREE.MeshBasicMaterial({ color: 0x10141a, depthWrite: false }));
+  var barFg = new THREE.Mesh(new THREE.PlaneGeometry(barW, 0.16), new THREE.MeshBasicMaterial({ color: 0x67d06b, depthWrite: false }));
+  barFg.position.z = 0.012;
+  var barPivot = new THREE.Group();
+  barPivot.add(barBg); barPivot.add(barFg);
+  g.add(barPivot);
+  u.bar = { pivot: barPivot, fg: barFg, w: barW, y: (u.flyH || 0) + u.r * 3.4 + 1.2 };
+  barPivot.visible = false;
+  scene.add(g);
+  return g;
+}
+
+/* ---------- 特效 ---------- */
+var fxLayer = $('fx');
+function floaterAdd(x, z, text, color, size) {
+  if (floaters.length > 140) return;
+  var el = document.createElement('div');
+  el.className = 'fl';
+  el.textContent = text;
+  el.style.color = color || '#fff';
+  el.style.fontSize = (size || 14) + 'px';
+  fxLayer.appendChild(el);
+  floaters.push({ x: x, z: z, t: 0, life: 0.85, el: el });
+}
+var fxPool = [];
+function spawnParticle(x, y, z, vx, vy, vz, life, size, color) {
+  if (fxPool.length > 260) return;
+  var m = new THREE.Mesh(G('box'), M(color));
+  m.scale.setScalar(size);
+  m.position.set(x, y, z);
+  scene.add(m);
+  fxPool.push({ m: m, vx: vx, vy: vy, vz: vz, life: life, maxLife: life });
+}
+function burst(x, z, n, color, speed, upBias) {
+  for (var i = 0; i < n; i++) {
+    var a = rand(0, TAU), s = rand(0.2, 1) * speed;
+    spawnParticle(x, rand(0.3, 1.5), z, Math.cos(a) * s, rand(1, 4) * (upBias || 1), Math.sin(a) * s, rand(0.25, 0.6), rand(0.14, 0.3), color);
+  }
+}
+var rings = [];
+function ringFx(x, z, radius, color) {
+  var m = new THREE.Mesh(new THREE.RingGeometry(0.82, 1, 28), new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x, 0.1, z);
+  scene.add(m);
+  rings.push({ m: m, max: radius, t: 0 });
+}
+function lightningFx(x1, y1, z1, x2, y2, z2) {
+  var geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute([
+    x1, y1, z1,
+    (x1 + x2) / 2 + rand(-0.8, 0.8), (y1 + y2) / 2 + rand(0, 1.2), (z1 + z2) / 2 + rand(-0.8, 0.8),
+    x2, y2, z2
+  ], 3));
+  var line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xcfe8ff, transparent: true, opacity: 1 }));
+  scene.add(line);
+  lightnings.push({ line: line, t: 0 });
+}
+function makeProjMesh(kind) {
+  var m;
+  if (kind === 'fire') {
+    m = new THREE.Mesh(G('sph'), new THREE.MeshBasicMaterial({ color: 0xf2a13c }));
+    m.scale.setScalar(0.95);
+  } else if (kind === 'rock') {
+    m = new THREE.Mesh(G('sph'), M(0x9aa0a6));
+    m.scale.setScalar(1.35);
+  } else if (kind === 'bullet') {
+    m = new THREE.Mesh(G('box'), new THREE.MeshBasicMaterial({ color: 0xffe9a8 }));
+    m.scale.set(1.3, 0.1, 0.1);
+  } else if (kind === 'shell') {
+    m = new THREE.Mesh(G('box'), new THREE.MeshBasicMaterial({ color: 0xffd76a }));
+    m.scale.set(1.7, 0.22, 0.22);
+  } else if (kind === 'rocket') {
+    m = new THREE.Mesh(G('box'), new THREE.MeshBasicMaterial({ color: 0xe8722a }));
+    m.scale.set(1.5, 0.22, 0.22);
+  } else if (kind === 'spear') {
+    m = new THREE.Mesh(G('cyl'), M(0x8a6b4a));
+    m.scale.set(0.15, 2.6, 0.15);
+  } else if (kind === 'ice') {
+    m = new THREE.Mesh(G('cone'), new THREE.MeshBasicMaterial({ color: 0x9fd7f7 }));
+    m.scale.set(0.32, 1.3, 0.32);
+  } else if (kind === 'shadow' || kind === 'bolt') {
+    m = new THREE.Mesh(G('sph'), new THREE.MeshBasicMaterial({ color: kind === 'shadow' ? 0x8a5cc0 : 0xb49ae0 }));
+    m.scale.setScalar(0.55);
+  } else {
+    m = new THREE.Mesh(G('cyl'), M(0x6b5844));
+    m.scale.set(0.1, 1.7, 0.1);
+  }
+  scene.add(m);
+  return m;
+}
+
+/* ---------- 布阵（左蓝右红） ---------- */
+function spent(t) { var s = 0; for (var i = 0; i < placed.length; i++) if (placed[i].team === t) s += DEFS[placed[i].type].cost; return s; }
+function remaining(t) { return infiniteMoney ? 1e9 : budget[t] - spent(t); }
+function teamCount(t) { var n = 0; for (var i = 0; i < placed.length; i++) if (placed[i].team === t) n++; return n; }
+function teamAt(x) { return x < W3 / 2 ? 0 : 1; }
+function clampField(x, z) { return { x: clamp(x, 3, W3 - 3), z: clamp(z, 3, D3 - 3) }; }
+function canPlaceAt(team, type, x, z) {
+  var def = DEFS[type];
+  if (x < 3 || x > W3 - 3 || z < 3 || z > D3 - 3) return { ok: false, reason: '超出战场范围' };
+  if (!infiniteMoney && remaining(team) < def.cost) {
+    return { ok: false, reason: (team === 0 ? '蓝军' : '红军') + '预算不足（剩余 ' + remaining(team) + '）' };
+  }
+  if (placed.length >= 260) return { ok: false, reason: '单位数量已达上限' };
+  return { ok: true };
+}
+function placeAt(team, type, x, z) {
+  var p = clampField(x, z);
+  placed.push({ type: type, team: team, x: p.x, z: p.z });
+  sfx('place');
+}
+function removeNear(x, z) {
+  var hit = -1, hd = 1e9;
+  for (var i = 0; i < placed.length; i++) {
+    var p = placed[i];
+    var d = hyp(p.x - x, p.z - z);
+    if (d < Math.max(2, DEFS[p.type].r * S + 1.2) && d < hd) { hd = d; hit = i; }
+  }
+  if (hit >= 0) { placed.splice(hit, 1); sfx('place'); }
+}
+function randomDeploy(team) {
+  placed = placed.filter(function (p) { return p.team !== team; });
+  var preset = PRESETS[Math.floor(Math.random() * PRESETS.length)];
+  var money = infiniteMoney ? 12000 : budget[team], list = [], guard = 0;
+  var entries = Object.keys(preset.comp).map(function (k) { return [k, preset.comp[k]]; });
+  while (guard++ < 500) {
+    var afford = entries.filter(function (e) { return DEFS[e[0]].cost <= money; });
+    if (!afford.length) break;
+    var tot = 0; afford.forEach(function (e) { tot += e[1]; });
+    var r = Math.random() * tot, pick = afford[0][0];
+    for (var i = 0; i < afford.length; i++) { r -= afford[i][1]; if (r <= 0) { pick = afford[i][0]; break; } }
+    list.push(pick); money -= DEFS[pick].cost;
+    if (placed.length + list.length >= 260) break;
+  }
+  formationPlace(team, list);
+  toast((team === 0 ? '蓝军' : '红军') + '已部署：' + preset.name + '（' + list.length + ' 个单位）');
+}
+function formationPlace(team, list) {
+  var sorted = list.slice().sort(function (a, b) {
+    return (DEFS[a].kind === 'melee' ? 0 : 1) - (DEFS[b].kind === 'melee' ? 0 : 1);
+  });
+  var baseX = team === 0 ? W3 / 2 - 12 : W3 / 2 + 12;
+  var dir = team === 0 ? -1 : 1;
+  var avail = team === 0 ? baseX - 6 : W3 - 6 - baseX;
+  var maxRows = Math.max(2, Math.floor(avail / 4.6));
+  var perRow = Math.max(6, Math.ceil(sorted.length / maxRows));
+  sorted.forEach(function (id, i) {
+    var row = Math.floor(i / perRow);
+    var rowCount = Math.min(perRow, sorted.length - row * perRow);
+    var col = i % perRow;
+    var x = clamp(baseX + dir * row * 4.6, 6, W3 - 6);
+    var z = clamp(D3 / 2 + (col - (rowCount - 1) / 2) * 4.6 + rand(-0.8, 0.8), 5, D3 - 5);
+    placed.push({ type: id, team: team, x: x, z: z });
+  });
+}
+
+/* ---------- 开战 ---------- */
+function spawnUnit(p) {
+  var def = DEFS[p.type];
+  var u = {
+    id: seq++, def: def, type: p.type, team: p.team, x: p.x, z: p.z,
+    hp: def.hp, maxHp: def.hp, r: def.r * S,
+    cd: Math.random() * def.cd * 0.5, retarget: Math.random() * 0.2, target: null,
+    face: p.team === 0 ? 0 : Math.PI, anim: 0, walk: Math.random() * 10, spd: 0,
+    kb: { x: 0, z: 0 }, fallen: 0, alive: true, tilt: 0, deadT: 0,
+    slowT: 0, slowFactor: 0.55, poisonT: 0, poisonDps: 0, poisonTick: 0, poisonSrc: null,
+    burnT: 0, burnDps: 0, burnTick: 0, burnSrc: null,
+    lastHurt: -99, regenTick: 0,
+    blinkCd: rand(1, 2), summonCd: def.summon ? def.summon.interval : 0, summons: []
+  };
+  u.mesh = buildUnitMesh(u);
+  return u;
+}
+function clearBattleVisuals() {
+  units.forEach(function (u) { if (u.mesh) scene.remove(u.mesh); });
+  units = [];
+  projectiles.forEach(function (p) { if (p.mesh) scene.remove(p.mesh); });
+  projectiles = [];
+  fxPool.forEach(function (p) { scene.remove(p.m); });
+  fxPool = [];
+  rings.forEach(function (r) { scene.remove(r.m); });
+  rings = [];
+  lightnings.forEach(function (L) { scene.remove(L.line); });
+  lightnings = [];
+  floaters.forEach(function (f) { if (f.el.parentNode) f.el.parentNode.removeChild(f.el); });
+  floaters = [];
+}
+function startBattle() {
+  if (teamCount(0) === 0 || teamCount(1) === 0) {
+    toast('双方都需要至少 1 个单位才能开战（试试「随机蓝军/红军」）');
+    return;
+  }
+  clearBattleVisuals();
+  units = placed.map(spawnUnit);
+  kills = [0, 0]; battleTime = 0; winner = -1; endT = 0; paused = false;
+  startCounts = [teamCount(0), teamCount(1)];
+  unitTotals = [startCounts[0], startCounts[1]];
+  state = 'battle';
+  overlay.classList.add('hidden');
+  cam.tx = W3 / 2; cam.tz = D3 / 2;
+}
+function backToPlace() {
+  state = 'place';
+  overlay.classList.add('hidden');
+  paused = false;
+  clearBattleVisuals();
+  battleTime = 0; winner = -1;
+}
+
+/* ---------- 战斗模拟（与 2D 版同源，y->z） ---------- */
+function nearestEnemy(u) {
+  var best = null, bd = 1e18;
+  for (var i = 0; i < units.length; i++) {
+    var e = units[i];
+    if (!e.alive || e.team === u.team) continue;
+    var dx = e.x - u.x, dz = e.z - u.z, d2 = dx * dx + dz * dz;
+    if (d2 < bd) { bd = d2; best = e; }
+  }
+  return best;
+}
+function aliveCount(t) { var n = 0; for (var i = 0; i < units.length; i++) if (units[i].alive && units[i].team === t) n++; return n; }
+function auraMult(u) {
+  var m = 1;
+  for (var i = 0; i < units.length; i++) {
+    var a = units[i];
+    if (a === u || !a.alive || a.team !== u.team || !a.def.aura) continue;
+    if (hyp(a.x - u.x, a.z - u.z) <= a.def.aura.r * S && a.def.aura.mult > m) m = a.def.aura.mult;
+  }
+  return m;
+}
+function auraArmorOf(t) {
+  var bonus = 0;
+  for (var i = 0; i < units.length; i++) {
+    var a = units[i];
+    if (a === t || !a.alive || a.team !== t.team || !a.def.auraArmor) continue;
+    if (hyp(a.x - t.x, a.z - t.z) <= a.def.auraArmor.r * S && a.def.auraArmor.armor > bonus) bonus = a.def.auraArmor.armor;
+  }
+  return bonus;
+}
+function damage(t, raw, src, nx, nz, kb, pierce) {
+  if (!t.alive) return;
+  var dmg = pierce ? raw : Math.max(1, raw - ((t.def.armor || 0) + auraArmorOf(t)));
+  var crit = Math.random() < 0.08;
+  if (crit) dmg *= 1.7;
+  dmg = Math.round(dmg);
+  t.hp -= dmg;
+  t.lastHurt = battleTime;
+  var res = 1 - (t.def.knockRes || 0);
+  t.kb.x += (nx || 0) * (kb || 0) * res * S;
+  t.kb.z += (nz || 0) * (kb || 0) * res * S;
+  if (res > 0.3 && hyp(t.kb.x, t.kb.z) > 23) t.fallen = Math.max(t.fallen, 0.45);
+  floaterAdd(t.x, t.z, '' + dmg, crit ? '#ffb02e' : '#ffffff', crit ? 17 : 13);
+  burst(t.x, t.z, 2, 0x7d2a2a, 2.5, 1);
+  if (src && src.def && src.hp !== undefined) {
+    if (src.def.lifesteal && src.alive) {
+      var hl = Math.round(dmg * src.def.lifesteal);
+      if (hl > 0 && src.hp < src.maxHp) src.hp = Math.min(src.maxHp, src.hp + hl);
+    }
+    if (src.def.poison && t.alive) { t.poisonT = src.def.poison.dur; t.poisonDps = src.def.poison.dps; t.poisonSrc = src; t.poisonTick = 0.6; }
+    if (src.def.burn && t.alive) { t.burnT = src.def.burn.dur; t.burnDps = src.def.burn.dps; t.burnSrc = src; t.burnTick = 0.6; }
+    if (src.def.slow && t.alive) { t.slowT = Math.max(t.slowT, src.def.slow.dur); t.slowFactor = src.def.slow.factor; }
+  }
+  if (t.hp <= 0) kill(t, src);
+}
+function kill(t, src) {
+  if (!t.alive) return;
+  t.alive = false;
+  t.deadT = 0;
+  if (src && src.team !== undefined && kills[src.team] !== undefined) kills[src.team]++;
+  burst(t.x, t.z, 8, 0x7d2a2a, 4, 1.4);
+  if (t.bar) t.bar.pivot.visible = false;
+  sfx('death');
+  if (t.def.kamikaze) doExplosion(t, t.x, t.z, t.def.aoe * S, t.def.dmg, t);
+  if (t.def.deathBurst) doExplosion(t, t.x, t.z, t.def.deathBurst.aoe * S, t.def.deathBurst.dmg, t);
+}
+function doExplosion(src, x, z, aoe, dmg, credit) {
+  sfx('boom');
+  ringFx(x, z, aoe, 0xf0a24a);
+  burst(x, z, 14, 0xf2b13c, 7, 1.5);
+  burst(x, z, 8, 0xe86a2a, 5, 1.2);
+  for (var j = 0; j < units.length; j++) {
+    var e = units[j];
+    if (!e.alive || e.team === src.team) continue;
+    var d = hyp(e.x - x, e.z - z);
+    if (d <= aoe + e.r) {
+      var f = 1 - 0.5 * Math.min(1, d / aoe);
+      var nx = (e.x - x) / (d || 1), nz = (e.z - z) / (d || 1);
+      damage(e, dmg * f, credit, nx, nz, 260);
+    }
+  }
+}
+function meleeAttack(u, t) {
+  var def = u.def;
+  u.cd = def.cd * rand(0.92, 1.08); u.anim = 1;
+  u.face = Math.atan2(t.z - u.z, t.x - u.x);
+  var ang = u.face, nx = Math.cos(ang), nz = Math.sin(ang);
+  var dmg = def.dmg * auraMult(u);
+  if (def.charge) dmg *= 1 + Math.min(1, u.spd / Math.max(0.01, def.speed * S)) * 1.4;
+  if (def.antiCav && (t.type === 'knight' || t.type === 'darkknight')) dmg *= 2.3;
+  if (def.aoeMelee) {
+    var hitAny = false;
+    for (var i = 0; i < units.length; i++) {
+      var e = units[i];
+      if (!e.alive || e.team === u.team) continue;
+      var d = hyp(e.x - u.x, e.z - u.z);
+      if (d <= def.range * S + u.r + e.r) { damage(e, dmg * rand(0.9, 1.1), u, nx, nz, def.kb || 180); hitAny = true; }
+    }
+    if (hitAny) { ringFx(u.x + nx * def.range * S * 0.6, u.z + nz * def.range * S * 0.6, def.range * S, 0xc9b48a); sfx('smash'); }
+  } else {
+    damage(t, dmg * rand(0.9, 1.1), u, nx, nz, def.kb || 60, def.pierce);
+    burst(u.x + nx * (u.r + t.r) * 0.6, u.z + nz * (u.r + t.r) * 0.6, 3, 0xffe9a8, 4, 1);
+    sfx('hit');
+  }
+}
+function castChain(u, t, baseDmg) {
+  var def = u.def;
+  var px = u.x, pz = u.z, cur = t, d = baseDmg;
+  var hit = [];
+  var hY = 1.6;
+  for (var c = 0; c < def.chain.count && cur; c++) {
+    lightningFx(px, hY, pz, cur.x, hY, cur.z);
+    damage(cur, d * rand(0.9, 1.1), u, 0, 0, 20);
+    hit.push(cur);
+    px = cur.x; pz = cur.z;
+    d *= def.chain.falloff;
+    var next = null, nd = 1e9;
+    for (var i = 0; i < units.length; i++) {
+      var e = units[i];
+      if (!e.alive || e.team === u.team || hit.indexOf(e) >= 0) continue;
+      var dd = hyp(e.x - px, e.z - pz);
+      if (dd <= def.chain.range * S && dd < nd) { nd = dd; next = e; }
+    }
+    cur = next;
+  }
+  sfx('fire');
+}
+function rangedAttack(u, t) {
+  var def = u.def;
+  u.cd = def.cd * rand(0.92, 1.08); u.anim = 1;
+  u.face = Math.atan2(t.z - u.z, t.x - u.x);
+  var dmg = def.dmg * auraMult(u);
+  if (def.chain) { castChain(u, t, dmg); return; }
+  var startY = u.flyH ? u.flyH : 1.5;
+  if (def.proj === 'rock') {
+    var n = def.multirock ? def.multirock.n : 1;
+    for (var mi = 0; mi < n; mi++) {
+      var dist0 = hyp(t.x - u.x, t.z - u.z);
+      var lead0 = 0.8 + dist0 / 26;
+      var rtx = t.x + Math.cos(t.face) * t.spd * S * lead0 * 0.6;
+      var rtz = t.z + Math.sin(t.face) * t.spd * S * lead0 * 0.6;
+      if (def.multirock) { rtx += rand(-def.multirock.spread, def.multirock.spread) * S; rtz += rand(-def.multirock.spread, def.multirock.spread) * S; }
+      rtx = clamp(rtx, 2, W3 - 2); rtz = clamp(rtz, 2, D3 - 2);
+      var distJ = hyp(rtx - u.x, rtz - u.z);
+      var p = {
+        kind: 'rock', sx: u.x, sz: u.z, tx: rtx, tz: rtz, t: -mi * 0.08,
+        dur: 0.8 + distJ / 30 + rand(0, 0.2), x: u.x, z: u.z, h: 0,
+        dmg: dmg, aoe: def.aoe * S, team: u.team, src: u
+      };
+      p.mesh = makeProjMesh('rock');
+      projectiles.push(p);
+    }
+    sfx('fire');
+    return;
+  }
+  var spMap = { arrow: 42, spear: 36, ice: 42, bolt: 42, shadow: 42, bullet: 90, shell: 70, rocket: 30 };
+  var sp = spMap[def.proj] || 42;
+  var lead = hyp(t.x - u.x, t.z - u.z) / sp;
+  var tx = t.x + Math.cos(t.face) * t.spd * S * lead;
+  var tz = t.z + Math.sin(t.face) * t.spd * S * lead;
+  var spread = def.spread !== undefined ? def.spread : (def.proj === 'spear' ? 0.03 : def.proj === 'bullet' ? 0.02 : 0.05);
+  var ang = Math.atan2(tz - u.z, tx - u.x) + rand(-spread, spread);
+  var p2 = {
+    kind: def.proj, x: u.x + Math.cos(ang) * u.r, z: u.z + Math.sin(ang) * u.r,
+    vx: Math.cos(ang) * sp, vz: Math.sin(ang) * sp, y: startY,
+    dmg: dmg, aoe: def.aoe ? def.aoe * S : 0, team: u.team, life: def.proj === 'bullet' ? 0.9 : 1.6, src: u, pierce: !!def.pierce
+  };
+  p2.mesh = makeProjMesh(def.proj);
+  projectiles.push(p2);
+  if (def.proj === 'shell') {
+    u.kb.x -= Math.cos(ang) * 17;
+    u.kb.z -= Math.sin(ang) * 17;
+    burst(u.x + Math.cos(ang) * (u.r + 2), u.z + Math.sin(ang) * (u.r + 2), 6, 0xffe9a8, 6, 1);
+  }
+  sfx(def.proj === 'arrow' || def.proj === 'bullet' ? 'arrow' : 'fire');
+}
+function checkWin() {
+  if (state !== 'battle') return;
+  var b = 0, r = 0;
+  for (var i = 0; i < units.length; i++) if (units[i].alive) { if (units[i].team === 0) b++; else r++; }
+  if (b === 0 || r === 0) {
+    winner = b > 0 ? 0 : (r > 0 ? 1 : -1);
+    state = 'ending'; endT = 0;
+    sfx('win');
+  }
+}
+function simUnits(dt) {
+  var i, j, u, t;
+  for (i = 0; i < units.length; i++) {
+    u = units[i];
+    if (!u.alive) continue;
+    u.cd -= dt;
+    u.anim = Math.max(0, u.anim - dt * 4);
+    u.x += u.kb.x * dt; u.z += u.kb.z * dt;
+    var kd = Math.max(0, 1 - 5 * dt);
+    u.kb.x *= kd; u.kb.z *= kd;
+    if (u.poisonT > 0) {
+      u.poisonT -= dt; u.hp -= u.poisonDps * dt; u.poisonTick -= dt;
+      if (u.poisonTick <= 0) {
+        u.poisonTick = 0.7;
+        floaterAdd(u.x, u.z, '' + Math.max(1, Math.round(u.poisonDps * 0.7)), '#7de37d', 11);
+        burst(u.x, u.z, 1, 0x7de37d, 1.5, 1);
+      }
+      if (u.hp <= 0) { kill(u, u.poisonSrc); continue; }
+    }
+    if (u.burnT > 0) {
+      u.burnT -= dt; u.hp -= u.burnDps * dt; u.burnTick -= dt;
+      if (u.burnTick <= 0) {
+        u.burnTick = 0.6;
+        floaterAdd(u.x, u.z, '' + Math.max(1, Math.round(u.burnDps * 0.6)), '#f2a13c', 11);
+        burst(u.x, u.z, 1, 0xf2a13c, 2, 1.6);
+      }
+      if (u.hp <= 0) { kill(u, u.burnSrc); continue; }
+    }
+    if (u.slowT > 0) u.slowT -= dt;
+    if (u.def.regen && battleTime - u.lastHurt > 3 && u.hp < u.maxHp) {
+      u.hp = Math.min(u.maxHp, u.hp + u.def.regen * dt);
+      u.regenTick -= dt;
+      if (u.regenTick <= 0) { u.regenTick = 1.2; floaterAdd(u.x, u.z, '+' + u.def.regen, '#aef2ae', 11); }
+    }
+    if (u.def.slowAura) {
+      for (var vi0 = 0; vi0 < units.length; vi0++) {
+        var ve = units[vi0];
+        if (!ve.alive || ve.team === u.team) continue;
+        if (hyp(ve.x - u.x, ve.z - u.z) <= u.def.slowAura.r * S) {
+          ve.slowT = Math.max(ve.slowT, 0.15);
+          ve.slowFactor = Math.min(ve.slowT > 0 ? ve.slowFactor : 1, u.def.slowAura.factor);
+        }
+      }
+    }
+    if (u.fallen > 0) { u.fallen -= dt; u.spd = lerp(u.spd, 0, Math.min(1, 10 * dt)); continue; }
+    u.retarget -= dt;
+    if (!u.target || !u.target.alive || u.retarget <= 0) {
+      u.target = nearestEnemy(u);
+      u.retarget = 0.35 + Math.random() * 0.25;
+    }
+    t = u.target;
+    if (!t) { u.spd = lerp(u.spd, 0, Math.min(1, 10 * dt)); continue; }
+    var dx = t.x - u.x, dz = t.z - u.z;
+    var d = Math.max(0.001, hyp(dx, dz));
+    var edge = d - u.r - t.r;
+    var def = u.def, mvx = 0, mvz = 0;
+    var spdMult = u.slowT > 0 ? (u.slowFactor || 0.55) : 1;
+    if (def.kind === 'kamikaze') {
+      if (edge < 2.4) { kill(u, null); continue; }
+      mvx = dx / d; mvz = dz / d;
+    } else if (def.kind === 'heal') {
+      if (u.cd <= 0) {
+        var healed = false;
+        for (var hi = 0; hi < units.length; hi++) {
+          var ha = units[hi];
+          if (!ha.alive || ha.team !== u.team || ha === u) continue;
+          if (ha.hp < ha.maxHp - 4 && hyp(ha.x - u.x, ha.z - u.z) <= def.heal.r * S) {
+            var amt = Math.min(def.heal.amt, ha.maxHp - ha.hp);
+            ha.hp += amt; healed = true;
+            floaterAdd(ha.x, ha.z, '+' + Math.round(amt), '#7de37d', 12);
+            burst(ha.x, ha.z, 2, 0xaef2ae, 1.5, 1.6);
+          }
+        }
+        u.cd = healed ? def.cd : 0.4;
+      }
+      u.face = Math.atan2(dz, dx);
+      if (d < 20) { mvx = -dx / d; mvz = -dz / d; }
+      else if (d > 32) { mvx = dx / d; mvz = dz / d; }
+    } else if (def.kind === 'ranged') {
+      if (def.minRange && edge < def.minRange * S) {
+        mvx = -dx / d; mvz = -dz / d;
+        u.face = Math.atan2(dz, dx);
+      } else if (edge <= def.range * S) {
+        u.face = Math.atan2(dz, dx);
+        if (u.cd <= 0) rangedAttack(u, t);
+        if (d < def.range * S * 0.42) { mvx = -dx / d; mvz = -dz / d; }
+      } else { mvx = dx / d; mvz = dz / d; }
+    } else {
+      if (edge <= def.range * S) {
+        u.face = Math.atan2(dz, dx);
+        if (u.cd <= 0) meleeAttack(u, t);
+      } else {
+        mvx = dx / d; mvz = dz / d;
+        if (def.blink) {
+          u.blinkCd -= dt;
+          if (d > 17 && u.blinkCd <= 0) {
+            u.blinkCd = 3.5;
+            u.kb.x += dx / d * 70; u.kb.z += dz / d * 70;
+            burst(u.x, u.z, 6, 0xb9b9c8, 3, 1);
+            sfx('arrow');
+          }
+        }
+      }
+    }
+    if (mvx !== 0 || mvz !== 0) {
+      u.x += mvx * def.speed * S * spdMult * dt;
+      u.z += mvz * def.speed * S * spdMult * dt;
+      u.walk += dt * def.speed * 0.5;
+      u.face = Math.atan2(mvz, mvx);
+      u.spd = lerp(u.spd, def.speed * S * spdMult, Math.min(1, 6 * dt));
+    } else {
+      u.spd = lerp(u.spd, 0, Math.min(1, 6 * dt));
+    }
+    u.x = clamp(u.x, u.r, W3 - u.r);
+    u.z = clamp(u.z, u.r, D3 - u.r);
+    if (def.summon) {
+      u.summonCd -= dt;
+      u.summons = u.summons.filter(function (s) { return s.alive; });
+      if (u.summonCd <= 0 && u.summons.length < def.summon.max && units.length < 300) {
+        u.summonCd = def.summon.interval;
+        for (var si = 0; si < def.summon.per; si++) {
+          var s2 = spawnUnit({
+            type: def.summon.type, team: u.team,
+            x: clamp(u.x + rand(-3.4, 3.4), 2, W3 - 2),
+            z: clamp(u.z + rand(-3.4, 3.4), 2, D3 - 2)
+          });
+          s2.summoned = true;
+          s2.face = u.face;
+          u.summons.push(s2);
+          units.push(s2);
+          unitTotals[u.team]++;
+          burst(s2.x, s2.z, 6, 0xb49ae0, 2.5, 2);
+        }
+        sfx('place');
+      }
+    }
+  }
+  for (i = 0; i < units.length; i++) {
+    var a = units[i];
+    if (!a.alive || a.fallen > 0) continue;
+    for (j = i + 1; j < units.length; j++) {
+      var b = units[j];
+      if (!b.alive || b.fallen > 0) continue;
+      var ddx = b.x - a.x, ddz = b.z - a.z;
+      var d2 = ddx * ddx + ddz * ddz;
+      var rr = a.r + b.r + 0.2;
+      if (d2 < rr * rr) {
+        var dd = Math.sqrt(d2);
+        if (dd < 0.01) { ddx = rand(-1, 1); ddz = rand(-1, 1); dd = Math.max(0.01, hyp(ddx, ddz)); }
+        var nx = ddx / dd, nz = ddz / dd;
+        var push = rr - dd;
+        var shareA = b.r * b.r / (a.r * a.r + b.r * b.r);
+        a.x -= nx * push * 0.5 * shareA; a.z -= nz * push * 0.5 * shareA;
+        b.x += nx * push * 0.5 * (1 - shareA); b.z += nz * push * 0.5 * (1 - shareA);
+      }
+    }
+  }
+}
+function simProjectiles(dt) {
+  for (var i = projectiles.length - 1; i >= 0; i--) {
+    var p = projectiles[i];
+    var dead = false;
+    if (p.kind === 'rock') {
+      p.t += dt / p.dur;
+      if (p.t >= 0) {
+        var tt = Math.min(1, p.t);
+        p.x = lerp(p.sx, p.tx, tt);
+        p.z = lerp(p.sz, p.tz, tt);
+        p.h = Math.sin(Math.PI * tt) * 9;
+        if (p.t >= 1) { doExplosion(p, p.x, p.z, p.aoe, p.dmg, p.src); dead = true; }
+      }
+    } else {
+      p.x += p.vx * dt; p.z += p.vz * dt; p.life -= dt;
+      dead = p.life <= 0;
+      if ((p.kind === 'rocket' || p.kind === 'shell' || p.kind === 'fire') && Math.random() < 0.7) {
+        spawnParticle(p.x, p.y, p.z, rand(-1, 1), rand(0, 1), rand(-1, 1), 0.22, 0.2, 0xf2a13c);
+      }
+      if (!dead) {
+        for (var j = 0; j < units.length; j++) {
+          var e = units[j];
+          if (!e.alive || e.team === p.team) continue;
+          var rr = e.r + (p.kind === 'fire' ? 0.8 : p.kind === 'spear' ? 0.6 : p.kind === 'shell' ? 0.7 : p.kind === 'rocket' ? 0.6 : 0.4);
+          var ex = e.x - p.x, ez = e.z - p.z;
+          if (ex * ex + ez * ez < rr * rr && Math.abs((e.flyH ? e.flyH * 0.5 : 1.2) - p.y) < 3.5) {
+            if (p.kind === 'fire' || p.kind === 'rocket' || p.kind === 'shell') { doExplosion(p, p.x, p.z, p.aoe, p.dmg, p.src); }
+            else {
+              var v = Math.max(0.01, hyp(p.vx, p.vz));
+              damage(e, p.dmg * rand(0.9, 1.1), p.src, p.vx / v, p.vz / v, 40, p.pierce);
+              burst(p.x, p.z, 2, 0xffe9a8, 3, 1);
+              sfx('hit');
+            }
+            dead = true; break;
+          }
+        }
+      }
+    }
+    if (dead) {
+      if (p.mesh) scene.remove(p.mesh);
+      projectiles.splice(i, 1);
+    }
+  }
+}
+function updateFx(dt) {
+  for (var i = fxPool.length - 1; i >= 0; i--) {
+    var p = fxPool[i];
+    p.life -= dt;
+    if (p.life <= 0) { scene.remove(p.m); fxPool.splice(i, 1); continue; }
+    p.m.position.x += p.vx * dt;
+    p.m.position.y += p.vy * dt;
+    p.m.position.z += p.vz * dt;
+    p.vy -= 9 * dt;
+    if (p.m.position.y < 0.05) { p.m.position.y = 0.05; p.vy = 0; }
+  }
+  for (var r = rings.length - 1; r >= 0; r--) {
+    var R = rings[r];
+    R.t += dt;
+    var k = R.t / 0.4;
+    if (k >= 1) { scene.remove(R.m); rings.splice(r, 1); continue; }
+    R.m.scale.setScalar(1 + (R.max - 1) * k);
+    R.m.material.opacity = 0.85 * (1 - k);
+  }
+  for (var l = lightnings.length - 1; l >= 0; l--) {
+    var L = lightnings[l];
+    L.t += dt;
+    if (L.t > 0.22) { scene.remove(L.line); lightnings.splice(l, 1); continue; }
+    L.line.material.opacity = 1 - L.t / 0.22;
+  }
+  for (var f = floaters.length - 1; f >= 0; f--) {
+    var F = floaters[f];
+    F.t += dt;
+    if (F.t >= F.life) {
+      if (F.el.parentNode) F.el.parentNode.removeChild(F.el);
+      floaters.splice(f, 1);
+    }
+  }
+}
+
+/* ---------- 渲染同步 ---------- */
+var v3 = new THREE.Vector3();
+function renderUnits(dt, now) {
+  for (var i = 0; i < units.length; i++) {
+    var u = units[i];
+    if (!u.mesh) continue;
+    u.mesh.position.x = u.x;
+    u.mesh.position.z = u.z;
+    var baseY = u.flyH ? u.flyH + Math.sin(now / 300 + u.id) * 0.35 : 0;
+    var bob = u.spd > 0.2 ? Math.abs(Math.sin(u.walk * 2)) * u.r * 0.1 : 0;
+    u.mesh.position.y = baseY + bob;
+    u.mesh.rotation.y = -u.face + Math.PI / 2;
+    if (!u.alive) {
+      u.deadT += dt;
+      var k = Math.min(1, u.deadT / 0.4);
+      u.mesh.rotation.x = k * Math.PI / 2;
+      if (u.deadT > 5) u.mesh.position.y = baseY - (u.deadT - 5) * 0.9;
+      if (u.deadT > 7.2) { scene.remove(u.mesh); u.mesh = null; }
+      continue;
+    }
+    var tiltT = u.fallen > 0 ? 1 : 0;
+    u.tilt = lerp(u.tilt, tiltT, Math.min(1, 10 * dt));
+    u.mesh.rotation.x = u.tilt * 1.25;
+    if (u.parts && u.parts.hand) {
+      var sw = u.anim > 0 ? Math.sin(u.anim * Math.PI) : 0;
+      if (u.parts.rotor) u.parts.hand.rotation.y = now / 40;
+      else u.parts.hand.rotation.x = -0.5 + sw * 1.1;
+      if (u.type === 'catapult') u.parts.hand.rotation.z = 0.85 - sw * 1.5;
+    }
+    if (u.bar) {
+      if (u.hp < u.maxHp) {
+        u.bar.pivot.visible = true;
+        var pct = clamp(u.hp / u.maxHp, 0, 1);
+        u.bar.fg.scale.x = Math.max(0.001, pct);
+        u.bar.fg.position.x = -u.bar.w * (1 - pct) / 2;
+        u.bar.fg.material.color.setHex(pct > 0.5 ? 0x67d06b : pct > 0.25 ? 0xe6c53d : 0xe65b5b);
+        u.bar.pivot.position.y = u.bar.y;
+        u.bar.pivot.lookAt(camera.position);
+      } else {
+        u.bar.pivot.visible = false;
+      }
+    }
+  }
+}
+function renderProjectiles() {
+  projectiles.forEach(function (p) {
+    if (!p.mesh) return;
+    if (p.kind === 'rock') {
+      if (p.t <= 0) { p.mesh.visible = false; return; }
+      p.mesh.visible = true;
+      p.mesh.position.set(p.x, (p.h || 0) + 1, p.z);
+    } else {
+      var yaw = Math.atan2(p.vz, p.vx);
+      p.mesh.position.set(p.x, p.y, p.z);
+      if (p.kind === 'arrow' || p.kind === 'spear' || p.kind === 'ice') {
+        p.mesh.rotation.set(0, -yaw + Math.PI / 2, Math.PI / 2);
+      } else {
+        p.mesh.rotation.set(0, -yaw + Math.PI / 2, 0);
+      }
+    }
+  });
+}
+function renderFloaters() {
+  floaters.forEach(function (f) {
+    var k = f.t / f.life;
+    v3.set(f.x, 2.4 + (1 - k) * 1.6, f.z);
+    v3.project(camera);
+    if (v3.z > 1) { f.el.style.opacity = '0'; return; }
+    f.el.style.transform = 'translate(' + (((v3.x + 1) / 2) * innerWidth).toFixed(1) + 'px,' + (((1 - v3.y) / 2) * innerHeight).toFixed(1) + 'px) translate(-50%,-50%)';
+    f.el.style.opacity = String(1 - k);
+  });
+}
+
+/* ---------- 布局预览单位（部署阶段） ---------- */
+var previewPool = [];
+function renderPlaced() {
+  /* 部署阶段用轻量圆柱体表示布阵 */
+  var need = placed.length;
+  while (previewPool.length < need) {
+    var g = new THREE.Group();
+    var c = new THREE.Mesh(G('cyl'), M(0x888888));
+    c.scale.set(1.6, 2.6, 1.6);
+    c.position.y = 1.3;
+    g.add(c);
+    var h = new THREE.Mesh(G('sph'), M(0xf0cda3));
+    h.scale.setScalar(0.8);
+    h.position.y = 3;
+    g.add(h);
+    scene.add(g);
+    previewPool.push({ g: g, body: c, head: h });
+  }
+  for (var i = 0; i < previewPool.length; i++) {
+    var pv = previewPool[i];
+    if (i < need) {
+      var p = placed[i];
+      pv.g.visible = true;
+      pv.g.position.set(p.x, 0, p.z);
+      var def = DEFS[p.type];
+      pv.g.scale.setScalar(Math.max(0.7, def.r * S));
+      pv.g.rotation.y = p.team === 0 ? 0 : Math.PI;
+      pv.body.material = M(TEAM3[p.team].main);
+    } else {
+      pv.g.visible = false;
+    }
+  }
+}
+
+/* ---------- 幽灵预览 ---------- */
+var mouse = { x: W3 / 2, z: D3 / 2, in: false };
+var drag = null;
+var ghost, ghostRing, ghostPillar;
+(function initGhost() {
+  ghost = new THREE.Group();
+  ghostRing = new THREE.Mesh(new THREE.RingGeometry(0.85, 1.05, 24), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false }));
+  ghostRing.rotation.x = -Math.PI / 2;
+  ghostRing.position.y = 0.08;
+  ghost.add(ghostRing);
+  ghostPillar = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 3, 10), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.25, depthWrite: false }));
+  ghostPillar.position.y = 1.5;
+  ghost.add(ghostPillar);
+  ghost.visible = false;
+  scene.add(ghost);
+})();
+function groundPoint(sx, sy) {
+  var nx = (sx / innerWidth) * 2 - 1, ny = -(sy / innerHeight) * 2 + 1;
+  v3.set(nx, ny, 0.5).unproject(camera);
+  var dx = v3.x - camera.position.x, dy = v3.y - camera.position.y, dz = v3.z - camera.position.z;
+  var t = -camera.position.y / dy;
+  if (!(t > 0)) return null;
+  return { x: camera.position.x + dx * t, z: camera.position.z + dz * t };
+}
+function updateGhost() {
+  if (state !== 'place' || !mouse.in) { ghost.visible = false; return; }
+  var def = DEFS[curType];
+  var team = teamAt(mouse.x);
+  var chk = canPlaceAt(team, curType, mouse.x, mouse.z);
+  var c = TEAM3[team];
+  ghost.visible = true;
+  ghost.position.set(mouse.x, 0, mouse.z);
+  var rs = Math.max(0.9, def.r * S);
+  ghostRing.scale.setScalar(rs);
+  var col = chk.ok ? c.main : 0xc0392b;
+  ghostRing.material.color.setHex(col);
+  ghostPillar.material.color.setHex(col);
+  ghostPillar.scale.set(rs, 1, rs);
+}
+var cvs = renderer.domElement;
+cvs.addEventListener('pointerdown', function (e) {
+  resumeAudio();
+  var w = groundPoint(e.clientX, e.clientY);
+  if (w) { mouse.x = w.x; mouse.z = w.z; }
+  mouse.in = true;
+  if (e.button === 0 && state === 'place' && w) {
+    var hit = -1, hd = 1e9;
+    for (var i = 0; i < placed.length; i++) {
+      var p = placed[i];
+      var d = hyp(p.x - w.x, p.z - w.z);
+      if (d < DEFS[p.type].r * S + 0.6 && d < hd) { hd = d; hit = i; }
+    }
+    if (hit >= 0) { drag = { mode: 'move', i: hit }; return; }
+    var team = teamAt(w.x);
+    var chk = canPlaceAt(team, curType, w.x, w.z);
+    if (chk.ok) {
+      placeAt(team, curType, w.x, w.z);
+      drag = { mode: 'paint', lx: w.x, lz: w.z };
+    } else if (chk.reason) toast(chk.reason);
+    return;
+  }
+  if (e.button === 2 && state === 'place') {
+    drag = { mode: 'rmb', sx: e.clientX, sy: e.clientY, moved: false };
+    return;
+  }
+  if (e.button === 0) drag = { mode: 'rotate', sx: e.clientX, sy: e.clientY };
+  else if (e.button === 2) drag = { mode: 'pan', sx: e.clientX, sy: e.clientY };
+});
+window.addEventListener('pointermove', function (e) {
+  var w = groundPoint(e.clientX, e.clientY);
+  if (w) { mouse.x = w.x; mouse.z = w.z; }
+  if (!drag) return;
+  var dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+  if (drag.mode === 'rotate') {
+    cam.yaw -= dx * 0.006;
+    cam.pitch += dy * 0.004;
+    drag.sx = e.clientX; drag.sy = e.clientY;
+    applyCam();
+  } else if (drag.mode === 'pan') {
+    var k = cam.dist * 0.0016;
+    cam.tx -= (Math.cos(cam.yaw + Math.PI / 2) * dx - Math.cos(cam.yaw) * dy) * k;
+    cam.tz -= (Math.sin(cam.yaw + Math.PI / 2) * dx - Math.sin(cam.yaw) * dy) * k;
+    drag.sx = e.clientX; drag.sy = e.clientY;
+    applyCam();
+  } else if (drag.mode === 'rmb') {
+    if (Math.abs(dx) + Math.abs(dy) > 5) drag.moved = true;
+    if (drag.moved) {
+      cam.yaw -= dx * 0.006;
+      cam.pitch += dy * 0.004;
+      drag.sx = e.clientX; drag.sy = e.clientY;
+      applyCam();
+    }
+  } else if (drag.mode === 'move') {
+    var p = placed[drag.i];
+    if (p && w) {
+      var c = clampField(w.x, w.z);
+      p.x = c.x; p.z = c.z;
+      p.team = teamAt(p.x);
+    }
+  } else if (drag.mode === 'paint' && w) {
+    var def = DEFS[curType];
+    if (hyp(w.x - drag.lx, w.z - drag.lz) > def.r * S * 2.2 + 0.4) {
+      var pt = teamAt(w.x);
+      var chk2 = canPlaceAt(pt, curType, w.x, w.z);
+      if (chk2.ok) { placeAt(pt, curType, w.x, w.z); drag.lx = w.x; drag.lz = w.z; }
+    }
+  }
+});
+window.addEventListener('pointerup', function () {
+  if (drag && drag.mode === 'rmb' && !drag.moved && state === 'place') removeNear(mouse.x, mouse.z);
+  drag = null;
+});
+cvs.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+cvs.addEventListener('wheel', function (e) {
+  e.preventDefault();
+  cam.dist *= 1 + (e.deltaY > 0 ? 0.1 : -0.1);
+  applyCam();
+}, { passive: false });
+cvs.addEventListener('pointerleave', function () { mouse.in = false; });
+window.addEventListener('resize', function () {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+window.addEventListener('keydown', function (e) {
+  if (e.key >= '1' && e.key <= '9') {
+    var i = +e.key - 1;
+    if (i < DEF_ORDER.length) { curType = DEF_ORDER[i]; refreshCards(); }
+  } else if (e.key === ' ') {
+    if (state === 'battle' || state === 'ending') { e.preventDefault(); paused = !paused; }
+  } else if (e.key === 'Escape') {
+    if (state !== 'place') backToPlace();
+  }
+});
+
+/* ---------- 卡片 / 按钮 ---------- */
+(function buildCards() {
+  var box = $('cards');
+  SERIES.forEach(function (s) {
+    var g = document.createElement('div');
+    g.className = 'cgroup';
+    var h = document.createElement('div');
+    h.className = 'ghead';
+    h.textContent = s.name;
+    h.style.color = s.color;
+    h.style.borderColor = s.color;
+    var row = document.createElement('div');
+    row.className = 'grow';
+    s.types.forEach(function (id) {
+      var i = DEF_ORDER.indexOf(id);
+      var d = DEFS[id];
+      var el = document.createElement('div');
+      el.className = 'card' + (id === curType ? ' sel' : '');
+      el.setAttribute('data-type', id);
+      el.title = d.name + ' · ' + d.cost + '金 · 生命' + d.hp + ' · 伤害' + d.dmg + ' · ' + d.desc + (i < 9 ? '（快捷键 ' + (i + 1) + '）' : '');
+      el.innerHTML = '<div class="ic" style="background:' + d.icColor + '">' + d.ic + '</div>' +
+        '<div class="nm">' + d.name + '</div><div class="ct">' + d.cost + '</div>';
+      el.addEventListener('click', function () {
+        curType = id;
+        document.querySelectorAll('.card').forEach(function (c) { c.classList.toggle('sel', c.getAttribute('data-type') === id); });
+      });
+      row.appendChild(el);
+    });
+    g.appendChild(h);
+    g.appendChild(row);
+    box.appendChild(g);
+  });
+})();
+function refreshCards() {
+  document.querySelectorAll('.card').forEach(function (c) { c.classList.toggle('sel', c.getAttribute('data-type') === curType); });
+}
+document.querySelectorAll('.bctrl button').forEach(function (b) {
+  b.addEventListener('click', function () {
+    if (infiniteMoney) { toast('无限预算模式中，无需调整预算'); return; }
+    var t = +b.getAttribute('data-bt'), d = +b.getAttribute('data-d');
+    budget[t] = clamp(budget[t] + d, 500, 6000);
+  });
+});
+var btnMoney = $('btnMoney');
+btnMoney.addEventListener('click', function () {
+  infiniteMoney = !infiniteMoney;
+  btnMoney.textContent = infiniteMoney ? '预算 无限' : '预算 正常';
+  btnMoney.style.borderColor = infiniteMoney ? '#e8b64c' : '';
+  toast(infiniteMoney ? '无限预算已开启：随意放置，随机部署也会拉满' : '已恢复正常预算模式');
+});
+$('btnRandomB').addEventListener('click', function () { randomDeploy(0); });
+$('btnRandomR').addEventListener('click', function () { randomDeploy(1); });
+$('btnClearB').addEventListener('click', function () {
+  placed = placed.filter(function (p) { return p.team !== 0; });
+  toast('蓝军阵型已清空');
+});
+$('btnClearR').addEventListener('click', function () {
+  placed = placed.filter(function (p) { return p.team !== 1; });
+  toast('红军阵型已清空');
+});
+$('btnFight').addEventListener('click', startBattle);
+$('btnBack').addEventListener('click', backToPlace);
+$('btnEdit').addEventListener('click', backToPlace);
+$('btnRetry').addEventListener('click', startBattle);
+btnSound.addEventListener('click', function () {
+  audioOn = !audioOn;
+  btnSound.textContent = audioOn ? '音效 开' : '音效 关';
+  if (audioOn) { resumeAudio(); sfx('place'); }
+});
+btnPause.addEventListener('click', function () { paused = !paused; });
+btnSpeed.addEventListener('click', function () { speedIdx = (speedIdx + 1) % SPEEDS.length; });
+
+/* ---------- HUD ---------- */
+function updateHUD() {
+  phaseEl.textContent = state === 'place' ? '部署阶段'
+    : state === 'battle' ? '战斗中'
+    : state === 'ending' ? '结算中' : '战斗结束';
+  if (state === 'place') {
+    if (infiniteMoney) {
+      blueInfo.textContent = '预算 无限 · 单位 ' + teamCount(0);
+      redInfo.textContent = '预算 无限 · 单位 ' + teamCount(1);
+    } else {
+      blueInfo.textContent = '预算 ' + budget[0] + ' · 剩余 ' + remaining(0);
+      redInfo.textContent = '预算 ' + budget[1] + ' · 剩余 ' + remaining(1);
+    }
+    timerEl.textContent = '--:--';
+  } else {
+    timerEl.textContent = fmtTime(battleTime);
+    blueInfo.textContent = '存活 ' + aliveCount(0) + ' / ' + unitTotals[0];
+    redInfo.textContent = '存活 ' + aliveCount(1) + ' / ' + unitTotals[1];
+  }
+  bottombar.classList.toggle('hidden', state !== 'place');
+  battlebar.classList.toggle('hidden', !(state === 'battle' || state === 'ending'));
+  deployMarks.visible = state === 'place';
+  document.querySelectorAll('.place-only').forEach(function (el) {
+    el.classList.toggle('hidden', state !== 'place');
+  });
+  document.querySelectorAll('.battle-only').forEach(function (el) {
+    el.classList.toggle('hidden', state === 'place');
+  });
+  btnPause.textContent = paused ? '继续' : '暂停';
+  btnSpeed.textContent = '速度 ' + SPEEDS[speedIdx] + 'x';
+}
+function showOverlay() {
+  var aB = aliveCount(0), aR = aliveCount(1);
+  otitle.textContent = winner === 0 ? '蓝军获胜' : winner === 1 ? '红军获胜' : '平局';
+  otitle.className = winner === 0 ? 'b' : winner === 1 ? 'r' : 'd';
+  ostats.innerHTML = '用时 ' + fmtTime(battleTime) + '<br>' +
+    '蓝军存活 ' + aB + ' / ' + unitTotals[0] + ' · 红军存活 ' + aR + ' / ' + unitTotals[1] + '<br>' +
+    '击杀统计 —— 蓝军 ' + kills[0] + ' · 红军 ' + kills[1];
+  overlay.classList.remove('hidden');
+}
+
+/* ---------- 主循环 ---------- */
+var lastT = performance.now();
+function frame(now) {
+  var rdt = Math.min(0.05, (now - lastT) / 1000);
+  lastT = now;
+  sndBudget = Math.min(10, sndBudget + 12 * rdt);
+
+  if (state === 'battle' || state === 'ending') {
+    var ts = 1;
+    if (state === 'ending') {
+      endT += rdt;
+      ts = Math.max(0.12, 1 - endT * 0.8);
+      if (endT > 1.15) { state = 'over'; showOverlay(); }
+    }
+    var sdt = paused ? 0 : rdt * SPEEDS[speedIdx] * ts;
+    if (sdt > 0) {
+      battleTime += sdt;
+      simUnits(sdt);
+      simProjectiles(sdt);
+      checkWin();
+    }
+    updateFx(paused ? rdt * 0.3 : Math.max(sdt, rdt * 0.3));
+  } else if (state === 'over') {
+    updateFx(rdt * 0.25);
+  }
+
+  if (state === 'place') renderPlaced();
+  renderUnits(sdtOrZero(rdt), now);
+  renderProjectiles();
+  renderFloaters();
+  updateGhost();
+  updateHUD();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+function sdtOrZero(rdt) {
+  if (state === 'battle' || state === 'ending') return paused ? 0 : rdt * SPEEDS[speedIdx];
+  return rdt;
+}
+requestAnimationFrame(frame);
+
+setTimeout(function () {
+  toast('选兵种后点击地面放置：左半场=蓝军，右半场=红军；拖动旋转视角、滚轮缩放');
+}, 700);
+</script>
+</body>
+</html>
