@@ -585,7 +585,7 @@ function kill(t, src) {
   }
   sfx('death');
   if (t.type === 'giant') shake += 1.5;
-  if (t.def.kamikaze) doExplosion(t, t.x, t.y, t.def.aoe, t.def.dmg, t);   // 炸弹人亡语自爆
+  if (t.def.kind === 'kamikaze') doExplosion(t, t.x, t.y, t.def.aoe, t.def.dmg, t);   // 炸弹人亡语自爆（被打死也会爆）
   if (t.def.deathBurst) doExplosion(t, t.x, t.y, t.def.deathBurst.aoe, t.def.deathBurst.dmg, t, '#e8e8d8');   // 骷髅亡语骨刺
 }
 function doExplosion(src, x, y, aoe, dmg, credit, fxColor) {

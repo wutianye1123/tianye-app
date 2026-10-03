@@ -1005,7 +1005,7 @@ function kill(t, src) {
   burst(t.x, t.z, 8, 0x7d2a2a, 4, 1.4);
   if (t.bar) t.bar.pivot.visible = false;
   sfx('death');
-  if (t.def.kamikaze) doExplosion(t, t.x, t.z, t.def.aoe * S, t.def.dmg, t);
+  if (t.def.kind === 'kamikaze') doExplosion(t, t.x, t.z, t.def.aoe * S, t.def.dmg, t);
   if (t.def.deathBurst) doExplosion(t, t.x, t.z, t.def.deathBurst.aoe * S, t.def.deathBurst.dmg, t);
 }
 function doExplosion(src, x, z, aoe, dmg, credit) {
