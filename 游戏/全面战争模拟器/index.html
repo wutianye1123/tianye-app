@@ -99,7 +99,7 @@ button:hover{background:#333d49;border-color:#4a5563}
     <button id="btnClear">清空本方</button>
     <button id="btnFight">开 战</button>
   </div>
-  <div id="hint">左键 放置 / 拖动 · 右键 移除 · 数字键 1-9 选兵 · Q 切换队伍 · 空格 暂停 · ESC 返回部署</div>
+  <div id="hint">左键 放置 / 拖动 · 右键 移除 · 数字键 1-9 快选前 9 个兵种 · Q 切换队伍 · 空格 暂停 · ESC 返回部署</div>
 </div>
 
 <div id="battlebar" class="hidden">
@@ -152,18 +152,34 @@ var DEFS = {
   berserker:  { name: '狂战士', ic: '狂', icColor: '#915e5e', cost: 160, hp: 150, dmg: 14, range: 26,  speed: 78,  cd: 0.4,  r: 11, kind: 'melee',  desc: '攻速极快的杀戮机器' },
   knight:     { name: '骑士',   ic: '骑', icColor: '#7e5e91', cost: 240, hp: 220, dmg: 24, range: 30,  speed: 100, cd: 0.85, r: 13, kind: 'melee',  charge: true, kb: 150, desc: '冲锋伤害翻倍，撞击击飞' },
   mage:       { name: '法师',   ic: '法', icColor: '#8a5fb0', cost: 280, hp: 65,  dmg: 34, range: 230, speed: 42,  cd: 2.6,  r: 10, kind: 'ranged', proj: 'fire', aoe: 58, desc: '火球范围杀伤' },
-  giant:      { name: '巨人',   ic: '巨', icColor: '#6e675e', cost: 550, hp: 950, dmg: 65, range: 44,  speed: 30,  cd: 1.7,  r: 22, kind: 'melee',  aoeMelee: true, armor: 2, knockRes: 0.9, kb: 320, desc: '一锤一片，势不可挡' }
+  giant:      { name: '巨人',   ic: '巨', icColor: '#6e675e', cost: 550, hp: 950, dmg: 65, range: 44,  speed: 30,  cd: 1.7,  r: 22, kind: 'melee',  aoeMelee: true, armor: 2, knockRes: 0.9, kb: 320, desc: '一锤一片，势不可挡' },
+  javelineer: { name: '掷矛兵', ic: '矛', icColor: '#a08a5a', cost: 130, hp: 85,  dmg: 32, range: 150, speed: 48,  cd: 2.2,  r: 10, kind: 'ranged', proj: 'spear', pierce: true, desc: '中距重掷，无视护甲' },
+  priest:     { name: '牧师',   ic: '医', icColor: '#cfcfcf', cost: 200, hp: 90,  dmg: 0,  range: 0,   speed: 52,  cd: 1.8,  r: 10, kind: 'heal',   heal: { r: 135, amt: 14 }, desc: '持续治疗周围伤员' },
+  assassin:   { name: '刺客',   ic: '刺', icColor: '#4a4a55', cost: 180, hp: 95,  dmg: 30, range: 24,  speed: 88,  cd: 0.8,  r: 10, kind: 'melee',  blink: true, poison: { dps: 6, dur: 3 }, desc: '闪现突进，淬毒双刃' },
+  icemage:    { name: '冰法师', ic: '冰', icColor: '#5aa8d6', cost: 230, hp: 65,  dmg: 12, range: 220, speed: 42,  cd: 1.4,  r: 10, kind: 'ranged', proj: 'ice', slow: { dur: 2.2, factor: 0.55 }, desc: '冰锥减速敌人' },
+  vampire:    { name: '吸血鬼', ic: '血', icColor: '#7a3030', cost: 260, hp: 150, dmg: 18, range: 26,  speed: 66,  cd: 0.55, r: 11, kind: 'melee',  lifesteal: 0.7, desc: '伤害的70%化为生命' },
+  bomber:     { name: '炸弹人', ic: '炸', icColor: '#3d3d3d', cost: 150, hp: 60,  dmg: 75, range: 0,   speed: 75,  cd: 0,    r: 10, kind: 'kamikaze', aoe: 66, desc: '冲入敌阵自爆' },
+  king:       { name: '国王',   ic: '王', icColor: '#e0b13c', cost: 300, hp: 280, dmg: 20, range: 26,  speed: 50,  cd: 0.9,  r: 12, kind: 'melee',  aura: { r: 150, mult: 1.3 }, armor: 1, desc: '周围友军伤害+30%' },
+  summoner:   { name: '召唤师', ic: '召', icColor: '#6a4fa0', cost: 300, hp: 80,  dmg: 10, range: 200, speed: 42,  cd: 2.0,  r: 10, kind: 'ranged', proj: 'bolt', summon: { type: 'farmer', interval: 5.5, per: 2, max: 6 }, desc: '不断召唤农夫援军' },
+  catapult:   { name: '投石车', ic: '炮', icColor: '#8a7351', cost: 420, hp: 190, dmg: 55, range: 480, speed: 15,  cd: 4.2,  r: 17, kind: 'ranged', proj: 'rock', aoe: 70, minRange: 130, armor: 1, desc: '超远程抛石范围杀伤' }
 };
-var DEF_ORDER = ['farmer', 'swordsman', 'pikeman', 'shield', 'archer', 'berserker', 'knight', 'mage', 'giant'];
+var DEF_ORDER = ['farmer', 'swordsman', 'pikeman', 'shield', 'archer', 'berserker', 'knight', 'mage', 'giant',
+                 'javelineer', 'priest', 'assassin', 'icemage', 'vampire', 'bomber', 'king', 'summoner', 'catapult'];
 
 var PRESETS = [
-  { name: '均衡军团', comp: { swordsman: 3, archer: 2, shield: 1 } },
+  { name: '均衡军团', comp: { swordsman: 3, archer: 2, shield: 1, javelineer: 1 } },
   { name: '箭雨齐发', comp: { archer: 5, shield: 1, pikeman: 2 } },
-  { name: '重装铁壁', comp: { shield: 3, swordsman: 2, mage: 1 } },
+  { name: '重装铁壁', comp: { shield: 3, swordsman: 2, mage: 1, priest: 1 } },
   { name: '狂暴蛮袭', comp: { berserker: 4, knight: 1 } },
   { name: '铁蹄冲锋', comp: { knight: 3, farmer: 4 } },
   { name: '巨像降临', comp: { giant: 1, archer: 3, farmer: 4 } },
-  { name: '农民起义', comp: { farmer: 10 } }
+  { name: '农民起义', comp: { farmer: 10 } },
+  { name: '圣光庇护', comp: { priest: 2, king: 1, swordsman: 3, icemage: 2 } },
+  { name: '暗夜獠牙', comp: { assassin: 4, vampire: 2 } },
+  { name: '火力压制', comp: { catapult: 2, shield: 2, archer: 3 } },
+  { name: '自爆浪潮', comp: { bomber: 5, knight: 2 } },
+  { name: '无尽军团', comp: { summoner: 2, priest: 1, farmer: 6 } },
+  { name: '王者亲征', comp: { king: 1, knight: 2, priest: 1, javelineer: 2 } }
 ];
 
 /* ---------- 状态 ---------- */
@@ -174,7 +190,7 @@ var projectiles = [], particles = [], floaters = [], corpses = [];
 var budget = [2000, 2000];
 var curTeam = 0, curType = 'swordsman';
 var SPEEDS = [0.5, 1, 2], speedIdx = 1, paused = false;
-var battleTime = 0, kills = [0, 0], startCounts = [0, 0];
+var battleTime = 0, kills = [0, 0], startCounts = [0, 0], unitTotals = [0, 0];
 var winner = -1, endT = 0, shake = 0, seq = 1;
 
 /* ---------- 画布与视图 ---------- */
@@ -295,7 +311,7 @@ var btnTeamB = $('btnTeamB'), btnTeamR = $('btnTeamR');
     var el = document.createElement('div');
     el.className = 'card' + (id === curType ? ' sel' : '');
     el.setAttribute('data-type', id);
-    el.title = d.name + ' · ' + d.cost + '金 · 生命' + d.hp + ' · 伤害' + d.dmg + ' · ' + d.desc + '（快捷键 ' + (i + 1) + '）';
+    el.title = d.name + ' · ' + d.cost + '金 · 生命' + d.hp + ' · 伤害' + d.dmg + ' · ' + d.desc + (i < 9 ? '（快捷键 ' + (i + 1) + '）' : '');
     el.innerHTML = '<div class="ic" style="background:' + d.icColor + '">' + d.ic + '</div>' +
       '<div class="nm">' + d.name + '</div><div class="ct">' + d.cost + '</div>';
     el.addEventListener('click', function () {
@@ -394,7 +410,9 @@ function spawnUnit(p) {
     hp: def.hp, maxHp: def.hp, r: def.r,
     cd: Math.random() * def.cd * 0.5, retarget: Math.random() * 0.2, target: null,
     face: p.team === 0 ? 0 : Math.PI, anim: 0, walk: Math.random() * 10, spd: 0,
-    kb: { x: 0, y: 0 }, fallen: 0, alive: true
+    kb: { x: 0, y: 0 }, fallen: 0, alive: true,
+    slowT: 0, slowFactor: 0.55, poisonT: 0, poisonDps: 0, poisonTick: 0, poisonSrc: null,
+    blinkCd: rand(1, 2), summonCd: def.summon ? def.summon.interval : 0, summons: []
   };
 }
 function startBattle() {
@@ -406,6 +424,7 @@ function startBattle() {
   projectiles = []; particles = []; floaters = []; corpses = [];
   kills = [0, 0]; battleTime = 0; winner = -1; endT = 0; paused = false;
   startCounts = [teamCount(0), teamCount(1)];
+  unitTotals = [startCounts[0], startCounts[1]];
   state = 'battle';
   overlay.classList.add('hidden');
   floaters.push({ x: W / 2, y: H / 2 - 40, t: 0, life: 1.2, text: '开  战', color: '#ffd76a', size: 64 });
@@ -431,9 +450,9 @@ function nearestEnemy(u) {
 }
 function aliveCount(t) { var n = 0; for (var i = 0; i < units.length; i++) if (units[i].alive && units[i].team === t) n++; return n; }
 
-function damage(t, raw, src, nx, ny, kb) {
+function damage(t, raw, src, nx, ny, kb, pierce) {
   if (!t.alive) return;
-  var dmg = Math.max(1, raw - (t.def.armor || 0));
+  var dmg = pierce ? raw : Math.max(1, raw - (t.def.armor || 0));
   var crit = Math.random() < 0.08;
   if (crit) dmg *= 1.7;
   dmg = Math.round(dmg);
@@ -455,9 +474,24 @@ function damage(t, raw, src, nx, ny, kb) {
       life: rand(0.2, 0.4), maxLife: 0.4, size: rand(1.5, 3), color: '#7d2a2a'
     });
   }
+  /* 命中特效：吸血 / 淬毒 / 冰缓 */
+  if (src && src.def && src.hp !== undefined) {
+    if (src.def.lifesteal && src.alive) {
+      var hl = Math.round(dmg * src.def.lifesteal);
+      if (hl > 0 && src.hp < src.maxHp) {
+        src.hp = Math.min(src.maxHp, src.hp + hl);
+        if (floaters.length < 220) {
+          floaters.push({ x: src.x + rand(-5, 5), y: src.y - src.r - 8, t: 0, life: 0.6, text: '+' + hl, color: '#e86a8a', size: 11 });
+        }
+      }
+    }
+    if (src.def.poison && t.alive) { t.poisonT = src.def.poison.dur; t.poisonDps = src.def.poison.dps; t.poisonSrc = src; t.poisonTick = 0.6; }
+    if (src.def.slow && t.alive) { t.slowT = Math.max(t.slowT, src.def.slow.dur); t.slowFactor = src.def.slow.factor; }
+  }
   if (t.hp <= 0) kill(t, src);
 }
 function kill(t, src) {
+  if (!t.alive) return;
   t.alive = false;
   if (src && src.team !== undefined && kills[src.team] !== undefined) kills[src.team]++;
   corpses.push({ x: t.x, y: t.y, r: t.r, team: t.team, rot: rand(0, TAU), t: 0 });
@@ -470,6 +504,30 @@ function kill(t, src) {
   }
   sfx('death');
   if (t.type === 'giant') shake += 6;
+  if (t.def.kamikaze) doExplosion(t, t.x, t.y, t.def.aoe, t.def.dmg, t);   // 炸弹人亡语自爆
+}
+function doExplosion(src, x, y, aoe, dmg, credit) {
+  shake += 6; sfx('boom');
+  ringFx(x, y, aoe, '#f0a24a');
+  for (var i = 0; i < 30; i++) {
+    if (particles.length > 600) break;
+    var a = rand(0, TAU), s = rand(50, 240);
+    particles.push({
+      x: x, y: y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+      life: rand(0.3, 0.7), maxLife: 0.7, size: rand(2, 5),
+      color: Math.random() < 0.5 ? '#f2b13c' : '#e86a2a'
+    });
+  }
+  for (var j = 0; j < units.length; j++) {
+    var e = units[j];
+    if (!e.alive || e.team === src.team) continue;
+    var d = hyp(e.x - x, e.y - y);
+    if (d <= aoe + e.r) {
+      var f = 1 - 0.5 * Math.min(1, d / aoe);
+      var nx = (e.x - x) / (d || 1), ny = (e.y - y) / (d || 1);
+      damage(e, dmg * f, credit, nx, ny, 260);
+    }
+  }
 }
 function ringFx(x, y, radius, color) {
   particles.push({ ring: true, x: x, y: y, life: 0.35, maxLife: 0.35, size: radius, color: color });
@@ -484,34 +542,24 @@ function spark(x, y, team) {
   }
 }
 function explode(p) {
-  shake += 6; sfx('boom');
-  ringFx(p.x, p.y, p.aoe, '#f0a24a');
-  for (var i = 0; i < 26; i++) {
-    if (particles.length > 600) break;
-    var a = rand(0, TAU), s = rand(40, 220);
-    particles.push({
-      x: p.x, y: p.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
-      life: rand(0.3, 0.7), maxLife: 0.7, size: rand(2, 5),
-      color: Math.random() < 0.5 ? '#f2b13c' : '#e86a2a'
-    });
+  doExplosion(p, p.x, p.y, p.aoe, p.dmg, p.src);
+}
+/* 国王等光环：攻击者周围友军光环的增伤倍率 */
+function auraMult(u) {
+  var m = 1;
+  for (var i = 0; i < units.length; i++) {
+    var a = units[i];
+    if (a === u || !a.alive || a.team !== u.team || !a.def.aura) continue;
+    if (hyp(a.x - u.x, a.y - u.y) <= a.def.aura.r && a.def.aura.mult > m) m = a.def.aura.mult;
   }
-  for (var j = 0; j < units.length; j++) {
-    var e = units[j];
-    if (!e.alive || e.team === p.team) continue;
-    var d = hyp(e.x - p.x, e.y - p.y);
-    if (d <= p.aoe + e.r) {
-      var f = 1 - 0.5 * Math.min(1, d / p.aoe);
-      var nx = (e.x - p.x) / (d || 1), ny = (e.y - p.y) / (d || 1);
-      damage(e, p.dmg * f, p.src, nx, ny, 240);
-    }
-  }
+  return m;
 }
 function meleeAttack(u, t) {
   var def = u.def;
   u.cd = def.cd * rand(0.92, 1.08); u.anim = 1;
   u.face = Math.atan2(t.y - u.y, t.x - u.x);
   var ang = u.face, nx = Math.cos(ang), ny = Math.sin(ang);
-  var dmg = def.dmg;
+  var dmg = def.dmg * auraMult(u);
   if (def.charge) dmg *= 1 + Math.min(1, u.spd / Math.max(1, def.speed)) * 1.4;
   if (def.antiCav && t.type === 'knight') dmg *= 2.3;
   if (def.aoeMelee) {
@@ -520,7 +568,7 @@ function meleeAttack(u, t) {
       var e = units[i];
       if (!e.alive || e.team === u.team) continue;
       var d = hyp(e.x - u.x, e.y - u.y);
-      if (d <= def.range + u.r + e.r) { damage(e, dmg * rand(0.9, 1.1), u, nx, ny, def.kb || 180); hitAny = true; }
+      if (d <= def.range + u.r + e.r) { damage(e, dmg * rand(0.9, 1.1), u, nx, ny, def.kb || 180, def.pierce); hitAny = true; }
     }
     if (hitAny) {
       shake += 5;
@@ -529,7 +577,7 @@ function meleeAttack(u, t) {
     }
   } else {
     var px = u.x + nx * (u.r + t.r) * 0.6, py = u.y + ny * (u.r + t.r) * 0.6;
-    damage(t, dmg * rand(0.9, 1.1), u, nx, ny, def.kb || 60);
+    damage(t, dmg * rand(0.9, 1.1), u, nx, ny, def.kb || 60, def.pierce);
     spark(px, py, u.team);
     sfx('hit');
   }
@@ -538,18 +586,35 @@ function rangedAttack(u, t) {
   var def = u.def;
   u.cd = def.cd * rand(0.92, 1.08); u.anim = 1;
   u.face = Math.atan2(t.y - u.y, t.x - u.x);
-  if (def.proj === 'arrow') {
-    var sp = 420;
+  var dmg = def.dmg * auraMult(u);
+  if (def.proj === 'rock') {
+    /* 投石车：抛物线落石，只落在预测落点 */
+    var dist0 = hyp(t.x - u.x, t.y - u.y);
+    var dur = 0.8 + dist0 / 260;
+    var rtx = clamp(t.x + Math.cos(t.face) * t.spd * dur * 0.6, 20, W - 20);
+    var rty = clamp(t.y + Math.sin(t.face) * t.spd * dur * 0.6, 20, H - 20);
+    projectiles.push({
+      kind: 'rock', sx: u.x + Math.cos(u.face) * u.r, sy: u.y + Math.sin(u.face) * u.r,
+      tx: rtx, ty: rty, t: 0, dur: dur, x: u.x, y: u.y,
+      dmg: dmg, aoe: def.aoe, team: u.team, src: u
+    });
+    sfx('fire');
+    return;
+  }
+  var straight = (def.proj === 'arrow' || def.proj === 'spear' || def.proj === 'ice' || def.proj === 'bolt');
+  if (straight) {
+    var sp = def.proj === 'spear' ? 360 : 420;
     var lead = hyp(t.x - u.x, t.y - u.y) / sp;
     var tx = t.x + Math.cos(t.face) * t.spd * lead;
     var ty = t.y + Math.sin(t.face) * t.spd * lead;
-    var ang = Math.atan2(ty - u.y, tx - u.x) + rand(-0.05, 0.05);
+    var spread = def.proj === 'spear' ? 0.03 : 0.05;
+    var ang = Math.atan2(ty - u.y, tx - u.x) + rand(-spread, spread);
     projectiles.push({
-      kind: 'arrow', x: u.x + Math.cos(ang) * u.r, y: u.y + Math.sin(ang) * u.r,
+      kind: def.proj, x: u.x + Math.cos(ang) * u.r, y: u.y + Math.sin(ang) * u.r,
       vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
-      dmg: def.dmg, team: u.team, life: 1.4, src: u
+      dmg: dmg, team: u.team, life: 1.6, src: u, pierce: !!def.pierce
     });
-    sfx('arrow');
+    sfx(def.proj === 'arrow' ? 'arrow' : 'fire');
   } else {
     var spf = 230;
     var tt = hyp(t.x - u.x, t.y - u.y) / spf;
@@ -559,7 +624,7 @@ function rangedAttack(u, t) {
     projectiles.push({
       kind: 'fire', x: u.x + Math.cos(angf) * u.r, y: u.y + Math.sin(angf) * u.r,
       vx: Math.cos(angf) * spf, vy: Math.sin(angf) * spf,
-      dmg: def.dmg, aoe: def.aoe, team: u.team, life: 3, src: u, tx: tx2, ty: ty2
+      dmg: dmg, aoe: def.aoe, team: u.team, life: 3, src: u, tx: tx2, ty: ty2
     });
     sfx('fire');
   }
@@ -575,6 +640,21 @@ function simUnits(dt) {
     u.x += u.kb.x * dt; u.y += u.kb.y * dt;
     var kd = Math.max(0, 1 - 5 * dt);
     u.kb.x *= kd; u.kb.y *= kd;
+    /* 状态效果：中毒 */
+    if (u.poisonT > 0) {
+      u.poisonT -= dt; u.hp -= u.poisonDps * dt; u.poisonTick -= dt;
+      if (u.poisonTick <= 0) {
+        u.poisonTick = 0.7;
+        if (floaters.length < 220) {
+          floaters.push({ x: u.x + rand(-5, 5), y: u.y - u.r - 6, t: 0, life: 0.6, text: '' + Math.max(1, Math.round(u.poisonDps * 0.7)), color: '#7de37d', size: 11 });
+        }
+        if (particles.length < 600) {
+          particles.push({ x: u.x + rand(-4, 4), y: u.y - u.r, vx: rand(-10, 10), vy: rand(-30, -10), life: 0.4, maxLife: 0.4, size: 2, color: '#7de37d' });
+        }
+      }
+      if (u.hp <= 0) { kill(u, u.poisonSrc); continue; }
+    }
+    if (u.slowT > 0) u.slowT -= dt;
     if (u.fallen > 0) { u.fallen -= dt; u.spd = lerp(u.spd, 0, Math.min(1, 10 * dt)); continue; }
     u.retarget -= dt;
     if (!u.target || !u.target.alive || u.retarget <= 0) {
@@ -587,8 +667,40 @@ function simUnits(dt) {
     var d = Math.max(0.001, hyp(dx, dy));
     var edge = d - u.r - t.r;
     var def = u.def, mvx = 0, mvy = 0;
-    if (def.kind === 'ranged') {
-      if (edge <= def.range) {
+    var spdMult = u.slowT > 0 ? (u.slowFactor || 0.55) : 1;
+    if (def.kind === 'kamikaze') {
+      /* 炸弹人：直冲最近敌人，贴脸引爆 */
+      if (edge < 24) { kill(u, null); continue; }
+      mvx = dx / d; mvy = dy / d;
+    } else if (def.kind === 'heal') {
+      /* 牧师：治疗周围伤员，与敌保持距离 */
+      if (u.cd <= 0) {
+        var healed = false;
+        for (var hi = 0; hi < units.length; hi++) {
+          var ha = units[hi];
+          if (!ha.alive || ha.team !== u.team || ha === u) continue;
+          if (ha.hp < ha.maxHp - 4 && hyp(ha.x - u.x, ha.y - u.y) <= def.heal.r) {
+            var amt = Math.min(def.heal.amt, ha.maxHp - ha.hp);
+            ha.hp += amt; healed = true;
+            if (floaters.length < 220) {
+              floaters.push({ x: ha.x + rand(-5, 5), y: ha.y - ha.r - 8, t: 0, life: 0.7, text: '+' + Math.round(amt), color: '#7de37d', size: 12 });
+            }
+            if (particles.length < 600) {
+              particles.push({ x: ha.x, y: ha.y - ha.r * 0.5, vx: rand(-20, 20), vy: rand(-50, -20), life: 0.5, maxLife: 0.5, size: 2.5, color: '#aef2ae' });
+            }
+          }
+        }
+        u.cd = healed ? def.cd : 0.4;
+      }
+      u.face = Math.atan2(dy, dx);
+      if (d < 200) { mvx = -dx / d; mvy = -dy / d; }
+      else if (d > 320) { mvx = dx / d; mvy = dy / d; }
+    } else if (def.kind === 'ranged') {
+      if (def.minRange && edge < def.minRange) {
+        /* 投石车死区：敌人太近只能后退 */
+        mvx = -dx / d; mvy = -dy / d;
+        u.face = Math.atan2(dy, dx);
+      } else if (edge <= def.range) {
         u.face = Math.atan2(dy, dx);
         if (u.cd <= 0) rangedAttack(u, t);
         if (d < def.range * 0.42) { mvx = -dx / d; mvy = -dy / d; }   // 风筝走位
@@ -597,19 +709,58 @@ function simUnits(dt) {
       if (edge <= def.range) {
         u.face = Math.atan2(dy, dx);
         if (u.cd <= 0) meleeAttack(u, t);
-      } else { mvx = dx / d; mvy = dy / d; }
+      } else {
+        mvx = dx / d; mvy = dy / d;
+        /* 刺客：距离远时闪现突进 */
+        if (def.blink) {
+          u.blinkCd -= dt;
+          if (d > 170 && u.blinkCd <= 0) {
+            u.blinkCd = 3.5;
+            u.kb.x += dx / d * 700; u.kb.y += dy / d * 700;
+            for (var bi = 0; bi < 6; bi++) {
+              if (particles.length < 600) break;
+              particles.push({ x: u.x, y: u.y, vx: rand(-40, 40), vy: rand(-40, 40), life: 0.3, maxLife: 0.3, size: 2.5, color: '#b9b9c8' });
+            }
+            sfx('arrow');
+          }
+        }
+      }
     }
     if (mvx !== 0 || mvy !== 0) {
-      u.x += mvx * def.speed * dt;
-      u.y += mvy * def.speed * dt;
+      u.x += mvx * def.speed * spdMult * dt;
+      u.y += mvy * def.speed * spdMult * dt;
       u.walk += dt * def.speed * 0.05;
       u.face = Math.atan2(mvy, mvx);
-      u.spd = lerp(u.spd, def.speed, Math.min(1, 6 * dt));
+      u.spd = lerp(u.spd, def.speed * spdMult, Math.min(1, 6 * dt));
     } else {
       u.spd = lerp(u.spd, 0, Math.min(1, 6 * dt));
     }
     u.x = clamp(u.x, u.r, W - u.r);
     u.y = clamp(u.y, u.r, H - u.r);
+    /* 召唤师：定期召唤援军 */
+    if (def.summon) {
+      u.summonCd -= dt;
+      u.summons = u.summons.filter(function (s) { return s.alive; });
+      if (u.summonCd <= 0 && u.summons.length < def.summon.max && units.length < 320) {
+        u.summonCd = def.summon.interval;
+        for (var si = 0; si < def.summon.per; si++) {
+          var s2 = spawnUnit({
+            type: def.summon.type, team: u.team,
+            x: clamp(u.x + rand(-34, 34), 20, W - 20),
+            y: clamp(u.y + rand(-34, 34), 20, H - 20)
+          });
+          s2.summoned = true;
+          s2.face = u.face;
+          u.summons.push(s2);
+          units.push(s2);
+          unitTotals[u.team]++;
+          if (particles.length < 600) {
+            particles.push({ x: s2.x, y: s2.y, vx: rand(-30, 30), vy: rand(-60, -20), life: 0.5, maxLife: 0.5, size: 3, color: '#b49ae0' });
+          }
+        }
+        sfx('place');
+      }
+    }
   }
   /* 单位间分离（重的推轻的） */
   for (i = 0; i < units.length; i++) {
@@ -637,27 +788,37 @@ function simUnits(dt) {
 function simProjectiles(dt) {
   for (var i = projectiles.length - 1; i >= 0; i--) {
     var p = projectiles[i];
-    p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
-    var dead = p.life <= 0;
-    if (p.kind === 'fire' && particles.length < 600) {
-      particles.push({ x: p.x, y: p.y, vx: rand(-15, 15), vy: rand(-15, 15), life: 0.3, maxLife: 0.3, size: 3, color: '#f2a13c' });
-      if (hyp(p.tx - p.x, p.ty - p.y) < 12) { explode(p); dead = true; }
-    }
-    if (!dead) {
-      for (var j = 0; j < units.length; j++) {
-        var e = units[j];
-        if (!e.alive || e.team === p.team) continue;
-        var rr = e.r + (p.kind === 'fire' ? 8 : 4);
-        var ex = e.x - p.x, ey = e.y - p.y;
-        if (ex * ex + ey * ey < rr * rr) {
-          if (p.kind === 'fire') { explode(p); }
-          else {
-            var v = Math.max(1, hyp(p.vx, p.vy));
-            damage(e, p.dmg * rand(0.9, 1.1), p.src, p.vx / v, p.vy / v, 40);
-            spark(p.x, p.y, p.team);
-            sfx('hit');
+    var dead = false;
+    if (p.kind === 'rock') {
+      /* 抛石：沿抛物线飞向落点，途中无碰撞 */
+      p.t += dt / p.dur;
+      var tt = Math.min(1, p.t);
+      p.x = lerp(p.sx, p.tx, tt);
+      p.y = lerp(p.sy, p.ty, tt);
+      if (p.t >= 1) { explode(p); dead = true; }
+    } else {
+      p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
+      dead = p.life <= 0;
+      if (p.kind === 'fire' && particles.length < 600) {
+        particles.push({ x: p.x, y: p.y, vx: rand(-15, 15), vy: rand(-15, 15), life: 0.3, maxLife: 0.3, size: 3, color: '#f2a13c' });
+        if (hyp(p.tx - p.x, p.ty - p.y) < 12) { explode(p); dead = true; }
+      }
+      if (!dead) {
+        for (var j = 0; j < units.length; j++) {
+          var e = units[j];
+          if (!e.alive || e.team === p.team) continue;
+          var rr = e.r + (p.kind === 'fire' ? 8 : p.kind === 'spear' ? 6 : 4);
+          var ex = e.x - p.x, ey = e.y - p.y;
+          if (ex * ex + ey * ey < rr * rr) {
+            if (p.kind === 'fire') { explode(p); }
+            else {
+              var v = Math.max(1, hyp(p.vx, p.vy));
+              damage(e, p.dmg * rand(0.9, 1.1), p.src, p.vx / v, p.vy / v, 40, p.pierce);
+              spark(p.x, p.y, p.team);
+              sfx('hit');
+            }
+            dead = true; break;
           }
-          dead = true; break;
         }
       }
     }
@@ -756,7 +917,10 @@ function drawHuman(u, c, swing) {
   var r = u.r;
   ctx.fillStyle = c.main; ctx.strokeStyle = c.dark; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = '#f0cda3';
+  var skin = '#f0cda3';
+  if (u.type === 'assassin') skin = '#3a3a45';
+  if (u.type === 'vampire') skin = '#e8d8dc';
+  ctx.fillStyle = skin;
   ctx.beginPath(); ctx.arc(r * 0.2, 0, r * 0.42, 0, TAU); ctx.fill();
   /* 固定装备（不随攻击摆动） */
   if (u.type === 'shield') {
@@ -771,6 +935,41 @@ function drawHuman(u, c, swing) {
     var ax = r * 0.55 + Math.cos(1.25) * (r + 4), ay = Math.sin(1.25) * (r + 4);
     seg(ax, -ay, ax, ay, 'rgba(240,240,240,0.75)', 1);
     if (u.anim > 0.55) seg(r * 0.3, 0, r + 16, 0, '#ddd', 2);
+  }
+  if (u.type === 'javelineer') {          // 背上备用矛束
+    seg(-r * 0.7, -r * 0.15, r * 0.35, -r * 0.75, '#a08050', 2);
+    seg(-r * 0.7, -r * 0.45, r * 0.35, -r * 1.05, '#a08050', 2);
+  }
+  if (u.type === 'vampire') {             // 暗红披风
+    ctx.fillStyle = 'rgba(96,20,34,0.75)';
+    ctx.beginPath();
+    ctx.arc(-r * 0.2, 0, r * 1.05, Math.PI * 0.55, Math.PI * 1.45);
+    ctx.lineTo(-r * 0.2, 0);
+    ctx.fill();
+  }
+  if (u.type === 'priest') {              // 白十字
+    ctx.fillStyle = '#f2f2ee';
+    ctx.fillRect(-1.5, -r * 0.55, 3, r * 1.1);
+    ctx.fillRect(-r * 0.35, -1.5, r * 0.7, 3);
+  }
+  if (u.type === 'king') {                // 王冠
+    ctx.strokeStyle = '#e8b64c'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(r * 0.2, 0, r * 0.56, 0, TAU); ctx.stroke();
+    ctx.fillStyle = '#e8b64c';
+    for (var ki = -1; ki <= 1; ki++) {
+      ctx.beginPath();
+      ctx.arc(r * 0.2 + Math.cos(ki * 0.9) * r * 0.56, Math.sin(ki * 0.9) * r * 0.56, 1.6, 0, TAU);
+      ctx.fill();
+    }
+  }
+  if (u.type === 'bomber') {              // 怀里的炸弹
+    ctx.fillStyle = '#2b2b30'; ctx.strokeStyle = '#101014'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(r * 0.75, 0, r * 0.6, 0, TAU); ctx.fill(); ctx.stroke();
+    seg(r * 1.05, -r * 0.25, r * 1.35, -r * 0.6, '#8a7351', 2);
+    if (Math.floor(performance.now() / 90) % 2 === 0) {
+      ctx.fillStyle = '#ffd76a';
+      ctx.beginPath(); ctx.arc(r * 1.35, -r * 0.6, 2.4, 0, TAU); ctx.fill();
+    }
   }
   /* 摆动武器 */
   ctx.save();
@@ -798,6 +997,39 @@ function drawHuman(u, c, swing) {
     ctx.beginPath(); ctx.arc(r + 10, -r * 0.25, glow, 0, TAU); ctx.fill();
     ctx.fillStyle = '#9fd7f7';
     ctx.beginPath(); ctx.arc(r + 10, -r * 0.25, 3, 0, TAU); ctx.fill();
+  } else if (u.type === 'javelineer') {
+    seg(r * 0.3, 0, r + 24, 0, '#b9c0c8', 2.5);
+    ctx.fillStyle = '#e6ebf0';
+    ctx.beginPath(); ctx.moveTo(r + 24, -4); ctx.lineTo(r + 33, 0); ctx.lineTo(r + 24, 4); ctx.closePath(); ctx.fill();
+  } else if (u.type === 'assassin') {     // 双匕首
+    seg(r * 0.4, -2, r + 10, -2, '#d8dce2', 2.5);
+    seg(r * 0.4, 3, r + 10, 3, '#d8dce2', 2.5);
+  } else if (u.type === 'vampire') {      // 利爪
+    for (var vi = -1; vi <= 1; vi++) seg(r * 0.5, vi * 4 - 2, r + 12, vi * 5, '#c8ced6', 2);
+  } else if (u.type === 'king') {         // 黄金剑
+    seg(r * 0.5, 0, r + 20, 0, '#e8c96a', 3);
+    seg(r * 0.72, -4, r * 0.72, 4, '#8a6b4a', 2.5);
+  } else if (u.type === 'icemage') {      // 冰晶法杖
+    seg(-r * 0.4, r * 0.45, r + 10, -r * 0.25, '#7a9ab0', 2.5);
+    ctx.fillStyle = 'rgba(159,215,247,0.35)';
+    ctx.beginPath(); ctx.arc(r + 10, -r * 0.25, 6, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#cfeafc';
+    ctx.beginPath();
+    ctx.moveTo(r + 10, -r * 0.25 - 5); ctx.lineTo(r + 13, -r * 0.25);
+    ctx.lineTo(r + 10, -r * 0.25 + 5); ctx.lineTo(r + 7, -r * 0.25);
+    ctx.closePath(); ctx.fill();
+  } else if (u.type === 'summoner') {     // 符文法杖
+    seg(-r * 0.4, r * 0.45, r + 10, -r * 0.25, '#5e4680', 2.5);
+    ctx.save();
+    ctx.translate(r + 10, -r * 0.25);
+    ctx.rotate(performance.now() / 500);
+    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = '#b49ae0'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(0, 0, 6, 0, TAU); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#d8c2f5';
+    ctx.beginPath(); ctx.arc(0, 0, 2.2, 0, TAU); ctx.fill();
+    ctx.restore();
   }
   ctx.restore();
 }
@@ -833,6 +1065,26 @@ function drawGiant(u, c, swing) {
   ctx.fillStyle = '#e8bd8f';
   ctx.beginPath(); ctx.arc(r * 0.28, 0, r * 0.34, 0, TAU); ctx.fill();
 }
+function drawCatapult(u, c, swing) {
+  var r = u.r, s;
+  ctx.fillStyle = '#8a7351'; ctx.strokeStyle = '#5e4c33'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.ellipse(0, 0, r * 1.15, r * 0.85, 0, 0, TAU); ctx.fill(); ctx.stroke();
+  for (s = -1; s <= 1; s += 2) {          // 车轮
+    ctx.fillStyle = '#6b5436';
+    ctx.beginPath(); ctx.arc(0, s * r * 0.85, r * 0.34, 0, TAU); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#4a3a24';
+    ctx.beginPath(); ctx.arc(0, s * r * 0.85, r * 0.1, 0, TAU); ctx.fill();
+  }
+  ctx.save();                              // 投臂（发射时向前挥动）
+  ctx.rotate(-0.85 + swing * 1.6);
+  seg(0, 0, r * 1.7, 0, '#7a5c3e', 4.5);
+  ctx.fillStyle = '#9aa0a6'; ctx.strokeStyle = '#6b7280'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(r * 1.7, 0, r * 0.32, 0, TAU); ctx.fill(); ctx.stroke();
+  ctx.restore();
+  seg(-r * 0.2, -r * 0.7, -r * 0.2, -r * 1.35, '#5e4c33', 2);   // 队旗
+  ctx.fillStyle = c.main;
+  ctx.fillRect(-r * 0.2, -r * 1.35, r * 0.55, r * 0.35);
+}
 function previewUnit(p) {
   var def = DEFS[p.type];
   return {
@@ -852,9 +1104,24 @@ function drawUnit(u) {
   ctx.rotate(u.face);
   if (u.fallen > 0) { ctx.scale(1.15, 0.78); ctx.rotate(0.6); }
   var swing = u.anim > 0 ? Math.sin(u.anim * Math.PI) : 0;
+  if (u.def.aura) {                        // 国王增伤光环
+    ctx.fillStyle = 'rgba(232,182,76,0.12)';
+    ctx.beginPath(); ctx.arc(0, 0, u.def.aura.r, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(232,182,76,0.35)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(0, 0, u.def.aura.r, 0, TAU); ctx.stroke();
+  }
   if (u.type === 'knight') drawKnight(u, c, swing);
   else if (u.type === 'giant') drawGiant(u, c, swing);
+  else if (u.type === 'catapult') drawCatapult(u, c, swing);
   else drawHuman(u, c, swing);
+  if (u.poisonT > 0) {                     // 中毒绿罩
+    ctx.fillStyle = 'rgba(110,220,110,0.22)';
+    ctx.beginPath(); ctx.arc(0, 0, r * 1.15, 0, TAU); ctx.fill();
+  }
+  if (u.slowT > 0) {                       // 冰缓蓝罩
+    ctx.fillStyle = 'rgba(130,205,255,0.25)';
+    ctx.beginPath(); ctx.arc(0, 0, r * 1.15, 0, TAU); ctx.fill();
+  }
   ctx.restore();
   if (state !== 'place' && u.alive && u.hp < u.maxHp) {
     var w = u.type === 'giant' ? 46 : 26;
@@ -880,22 +1147,45 @@ function drawCorpse(c) {
   ctx.restore();
 }
 function drawProj(p) {
-  if (p.kind === 'arrow') {
-    var v = Math.max(1, hyp(p.vx, p.vy));
-    var nx = p.vx / v, ny = p.vy / v;
-    ctx.fillStyle = 'rgba(0,0,0,0.12)';
-    ctx.beginPath(); ctx.arc(p.x + 4, p.y + 6, 2, 0, TAU); ctx.fill();
-    seg(p.x - nx * 14, p.y - ny * 14, p.x, p.y, '#6b5844', 2.5);
-    ctx.fillStyle = '#e6ebf0';
-    ctx.beginPath(); ctx.arc(p.x, p.y, 1.8, 0, TAU); ctx.fill();
-  } else {
+  if (p.kind === 'fire') {
     ctx.fillStyle = 'rgba(240,150,60,0.3)';
     ctx.beginPath(); ctx.arc(p.x, p.y, 10, 0, TAU); ctx.fill();
     ctx.fillStyle = '#f2a13c';
     ctx.beginPath(); ctx.arc(p.x, p.y, 5.5, 0, TAU); ctx.fill();
     ctx.fillStyle = '#ffe9b0';
     ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, TAU); ctx.fill();
+    return;
   }
+  if (p.kind === 'rock') {
+    var tt = Math.min(1, p.t);
+    var hgt = Math.sin(Math.PI * tt) * 90;
+    ctx.setLineDash([6, 6]);                // 落点预警圈
+    ctx.strokeStyle = 'rgba(60,40,20,0.4)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(p.tx, p.ty, p.aoe * 0.5, 0, TAU); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.beginPath(); ctx.ellipse(p.x, p.y, 8, 4, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#9aa0a6';
+    ctx.beginPath(); ctx.arc(p.x, p.y - hgt, 7, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.beginPath(); ctx.arc(p.x - 2, p.y - hgt - 2, 2.5, 0, TAU); ctx.fill();
+    return;
+  }
+  /* 直线投射物：箭 / 矛 / 冰锥 / 奥术弹 */
+  var v = Math.max(1, hyp(p.vx, p.vy));
+  var nx = p.vx / v, ny = p.vy / v;
+  var len = p.kind === 'spear' ? 22 : 14;
+  var shaft = p.kind === 'arrow' ? '#6b5844'
+    : p.kind === 'spear' ? '#8a6b4a'
+    : p.kind === 'ice' ? '#7fc4e8' : '#9a6ae0';
+  var tipC = p.kind === 'arrow' ? '#e6ebf0'
+    : p.kind === 'spear' ? '#cfd6dd'
+    : p.kind === 'ice' ? '#ffffff' : '#d8c2f5';
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.beginPath(); ctx.arc(p.x + 4, p.y + 6, 2, 0, TAU); ctx.fill();
+  seg(p.x - nx * len, p.y - ny * len, p.x, p.y, shaft, p.kind === 'spear' ? 3 : 2.5);
+  ctx.fillStyle = tipC;
+  ctx.beginPath(); ctx.arc(p.x, p.y, p.kind === 'spear' ? 2.4 : 1.8, 0, TAU); ctx.fill();
 }
 function drawParticles() {
   particles.forEach(function (p) {
@@ -984,8 +1274,8 @@ function updateHUD() {
     timerEl.textContent = '--:--';
   } else {
     timerEl.textContent = fmtTime(battleTime);
-    blueInfo.textContent = '存活 ' + aliveCount(0) + ' / ' + startCounts[0];
-    redInfo.textContent = '存活 ' + aliveCount(1) + ' / ' + startCounts[1];
+    blueInfo.textContent = '存活 ' + aliveCount(0) + ' / ' + unitTotals[0];
+    redInfo.textContent = '存活 ' + aliveCount(1) + ' / ' + unitTotals[1];
   }
   bottombar.classList.toggle('hidden', state !== 'place');
   battlebar.classList.toggle('hidden', !(state === 'battle' || state === 'ending'));
@@ -1003,7 +1293,7 @@ function showOverlay() {
   otitle.textContent = winner === 0 ? '蓝军获胜' : winner === 1 ? '红军获胜' : '平局';
   otitle.className = winner === 0 ? 'b' : winner === 1 ? 'r' : 'd';
   ostats.innerHTML = '用时 ' + fmtTime(battleTime) + '<br>' +
-    '蓝军存活 ' + aB + ' / ' + startCounts[0] + ' · 红军存活 ' + aR + ' / ' + startCounts[1] + '<br>' +
+    '蓝军存活 ' + aB + ' / ' + unitTotals[0] + ' · 红军存活 ' + aR + ' / ' + unitTotals[1] + '<br>' +
     '击杀统计 —— 蓝军 ' + kills[0] + ' · 红军 ' + kills[1];
   overlay.classList.remove('hidden');
 }
