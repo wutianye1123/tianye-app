@@ -69,6 +69,16 @@ button:hover{background:#333d49;border-color:#4a5563}
 #toast{position:fixed;top:92px;left:50%;transform:translateX(-50%);background:rgba(10,12,16,.88);
   border:1px solid #3a434e;padding:8px 18px;border-radius:10px;font-size:13px;opacity:0;
   transition:opacity .25s;pointer-events:none;z-index:30;white-space:nowrap}
+#presetPanel{position:fixed;inset:0;background:rgba(8,10,14,.55);display:flex;align-items:center;
+  justify-content:center;z-index:25}
+#presetBox{background:#1a2027;border:1px solid #333d49;border-radius:14px;padding:18px 20px;
+  max-width:min(860px,92vw);max-height:80vh;display:flex;flex-direction:column;gap:12px;
+  box-shadow:0 20px 60px rgba(0,0,0,.5)}
+#presetTitle{font-size:17px;font-weight:700;letter-spacing:2px;text-align:center}
+#presetGrid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;overflow-y:auto;padding:2px}
+#presetGrid button{padding:8px 4px;font-size:13px;border-radius:8px}
+#presetGrid button.preset-rand{background:#3a3220;border-color:#b8860b;color:#ffd76a;font-weight:700}
+#presetClose{align-self:center;padding:8px 40px}
 .hidden{display:none!important}
 </style>
 </head>
@@ -99,8 +109,8 @@ button:hover{background:#333d49;border-color:#4a5563}
 <div id="bottombar">
   <div id="cards"></div>
   <div id="actionrow">
-    <button id="btnRandomB">随机蓝军</button>
-    <button id="btnRandomR">随机红军</button>
+    <button id="btnRandomB">部署蓝军</button>
+    <button id="btnRandomR">部署红军</button>
     <span class="sep"></span>
     <button id="btnClearB">清空蓝军</button>
     <button id="btnClearR">清空红军</button>
@@ -124,6 +134,14 @@ button:hover{background:#333d49;border-color:#4a5563}
 </div>
 
 <div id="toast"></div>
+
+<div id="presetPanel" class="hidden">
+  <div id="presetBox">
+    <div id="presetTitle"></div>
+    <div id="presetGrid"></div>
+    <button id="presetClose">取 消</button>
+  </div>
+</div>
 
 <script src="three.min.js"></script>
 <script>
@@ -202,6 +220,7 @@ var DEF_ORDER = [];
 SERIES.forEach(function (s) { DEF_ORDER = DEF_ORDER.concat(s.types); });
 
 var PRESETS = [
+  /* ---- 基础 ---- */
   { name: '均衡军团', comp: { swordsman: 3, archer: 2, shield: 1, javelineer: 1 } },
   { name: '箭雨齐发', comp: { archer: 5, shield: 1, pikeman: 2 } },
   { name: '重装铁壁', comp: { shield: 3, swordsman: 2, mage: 1, priest: 1 } },
@@ -215,21 +234,57 @@ var PRESETS = [
   { name: '自爆浪潮', comp: { bomber: 5, knight: 2 } },
   { name: '无尽军团', comp: { summoner: 2, priest: 1, farmer: 6 } },
   { name: '王者亲征', comp: { king: 1, knight: 2, priest: 1, javelineer: 2 } },
+  /* ---- 黑暗 ---- */
   { name: '白骨军团', comp: { skeleton: 6, necromancer: 1 } },
   { name: '暗影降临', comp: { assassin: 3, vampire: 2, darkknight: 1, lich: 1 } },
+  { name: '石像守望', comp: { gargoyle: 4, lich: 1, skeleton: 2 } },
+  { name: '亡灵天灾', comp: { necromancer: 2, skeleton: 6, lich: 1 } },
+  { name: '吸血鬼王朝', comp: { vampire: 3, darkknight: 1, lich: 1 } },
+  /* ---- 元素 ---- */
   { name: '雷暴秘术', comp: { stormmage: 2, icemage: 2, pyromancer: 2, earthwarden: 1 } },
+  { name: '女巫集会', comp: { mage: 2, icemage: 1, pyromancer: 1, stormmage: 1, lich: 1 } },
+  { name: '全法师议会', comp: { mage: 3, icemage: 2, pyromancer: 2, stormmage: 2 } },
+  { name: '冰火两重天', comp: { icemage: 3, pyromancer: 3 } },
+  { name: '三炮齐鸣', comp: { mlrs: 1, catapult: 2, mage: 2 } },
+  /* ---- 巨兽 ---- */
   { name: '自然之怒', comp: { treant: 1, druid: 2, warbear: 3 } },
   { name: '巨兽横行', comp: { troll: 1, minotaur: 2, cyclops: 1 } },
   { name: '巨龙苏醒', comp: { dragon: 1, skeleton: 8 } },
-  { name: '石像守望', comp: { gargoyle: 4, lich: 1, skeleton: 2 } },
   { name: '熊蛮冲锋', comp: { warbear: 4, minotaur: 1 } },
+  { name: '森林守护者', comp: { treant: 2, druid: 2, warbear: 2 } },
+  { name: '兽人部落', comp: { minotaur: 2, troll: 1, berserker: 2 } },
+  { name: '巨兽动物园', comp: { giant: 1, cyclops: 1, troll: 1, warbear: 1, minotaur: 1 } },
+  /* ---- 现代 ---- */
   { name: '机械步兵', comp: { rifleman: 4, humvee: 1, medic: 1 } },
   { name: '装甲突击', comp: { tank: 2, rifleman: 3, bazooka: 1 } },
   { name: '火力覆盖', comp: { mlrs: 1, sniper: 2, gunner: 2 } },
   { name: '空中支援', comp: { heli: 2, rifleman: 4 } },
   { name: '现代化军', comp: { tank: 1, humvee: 1, heli: 1, rifleman: 3, medic: 1 } },
   { name: '钢铁洪流', comp: { tank: 3 } },
-  { name: '狙击小队', comp: { sniper: 4, medic: 1 } }
+  { name: '狙击小队', comp: { sniper: 4, medic: 1 } },
+  { name: '现代合成营', comp: { tank: 1, humvee: 1, rifleman: 3, medic: 1, gunner: 1 } },
+  { name: '空地一体战', comp: { heli: 2, tank: 1, gunner: 2 } },
+  { name: '炮兵阵地', comp: { mlrs: 2, shield: 2, sniper: 1 } },
+  { name: '特种作战', comp: { sniper: 2, assassin: 2, medic: 1 } },
+  { name: '钢铁丛林', comp: { tank: 2, mlrs: 1, humvee: 2 } },
+  { name: '反坦克小队', comp: { bazooka: 4, warbear: 2 } },
+  /* ---- 历史/神话主题 ---- */
+  { name: '罗马方阵', comp: { shield: 3, javelineer: 3, swordsman: 1 } },
+  { name: '斯巴达三百', comp: { shield: 4, pikeman: 2 } },
+  { name: '维京掠夺者', comp: { berserker: 3, warbear: 1, shield: 1 } },
+  { name: '十字军东征', comp: { knight: 2, priest: 1, king: 1 } },
+  { name: '蒙古掠骑', comp: { knight: 3, archer: 2 } },
+  { name: '龙骑士团', comp: { knight: 2, dragon: 1 } },
+  { name: '龟甲阵', comp: { shield: 4, archer: 3 } },
+  { name: '长城防线', comp: { shield: 3, pikeman: 3, archer: 2 } },
+  /* ---- 战术主题 ---- */
+  { name: '快速反应部队', comp: { knight: 1, heli: 1, minotaur: 1, assassin: 2 } },
+  { name: '召唤大军', comp: { summoner: 2, necromancer: 2, priest: 1 } },
+  { name: '全远程火力', comp: { archer: 4, javelineer: 3, sniper: 2, mage: 1 } },
+  { name: '不动如山', comp: { shield: 4, treant: 1, gargoyle: 2, earthwarden: 1 } },
+  { name: '精英近卫', comp: { king: 1, giant: 1, tank: 1, dragon: 1, lich: 1 } },
+  { name: '草叉信仰', comp: { farmer: 12, priest: 1 } },
+  { name: '爆破专家', comp: { bomber: 6, medic: 1 } }
 ];
 
 /* ---------- 状态 ---------- */
@@ -837,9 +892,8 @@ function removeNear(x, z) {
   }
   if (hit >= 0) { placed.splice(hit, 1); sfx('place'); }
 }
-function randomDeploy(team) {
-  placed = placed.filter(function (p) { return p.team !== team; });
-  var preset = PRESETS[Math.floor(Math.random() * PRESETS.length)];
+function deployList(team, preset) {
+  /* 按预设配比在预算内加权填充 */
   var money = infiniteMoney ? 12000 : budget[team], list = [], guard = 0;
   var entries = Object.keys(preset.comp).map(function (k) { return [k, preset.comp[k]]; });
   while (guard++ < 500) {
@@ -851,8 +905,17 @@ function randomDeploy(team) {
     list.push(pick); money -= DEFS[pick].cost;
     if (placed.length + list.length >= 260) break;
   }
+  return list;
+}
+function deployPreset(team, idx) {
+  placed = placed.filter(function (p) { return p.team !== team; });
+  var preset = PRESETS[idx];
+  var list = deployList(team, preset);
   formationPlace(team, list);
   toast((team === 0 ? '蓝军' : '红军') + '已部署：' + preset.name + '（' + list.length + ' 个单位）');
+}
+function randomDeploy(team) {
+  deployPreset(team, Math.floor(Math.random() * PRESETS.length));
 }
 function formationPlace(team, list) {
   var sorted = list.slice().sort(function (a, b) {
@@ -1792,8 +1855,34 @@ btnMoney.addEventListener('click', function () {
   btnMoney.style.borderColor = infiniteMoney ? '#e8b64c' : '';
   toast(infiniteMoney ? '无限预算已开启：随意放置，随机部署也会拉满' : '已恢复正常预算模式');
 });
-$('btnRandomB').addEventListener('click', function () { randomDeploy(0); });
-$('btnRandomR').addEventListener('click', function () { randomDeploy(1); });
+$('btnRandomB').addEventListener('click', function () { openPresetPanel(0); });
+$('btnRandomR').addEventListener('click', function () { openPresetPanel(1); });
+/* 预设方案选择面板 */
+var presetPanel, presetTitle, presetGrid, presetTeam = 0;
+function closePresetPanel() { presetPanel.classList.add('hidden'); }
+function openPresetPanel(team) {
+  presetTeam = team;
+  presetTitle.textContent = (team === 0 ? '蓝军' : '红军') + ' 部署方案（' + PRESETS.length + ' 套）';
+  presetGrid.innerHTML = '';
+  var rb = document.createElement('button');
+  rb.className = 'preset-rand';
+  rb.textContent = '随机方案';
+  rb.addEventListener('click', function () { randomDeploy(presetTeam); closePresetPanel(); });
+  presetGrid.appendChild(rb);
+  PRESETS.forEach(function (p, i) {
+    var b = document.createElement('button');
+    b.textContent = p.name;
+    b.title = Object.keys(p.comp).map(function (k) { return DEFS[k].name + '×' + p.comp[k]; }).join(' · ');
+    b.addEventListener('click', function () { deployPreset(presetTeam, i); closePresetPanel(); });
+    presetGrid.appendChild(b);
+  });
+  presetPanel.classList.remove('hidden');
+}
+presetPanel = $('presetPanel');
+presetTitle = $('presetTitle');
+presetGrid = $('presetGrid');
+$('presetClose').addEventListener('click', closePresetPanel);
+presetPanel.addEventListener('pointerdown', function (e) { if (e.target === presetPanel) closePresetPanel(); });
 $('btnClearB').addEventListener('click', function () {
   placed = placed.filter(function (p) { return p.team !== 0; });
   toast('蓝军阵型已清空');
