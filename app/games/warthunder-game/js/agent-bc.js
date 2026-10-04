@@ -64,6 +64,8 @@
   function pilotate(tank, game) {
     var origUpdate = tank.ai.update.bind(tank.ai);   // 保留原规则 AI 作兜底
     var lastThink = 0, act = null, lastEnemies = [], lastObstacles = [];
+    var stuck = CORE.makeStuck();   // 卡墙脱困跟踪器
+    var tgt = null;                // 集火分散：本机认领的目标
     done.add(tank);
     tank.__pilotedBy = 'bc';   // 跨脚本互斥：agent-rl 见此标记不重复接管
     stats.bots++;
@@ -93,6 +95,9 @@
           lastObstacles = obstacles;
           act = forward(obs);
           stats.thinking++;
+          // 目标认领（10Hz 换脑子：评分=距离+250m×队友锁定数，滞回 100m）
+          var newTgt = CORE.pickTarget(tank, lastEnemies, tgt);
+          if (newTgt !== tgt) { CORE.releaseTarget(tank, tgt); CORE.claimTarget(tank, newTgt); tgt = newTgt; }
           if (qs.get('bcDump') === '1' && obs[16] < 0.6 && (stats._dumps = (stats._dumps || 0) + 1) <= 40)
             console.log('[BCDUMP] ' + JSON.stringify({ d: +obs[16].toFixed(3), p: +act[4].toPrecision(3),
               obs: obs.map(function (v) { return +v.toFixed(3); }) }));
@@ -102,58 +107,67 @@
         }
         if (!act) return origUpdate(dt, ctx);        // 首帧没推理完：先用规则 AI
         if (!tank.alive) return;
-        // —— 远距进场：经典 P 控制器（朝最近敌开，规则 AI 同款增益），交战区交给 BC ——
-        var e0 = lastEnemies[0];
-        if (e0 && tankDist(tank, e0) > NAV_DIST * 450) {
+
+        // —— 目标选择：集火分散（评分=距离+250m×队友已锁定数，带滞回；obs 仍用最近 3 敌）——
+        var e0 = (tgt && tgt.alive) ? tgt : lastEnemies[0];
+        if (!e0) { tank.drive(act[0], act[1], dt); return; }   // 无敌可打：按 BC 心意兜底走
+        var dE = tankDist(tank, e0);
+
+        // —— 卡墙脱困（最高优先级：卡死了什么战术都白搭；规则 AI 同款参数）——
+        var thrIntent = dE > NAV_DIST * 450 ? 1 : act[0];
+        if (stuck.update(tank, thrIntent, dt)) {
+          stats.unstick = (stats.unstick || 0) + 1;
+          tank.drive(-1, stuck.dir * 0.9, dt);       // 倒车打满舵甩头
+          tank.aimTurretAt(CORE.gunAimPoint(tank, e0), dt);
+          return;                                     // 甩头期间不开火（收敛难满足，省弹）
+        }
+
+        // —— 远距进场：P 控制器朝选定目标开（规则 AI 同款增益）——
+        if (dE > NAV_DIST * 450) {
           var dx = e0.position.x - tank.position.x, dz = e0.position.z - tank.position.z;
           var hd = CORE.wrap2pi(Math.atan2(dx, dz) - tank.heading);
-          var turn = Math.max(-1, Math.min(1, hd * 2.2));
-          tank.drive(1, turn, dt);
+          tank.drive(1, Math.max(-1, Math.min(1, hd * 2.2)), dt);
           tank.aimTurretAt(CORE.gunAimPoint(tank, e0), dt);   // 精确炮手（提前量+下坠补偿）
           stats.nav++;
           return;
         }
-        // —— 交战区：BC 管驾驶，炮手=精确直瞄（提前量+下坠补偿，与 TankAI 同款；二代实测网络 aimYaw
-        //   头 MAE≈8° 不可用，网络瞄准头保留训练待后续启用） ——
-        var ge0 = lastEnemies[0];
-        var ap = ge0 ? CORE.gunAimPoint(tank, ge0) : null;
-        var dE = ge0 ? tankDist(tank, ge0) : 9999;
-        var converged = ap && CORE.barrelAligned(tank, ap, CORE.fireTol(dE));   // 距离自适应收敛门
-        // 稳炮：近距缠斗炮口差一点收敛 → 压一拍转向让炮塔跟上，打完这炮再继续绕
-        // （10-04 修"近战憋炮闷头冲"：固定严门让 BC 环带缠斗几乎永不满足、开火率掉 3~4 倍）
-        var turnCmd = act[1];
-        if (ge0 && !converged && dE < 120 && tank.canFire()) {
-          var aimOffQ = CORE.wrap2pi(Math.atan2(ap.x - tank.position.x, ap.z - tank.position.z)
-            - tank.heading - (tank.turretYaw || 0));
-          if (Math.abs(aimOffQ) < 0.35) { turnCmd *= 0.3; stats.steady = (stats.steady || 0) + 1; }
-        }
-        tank.drive(act[0], turnCmd, dt);
-        if (ge0) {
-          tank.aimTurretAt(ap, dt);
+
+        // —— 交战区 ——
+        var ap = CORE.gunAimPoint(tank, e0);
+        var converged = CORE.barrelAligned(tank, ap, CORE.fireTol(dE));   // 距离自适应收敛门
+        var ret = CORE.retreatCmd(tank, e0);
+        if (ret) {
+          // 残血撤退（规则 AI 同款 33% 阈值）：倒卡拉距、车头对敌、炮口继续输出（下方开火门照常）
+          stats.retreat = (stats.retreat || 0) + 1;
+          tank.drive(ret.thr, ret.turn, dt);
         } else {
-          var yaw = CORE.wrap2pi(act[2] * Math.PI);
-          var wy = tank.heading + yaw;
-          var pos = tank.position;
-          tank.aimTurretAt({ x: pos.x + Math.sin(wy) * 60, y: pos.y + 1.8, z: pos.z + Math.cos(wy) * 60 }, dt);
+          // 稳炮：近距缠斗炮口差一点收敛 → 压一拍转向让炮塔跟上，打完这炮再继续绕
+          var turnCmd = act[1];
+          if (!converged && dE < 120 && tank.canFire()) {
+            var aimOffQ = CORE.wrap2pi(Math.atan2(ap.x - tank.position.x, ap.z - tank.position.z)
+              - tank.heading - (tank.turretYaw || 0));
+            if (Math.abs(aimOffQ) < 0.35) { turnCmd *= 0.3; stats.steady = (stats.steady || 0) + 1; }
+          }
+          tank.drive(act[0], turnCmd, dt);
         }
-        // —— 开火：BC 置信度 ∨ 纪律兜底（240m 内 + 视线通 + 炮口对准提前点 + 装填好）——
-        // 视线双层：障碍物 LOS（房子/石头）+ 地形 LOS（山坡挡弹——敌在坡下时停火省弹）
+        tank.aimTurretAt(ap, dt);
+
+        // —— 开火三重门：地形 LOS（坡）+ 烟幕纪律（烟里不开火）+ 收敛门（炮口真对准）——
         var em0 = (ctx && ctx.entityManager) || game.em;
-        var terrainHold = false;
-        if (ap) terrainHold = CORE.terrainLos(tank.position.x, tank.position.y + 1.8, tank.position.z,
-                                              ap.x, ap.y, ap.z);
+        var terrainHold = CORE.terrainLos(tank.position.x, tank.position.y + 1.8, tank.position.z,
+                                          ap.x, ap.y, ap.z);
         if (terrainHold) stats.terrainHold = (stats.terrainHold || 0) + 1;
-        var wantFire = !terrainHold && converged && act[4] > (W.meta.fireTh || 0.5);
-        if (!wantFire && !terrainHold && converged && ASSIST && tank.canFire()) {
-          if (ge0) {
-            var dx0 = ge0.position.x - tank.position.x, dz0 = ge0.position.z - tank.position.z;
-            if (Math.hypot(dx0, dz0) < 240) {
-              var aimOff = CORE.wrap2pi(Math.atan2(ap.x - tank.position.x, ap.z - tank.position.z)
-                - tank.heading - (tank.turretYaw || 0));
-              var losN = CORE.blockedCount(lastObstacles, tank.position.x, tank.position.z,
-                                           ge0.position.x, ge0.position.z, 9);
-              if (Math.abs(aimOff) < 0.06 && losN === 0) { wantFire = true; stats.assist++; }
-            }
+        var smokeB = CORE.smokeBlind((ctx && ctx.smokes) || [], tank.position, e0.position);
+        if (smokeB) stats.smokeHold = (stats.smokeHold || 0) + 1;
+        var wantFire = !terrainHold && !smokeB && converged && act[4] > (W.meta.fireTh || 0.5);
+        if (!wantFire && !terrainHold && !smokeB && converged && ASSIST && tank.canFire()) {
+          var dx0 = e0.position.x - tank.position.x, dz0 = e0.position.z - tank.position.z;
+          if (Math.hypot(dx0, dz0) < 240) {
+            var aimOff = CORE.wrap2pi(Math.atan2(ap.x - tank.position.x, ap.z - tank.position.z)
+              - tank.heading - (tank.turretYaw || 0));
+            var losN = CORE.blockedCount(lastObstacles, tank.position.x, tank.position.z,
+                                         e0.position.x, e0.position.z, 9);
+            if (Math.abs(aimOff) < 0.06 && losN === 0) { wantFire = true; stats.assist++; }
           }
         }
         if (wantFire && tank.canFire()) {
@@ -242,6 +256,7 @@
         var t = ai.tank;
         var origUpdate = ai.update.bind(ai);
         var lastThink = 0, act = null, lastEnemies = [], lastObstacles = [];
+        var qStuck = CORE.makeStuck(), qTgt = null;   // 脱困跟踪 + 目标认领
         var q = { fires: 0, thinks: 0, fallbacks: 0 };
         ai.update = function bcQUpdate(dt, ctx) {
           try {
@@ -267,13 +282,24 @@
               var obs = CORE.buildObs(t, g, lastEnemies, obstacles);
               act = forward(obs);
               q.thinks++;
+              var newTgt = CORE.pickTarget(t, lastEnemies, qTgt);
+              if (newTgt !== qTgt) { CORE.releaseTarget(t, qTgt); CORE.claimTarget(t, newTgt); qTgt = newTgt; }
             }
             if (!act) return origUpdate(dt, ctx);
             if (!t.alive) return;
-            var e0 = lastEnemies[0];
+            var e0 = (qTgt && qTgt.alive) ? qTgt : lastEnemies[0];
             ai.phase = 'BC 交战中';
             if (e0) {
               var d = Math.hypot(e0.position.x - t.position.x, e0.position.z - t.position.z);
+              // 卡墙脱困（最高优先级）
+              var thrIntent = d > NAV_DIST * 450 ? 1 : act[0];
+              if (qStuck.update(t, thrIntent, dt)) {
+                q.unstick = (q.unstick || 0) + 1;
+                ai.phase = 'BC 脱困';
+                t.drive(-1, qStuck.dir * 0.9, dt);
+                t.aimTurretAt(CORE.gunAimPoint(t, e0), dt);
+                return;
+              }
               if (d > NAV_DIST * 450) {
                 // 远距进场：P 控制器（AI 代打 buff 过的 maxSpeed 生效）
                 var dx = e0.position.x - t.position.x, dz = e0.position.z - t.position.z;
@@ -284,23 +310,31 @@
                 return;
               }
               var ap = CORE.gunAimPoint(t, e0);
-              var dE = Math.hypot(e0.position.x - t.position.x, e0.position.z - t.position.z);
-              var converged = CORE.barrelAligned(t, ap, CORE.fireTol(dE));   // 距离自适应收敛门
-              // 稳炮：近距差一点收敛 → 压一拍转向
-              var turnCmd = act[1];
-              if (!converged && dE < 120 && t.canFire()) {
-                var aimOffQ = CORE.wrap2pi(Math.atan2(ap.x - t.position.x, ap.z - t.position.z)
-                  - t.heading - (t.turretYaw || 0));
-                if (Math.abs(aimOffQ) < 0.35) turnCmd *= 0.3;
+              var converged = CORE.barrelAligned(t, ap, CORE.fireTol(d));   // 距离自适应收敛门
+              var ret = CORE.retreatCmd(t, e0);
+              if (ret) {
+                ai.phase = 'BC 撤退';         // 残血倒车拉开，车头对敌继续输出
+                q.retreat = (q.retreat || 0) + 1;
+                t.drive(ret.thr, ret.turn, dt);
+              } else {
+                // 稳炮：近距差一点收敛 → 压一拍转向
+                var turnCmd = act[1];
+                if (!converged && d < 120 && t.canFire()) {
+                  var aimOffQ = CORE.wrap2pi(Math.atan2(ap.x - t.position.x, ap.z - t.position.z)
+                    - t.heading - (t.turretYaw || 0));
+                  if (Math.abs(aimOffQ) < 0.35) turnCmd *= 0.3;
+                }
+                t.drive(act[0], turnCmd, dt);
               }
-              t.drive(act[0], turnCmd, dt);
               t.aimTurretAt(ap, dt);
-              // 开火：网络置信度 ∨ 纪律兜底（含地形 LOS——山坡挡弹停火）
+              // 开火三重门：地形 LOS + 烟幕纪律 + 收敛
               var terrainHold = CORE.terrainLos(t.position.x, t.position.y + 1.8, t.position.z,
                                                 ap.x, ap.y, ap.z);
               if (terrainHold) q.terrainHold = (q.terrainHold || 0) + 1;
-              var wantFire = !terrainHold && converged && act[4] > (W.meta.fireTh || 0.5);
-              if (!wantFire && !terrainHold && converged && ASSIST && t.canFire()) {
+              var smokeB = CORE.smokeBlind((ctx && ctx.smokes) || [], t.position, e0.position);
+              if (smokeB) q.smokeHold = (q.smokeHold || 0) + 1;
+              var wantFire = !terrainHold && !smokeB && converged && act[4] > (W.meta.fireTh || 0.5);
+              if (!wantFire && !terrainHold && !smokeB && converged && ASSIST && t.canFire()) {
                 var dx0 = e0.position.x - t.position.x, dz0 = e0.position.z - t.position.z;
                 if (Math.hypot(dx0, dz0) < 240) {
                   var aimOff = CORE.wrap2pi(Math.atan2(ap.x - t.position.x, ap.z - t.position.z)

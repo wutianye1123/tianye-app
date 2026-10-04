@@ -148,6 +148,7 @@
     var rec = {
       tank: tank, tid: winId + '-' + (++tidSeq), dead: false, pend: 0,
       applied: null, nextObs: null, lastEnemies: [], lastObstacles: [],
+      stuck: CORE.makeStuck(), tgt: null,   // 脱困跟踪 + 集火分散认领
       steps: { obs: [], act: [], logp: [], val: [], rew: [], done: [] }
     };
     pilots.set(tank, rec);
@@ -249,9 +250,22 @@
         if (!rec.applied) return origUpdate(dt, ctx);   // 首帧未推理：先用规则 AI
         if (!tank.alive) return;
 
-        var e0 = rec.lastEnemies[0];
+        // —— 目标选择：集火分散（obs 仍最近 3 敌，采样语义不变）——
+        var e0 = (rec.tgt && rec.tgt.alive) ? rec.tgt : rec.lastEnemies[0];
+        if (!e0) { tank.drive(rec.applied[0], rec.applied[1], dt); return; }
+        var dE = tankDist(tank, e0);
+
+        // —— 卡墙脱困（最高优先级；注意：脚本驾驶段不采样）——
+        var thrIntent = dE > NAV_DIST * 450 ? 1 : rec.applied[0];
+        if (rec.stuck.update(tank, thrIntent, dt)) {
+          stats.unstick = (stats.unstick || 0) + 1;
+          tank.drive(-1, rec.stuck.dir * 0.9, dt);
+          tank.aimTurretAt(CORE.gunAimPoint(tank, e0), dt);
+          return;
+        }
+
         // —— 远距进场：P 控制器（第五代外壳，脚本驾驶不采样） ——
-        if (e0 && tankDist(tank, e0) > NAV_DIST * 450) {
+        if (dE > NAV_DIST * 450) {
           var dx = e0.position.x - tank.position.x, dz = e0.position.z - tank.position.z;
           var hd = CORE.wrap2pi(Math.atan2(dx, dz) - tank.heading);
           tank.drive(1, Math.max(-1, Math.min(1, hd * 2.2)), dt);
@@ -259,40 +273,39 @@
           stats.nav++;
           return;
         }
-        // —— 交战区：PPO 驾驶 + 精确炮手（提前量+下坠补偿，与 TankAI 同款） ——
-        // 稳炮：近距差一点收敛 → 压一拍转向让炮塔跟上（与第五代同款解法）
-        var ap0 = e0 ? CORE.gunAimPoint(tank, e0) : null;
-        var dE = e0 ? tankDist(tank, e0) : 9999;
-        var converged0 = ap0 && CORE.barrelAligned(tank, ap0, CORE.fireTol(dE));
-        var turnCmd = rec.applied[1];
-        if (e0 && !converged0 && dE < 120 && tank.canFire()) {
-          var aimOffQ = CORE.wrap2pi(Math.atan2(ap0.x - tank.position.x, ap0.z - tank.position.z)
-            - tank.heading - (tank.turretYaw || 0));
-          if (Math.abs(aimOffQ) < 0.35) { turnCmd *= 0.3; stats.steady = (stats.steady || 0) + 1; }
-        }
-        tank.drive(rec.applied[0], turnCmd, dt);
-        if (e0) {
-          tank.aimTurretAt(ap0, dt);
+        // —— 交战区：PPO 驾驶 + 精确炮手 ——
+        var ap0 = CORE.gunAimPoint(tank, e0);
+        var converged0 = CORE.barrelAligned(tank, ap0, CORE.fireTol(dE));
+        var ret = CORE.retreatCmd(tank, e0);
+        if (ret) {
+          stats.retreat = (stats.retreat || 0) + 1;   // 残血撤退：倒卡拉距、车头对敌、照常开火
+          tank.drive(ret.thr, ret.turn, dt);
         } else {
-          var wy = tank.heading;   // 无敌可打：炮口朝车头方向
-          var pos = tank.position;
-          tank.aimTurretAt({ x: pos.x + Math.sin(wy) * 60, y: pos.y + 1.8, z: pos.z + Math.cos(wy) * 60 }, dt);
+          // 稳炮：近距差一点收敛 → 压一拍转向让炮塔跟上
+          var turnCmd = rec.applied[1];
+          if (!converged0 && dE < 120 && tank.canFire()) {
+            var aimOffQ = CORE.wrap2pi(Math.atan2(ap0.x - tank.position.x, ap0.z - tank.position.z)
+              - tank.heading - (tank.turretYaw || 0));
+            if (Math.abs(aimOffQ) < 0.35) { turnCmd *= 0.3; stats.steady = (stats.steady || 0) + 1; }
+          }
+          tank.drive(rec.applied[0], turnCmd, dt);
         }
-        // —— 开火纪律兜底（第五代外壳）：240m 内 + LOS 通（障碍物+地形）+ 炮口对准提前点 + 装填好 ——
-        if (e0 && tank.canFire()) {
+        tank.aimTurretAt(ap0, dt);
+        // —— 开火三重门：地形 LOS + 烟幕纪律 + 收敛（240m 内 + 障碍 LOS + 装填好）——
+        if (tank.canFire()) {
           var em0 = (ctx && ctx.entityManager) || game.em;
           var dx0 = e0.position.x - tank.position.x, dz0 = e0.position.z - tank.position.z;
           if (Math.hypot(dx0, dz0) < 240) {
-            var ap = CORE.gunAimPoint(tank, e0);
             var terrainHold = CORE.terrainLos(tank.position.x, tank.position.y + 1.8, tank.position.z,
-                                              ap.x, ap.y, ap.z);
+                                              ap0.x, ap0.y, ap0.z);
             if (terrainHold) stats.terrainHold = (stats.terrainHold || 0) + 1;
-            var converged = CORE.barrelAligned(tank, ap, CORE.fireTol(dE));
-            var aimOff = CORE.wrap2pi(Math.atan2(ap.x - tank.position.x, ap.z - tank.position.z)
+            var smokeB = CORE.smokeBlind((ctx && ctx.smokes) || [], tank.position, e0.position);
+            if (smokeB) stats.smokeHold = (stats.smokeHold || 0) + 1;
+            var aimOff = CORE.wrap2pi(Math.atan2(ap0.x - tank.position.x, ap0.z - tank.position.z)
               - tank.heading - (tank.turretYaw || 0));
             var losN = CORE.blockedCount(rec.lastObstacles, tank.position.x, tank.position.z,
                                          e0.position.x, e0.position.z, 9);
-            if (!terrainHold && converged && Math.abs(aimOff) < 0.06 && losN === 0) {
+            if (!terrainHold && !smokeB && converged0 && Math.abs(aimOff) < 0.06 && losN === 0) {
               if (tank.tryFire(em0)) { stats.fires++; rec.pend -= 0.05; }
             }
           }
@@ -311,6 +324,9 @@
     var obstacles = (ctx && ctx.obstacles) || (em && em.obstacles) || [];
     rec.lastEnemies = CORE.enemiesOf(tank, game);
     rec.lastObstacles = obstacles;
+    // 目标认领（集火分散）
+    var newTgt = CORE.pickTarget(tank, rec.lastEnemies, rec.tgt);
+    if (newTgt !== rec.tgt) { CORE.releaseTarget(tank, rec.tgt); CORE.claimTarget(tank, newTgt); rec.tgt = newTgt; }
     var e0 = rec.lastEnemies[0];
     var d = e0 ? tankDist(tank, e0) : 9999;
     var inEngage = e0 && d <= NAV_DIST * 450;   // 交战区：RL 驾驶（导航段不采样——P 控制器脚本驾驶）

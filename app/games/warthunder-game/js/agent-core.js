@@ -249,32 +249,43 @@
   // ④ 集火分散（超过规则 AI 的一步）：同队 bot 各选各的目标——
   // 评分 = 距离 + 250m×已被队友锁定数（别人打的不抢，除非近得多）；带 100m 滞回防抖动。
   // 注册表 window 级共享（bc/rl/Q 代打同页互通）；obs 仍用最近 3 敌（与训练数据语义一致）。
-  var targetReg = new Map();   // enemy 对象 -> 锁定它的 pilot 数
+  var targetReg = new Map();   // enemy 对象 -> 锁定它的 pilot tank Set（死了自动被清）
+  function _pruneReg() {
+    targetReg.forEach(function (set, e) {
+      if (!e.alive) { targetReg.delete(e); return; }
+      set.forEach(function (p) { if (!p.alive) set.delete(p); });
+      if (!set.size) targetReg.delete(e);
+    });
+  }
+  function claimTarget(pilot, e) {
+    if (!e) return;
+    if (!targetReg.has(e)) targetReg.set(e, new Set());
+    targetReg.get(e).add(pilot);
+  }
+  function releaseTarget(pilot, e) {
+    var set = e && targetReg.get(e);
+    if (set) { set.delete(pilot); if (!set.size) targetReg.delete(e); }
+  }
   function pickTarget(tank, enemies, cur) {
-    if (!enemies.length) { return null; }
-    // 清死目标
-    targetReg.forEach(function (n, e) { if (!e.alive) targetReg.delete(e); });
+    if (!enemies.length) return null;
+    _pruneReg();
     var best = null, bestScore = Infinity;
     for (var i = 0; i < Math.min(3, enemies.length); i++) {
       var e = enemies[i];
       var d = Math.hypot(e.position.x - tank.position.x, e.position.z - tank.position.z);
-      var score = d + 250 * (targetReg.get(e) || 0);
+      var n = (targetReg.get(e) || new Set()).size;
+      if (cur === e) n = Math.max(0, n - 1);   // 评估时不算自己
+      var score = d + 250 * n;
       if (score < bestScore) { bestScore = score; best = e; }
     }
-    // 滞回：当前目标还活着且没差太多就换脑子不换目标
+    // 滞回：当前目标还活着且没差太多就继续打（换目标有炮塔转向成本）
     if (cur && cur.alive && enemies.indexOf(cur) < 3) {
+      var setCur = targetReg.get(cur);
+      var nCur = Math.max(0, (setCur ? setCur.size : 0) - 1);
       var dCur = Math.hypot(cur.position.x - tank.position.x, cur.position.z - tank.position.z);
-      if (dCur + 250 * (Math.max(0, (targetReg.get(cur) || 0) - 1)) < bestScore + 100) best = cur;
+      if (dCur + 250 * nCur < bestScore + 100) best = cur;
     }
     return best;
-  }
-  function claimTarget(prev, next) {
-    if (prev === next) return;
-    if (prev && targetReg.has(prev)) {
-      var n = targetReg.get(prev) - 1;
-      if (n <= 0) targetReg.delete(prev); else targetReg.set(prev, n);
-    }
-    if (next) targetReg.set(next, (targetReg.get(next) || 0) + 1);
   }
 
   window.__WTA = { OBS_DIM: OBS_DIM, wrap2pi: wrap2pi, clamp01: clamp01,
@@ -282,5 +293,5 @@
                    makeMLP: makeMLP, gunAimPoint: gunAimPoint, terrainLos: terrainLos,
                    barrelAligned: barrelAligned, fireTol: fireTol,
                    makeStuck: makeStuck, retreatCmd: retreatCmd, smokeBlind: smokeBlind,
-                   pickTarget: pickTarget, claimTarget: claimTarget };
+                   pickTarget: pickTarget, claimTarget: claimTarget, releaseTarget: releaseTarget };
 })();
