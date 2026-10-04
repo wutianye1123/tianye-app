@@ -271,11 +271,12 @@
                   <input type="text" id="mpHostName" placeholder="输入昵称" maxlength="16" value="玩家1">
                 </div>
                 <div class="mp-field">
-                  <label>选择队伍</label>
+                  <div id="mpHostTeamWrap"><label>选择队伍</label>
                   <div style="display:flex;gap:10px;">
-                    <button id="mpHostTeamRed" class="mp-action-btn" style="flex:1;background:rgba(239,68,68,0.25);border:2px solid #ef4444;color:#ef4444;padding:8px 0;border-radius:8px;font-size:14px;cursor:pointer;" onclick="selectMpTeam('host','red')">红队</button>
-                    <button id="mpHostTeamBlue" class="mp-action-btn" style="flex:1;background:rgba(59,130,246,0.1);border:2px solid #3b82f6;color:#3b82f6;padding:8px 0;border-radius:8px;font-size:14px;cursor:pointer;" onclick="selectMpTeam('host','blue')">蓝队</button>
-                  </div>
+                    <button id="mpHostTeamRed" class="mp-action-btn" style="flex:1;background:rgba(239,68,68,0.1);border:2px solid #ef4444;color:#ef4444;padding:8px 0;border-radius:8px;font-size:14px;cursor:pointer;" onclick="selectMpTeam('host','red')">红队</button>
+                    <button id="mpHostTeamBlue" class="mp-action-btn" style="flex:1;background:rgba(59,130,246,0.25);border:2px solid #3b82f6;color:#3b82f6;padding:8px 0;border-radius:8px;font-size:14px;cursor:pointer;" onclick="selectMpTeam('host','blue')">蓝队</button>
+                  </div></div>
+                  <div id="mpHostTeamAuto" style="display:none;margin-bottom:12px;color:#8a9;font-size:13px;">🔀 队伍由系统自动分配（无需选择）</div>
                 </div>
                 <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;">
                   <input type="checkbox" id="mpPvPCheck" checked style="width:16px;height:16px;accent-color:#ef4444;cursor:pointer;flex-shrink:0;">
@@ -300,11 +301,12 @@
                   <input type="text" id="mpJoinName" placeholder="输入昵称" maxlength="16" value="玩家2">
                 </div>
                 <div class="mp-field">
-                  <label>选择队伍</label>
+                  <div id="mpJoinTeamWrap"><label>选择队伍</label>
                   <div style="display:flex;gap:10px;">
                     <button id="mpJoinTeamRed" class="mp-action-btn" style="flex:1;background:rgba(239,68,68,0.25);border:2px solid #ef4444;color:#ef4444;padding:8px 0;border-radius:8px;font-size:14px;cursor:pointer;" onclick="selectMpTeam('join','red')">红队</button>
                     <button id="mpJoinTeamBlue" class="mp-action-btn" style="flex:1;background:rgba(59,130,246,0.1);border:2px solid #3b82f6;color:#3b82f6;padding:8px 0;border-radius:8px;font-size:14px;cursor:pointer;" onclick="selectMpTeam('join','blue')">蓝队</button>
-                  </div>
+                  </div></div>
+                  <div id="mpJoinTeamAuto" style="display:none;margin-bottom:12px;color:#8a9;font-size:13px;">🔀 队伍由系统自动分配（无需选择）</div>
                 </div>
                 <div class="mp-field">
                   <label>互联网房间（自动刷新）</label>
@@ -344,7 +346,7 @@
   <script>
     const games = [
       { id:'狩猎游戏', name:'狩猎游戏', desc:'3D第一人称射击狩猎游戏，在广袤的自然场景中追踪猎物，体验真实的射击手感和沉浸式狩猎体验。', icon:'🎯', file:'index.html', tags:['射击','3D','第一人称'], genre:'射击游戏' },
-      { id:'warthunder-game', name:'陆空对战', desc:'类战争雷霆 3D 载具对战！坦克/飞机双模式，鼠标瞄准炮塔（带高低机）、飞行教官自动改平；弹药殉爆/起火、多条命重生，与 AI 队友并肩作战。', icon:'🛡️', file:'index.html', tags:['射击','3D','对战','载具'], genre:'射击游戏' },
+      { id:'warthunder-game', name:'陆空对战', desc:'类战争雷霆 3D 载具对战！坦克/飞机双模式，鼠标瞄准炮塔（带高低机）、飞行教官自动改平；弹药殉爆/起火、多条命重生，与 AI 队友并肩作战；支持联机 PvP（坦克飞机同场混战）。', icon:'🛡️', file:'index.html', tags:['射击','3D','对战','载具','联机'], genre:'射击游戏' },
       { id:'3D我的世界', name:'3D 我的世界', desc:'3D方块世界建造游戏，自由探索无限世界，采集资源，建造属于自己的建筑奇迹。', icon:'🧱', file:'3D我的世界.html', tags:['沙盒','3D','建造'], genre:'沙盒游戏' },
       { id:'2D我的世界', name:'2D 我的世界', desc:'2D像素方块世界，经典横版沙盒体验，挖掘、建造、生存。', icon:'⬛', file:'2D我的世界.html', tags:['沙盒','2D','像素'], genre:'沙盒游戏' },
       { id:'3D开车', name:'3D 开车', desc:'3D驾驶模拟，真实物理引擎，多款车辆可选，自由驰骋在开放道路上。', icon:'🚗', file:'3D开车.html', tags:['驾驶','3D','模拟'], genre:'模拟游戏' },
@@ -441,6 +443,16 @@
 
     function selectGame(game) {
       selectedGame = game;
+      // 系统分队游戏（如陆空对战）：隐藏红/蓝队手选，显示"系统分配"提示
+      {
+        const autoTeam = game && game.id === 'warthunder-game';
+        const hw = document.getElementById('mpHostTeamWrap'), ha = document.getElementById('mpHostTeamAuto');
+        const jw = document.getElementById('mpJoinTeamWrap'), ja = document.getElementById('mpJoinTeamAuto');
+        if (hw) hw.style.display = autoTeam ? 'none' : '';
+        if (ha) ha.style.display = autoTeam ? '' : 'none';
+        if (jw) jw.style.display = autoTeam ? 'none' : '';
+        if (ja) ja.style.display = autoTeam ? '' : 'none';
+      }
       // 更新侧边栏高亮
       document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
       event.currentTarget.classList.add('active');
@@ -502,7 +514,7 @@
     let mpHostInfo = null; // { ip, port }
     let mpPlayers = [];
     let mpMyId = null;
-    let mpTeam = { host: 'red', join: 'red' };
+    let mpTeam = { host: 'blue', join: 'red' };   // 默认主机蓝/成员红——两边默认对立，忘了点也不会变同队（游戏内还有开局自动平衡兜底）
     let mpNetMode = 'internet'; // 'internet' | 'lan'
 
     // 模式切换

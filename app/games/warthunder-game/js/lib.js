@@ -36,6 +36,16 @@ export function makeSkyTexture(topColor, bottomColor) {
   g.addColorStop(0.88, warm);   // 地平线暖雾（大气散射的米氏效应）
   g.addColorStop(1, warm);
   x.fillStyle = g; x.fillRect(0, 0, 64, 512);
+  // 渐变抖动：Canvas 渐变本身是 8bit（512 行的平滑过渡会被量化成一条条水平色带，
+  // 贴到天穹上随视角流动）。每像素 ±1.5 级随机噪声把台阶打散——肉眼是"空气感颗粒"不是噪点。
+  {
+    const img = x.getImageData(0, 0, 64, 512), d = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const n = (Math.random() - 0.5) * 3;
+      d[i] += n; d[i + 1] += n; d[i + 2] += n;
+    }
+    x.putImageData(img, 0, 0);
+  }
   // 极轻的高空水平层云纹理（拉丝，打破纯渐变的 CG 感）
   x.globalAlpha = 0.05;
   for (let i = 0; i < 24; i++) {
@@ -241,7 +251,10 @@ export function makeGrassTexture() {
   _grassTex = new THREE.CanvasTexture(c);
   return _grassTex;
 }
-// 地形高度场：分层正弦，起伏丘陵。terrainScale 按地图调整起伏强度（全局，所有调用方一致）。
+// 地形高度场：分层正弦 + 宏观地形域。
+// 宏观域（~1km 尺度的低频系数）：同一张图里调制出 平原(amp≈0.4) / 丘陵(amp≈1.0) / 山区(amp≈1.6+大丘陵)——
+// 不再是全图均匀起伏，开车穿图能遇到不同地形。
+// terrainScale 按地图调整起伏强度（全局，所有调用方一致）。
 // terrainMode 地形模式：normal=普通起伏；canyon=峡谷（z 轴向谷底、两侧山壁）；island=海岛（中心高地、外围沉入海面下）。
 let terrainScale = 1;
 let terrainMode = 'normal';
@@ -251,6 +264,11 @@ export function terrainHeight(x, z) {
   const base = (Math.sin(x * 0.013) * Math.cos(z * 0.014) * 11
     + Math.sin(x * 0.03 + 1.3) * Math.cos(z * 0.026 + 0.5) * 4
     + Math.sin((x + z) * 0.006) * 7);
+  // 宏观地形域：低频系数决定这块区域是平原还是山区
+  const macro = Math.sin(x * 0.0038 + 2.1) * Math.cos(z * 0.0033 + 0.7);
+  const amp = 0.4 + (macro + 1) * 0.6;   // 0.4~1.6
+  // 山区专属大丘陵（macro>0.15 才出现）：图内"纵向"高度差的主要来源
+  const bigHills = Math.sin(x * 0.006 + 0.4) * Math.cos(z * 0.005 + 1.9) * 16 * Math.max(0, macro - 0.15);
   if (terrainMode === 'canyon') {
     const wall = Math.min(Math.max(0, Math.abs(x) - 55) * 1.1, 68);   // 两侧山壁：|x|>55 起坡，封顶 68m
     return base * 0.45 * terrainScale + wall;
@@ -260,5 +278,5 @@ export function terrainHeight(x, z) {
     const shore = Math.max(0, r - 330) * 0.3;   // 海岛：r>330 缓降沉入海面（战场边缘浅滩）
     return base * 0.6 * terrainScale + 16 - shore;
   }
-  return base * terrainScale;
+  return (base * amp + bigHills) * terrainScale;
 }

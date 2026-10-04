@@ -1,5 +1,18 @@
 import * as THREE from 'three';
 import { clamp, lerp, lerpAngle, randRange, randInt, makeSkyTexture, makeCloudTexture, camoTexture, makeTrackTexture, makeNoiseTexture, makeShadowTexture, makeGrassTexture, makeSmokeTexture, makeCraterTexture, makeTrackMarkTexture, terrainHeight, setTerrainScale, setTerrainMode } from './lib.js';
+import { MPNet } from './mp.js';   // 联机对战（PvP）：主机权威伤害 + 幽灵同步（详见 mp.js 头注释）
+
+// ===== 页面级兜底报错（必须在一切代码之前挂上）=====
+// 任何未捕获异常都显示为左下角红色面板——不再"点了没反应"地无声失败，报错看得见才修得了。
+window.addEventListener('error', (e) => {
+  const show = (txt) => {
+    let el = document.getElementById('fatal-err');
+    if (!el) { el = document.createElement('div'); el.id = 'fatal-err'; el.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:99999;max-width:85%;background:rgba(130,20,20,.94);color:#fff;padding:10px 14px;border-radius:10px;font:13px/1.5 monospace;white-space:pre-wrap;pointer-events:auto'; document.body && document.body.appendChild(el); }
+    el.textContent = txt;
+  };
+  show('⚠ 页面脚本出错：' + (e.message || '未知错误') + '\n' + (e.filename || '') + ':' + (e.lineno || '?') + '\n（把这段红字告诉开发者即可修复）');
+});
+const GAME_VERSION = '2026.09.26.5';
 
 // 坦克贴地姿态用的临时对象（避免每帧分配）
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
@@ -20,6 +33,11 @@ const _tankQ = new THREE.Quaternion(), _tankWQ = new THREE.Quaternion();
 const _aimMuz = new THREE.Vector3();     // 落点瞄准：炮口世界坐标
 const _aimDir = new THREE.Vector3();     // 落点瞄准：视线/炮管线方向
 const _aimGun = new THREE.Vector3();     // 落点瞄准：炮塔瞄准点（aimTurretAt 只读，可复用）
+const _ttMuz = new THREE.Vector3();      // 尾炮塔：出膛点世界坐标
+const _ttAim = new THREE.Vector3();      // 尾炮塔：提前量解瞄准点
+const _ttDes = new THREE.Vector3();      // 尾炮塔：期望指向
+const _ttLook = new THREE.Vector3();     // 尾炮塔：炮管 lookAt 临时点
+const _ttTmp = new THREE.Vector3();      // 尾炮塔：通用临时量
 
 
 // ===== js/config.js =====
@@ -28,10 +46,10 @@ const CONFIG = {
   tank: {
     maxHealth: 140,
     enemyHealth: 45,
-    speed: 15,            // 前进 m/s（玩家）
-    enemySpeed: 9,        // 敌方较慢
-    reverseSpeed: 8,
-    turnSpeed: 1.3,
+    speed: 12,            // 前进 m/s（玩家）——放缓：更像钢铁巨兽的节奏
+    enemySpeed: 7.5,      // 敌方较慢（同步放缓）
+    reverseSpeed: 6.5,
+    turnSpeed: 1.15,
     turretSpeed: 0.8,
     reloadTime: 3.0,      // 玩家主炮装填
     enemyReloadTime: 5.0, // 敌方装填更长
@@ -45,7 +63,7 @@ const CONFIG = {
     shellLife: 2.5,
     radius: 3.0,
     captureRadius: 22,    // 占领模式据点半径（_setupObjective 与 inZ 判定共用，改一处即可，原两处硬编码 22）
-    worldSize: 450,
+    worldSize: 900,
   },
   plane: {
     maxHealth: 60,
@@ -66,7 +84,7 @@ const CONFIG = {
     bulletLife: 2.0,
     radius: 10,
     gravity: 12,
-    worldSize: 800,
+    worldSize: 1600,
     ceiling: 350,
     spawnAltitude: 70,
     missile: { count: 6, damage: 55, speed: 120, cooldown: 0.8, homing: 3.0, life: 5, radius: 0.5, regen: 7 },
@@ -146,6 +164,7 @@ const TANK_TYPES = [
   // Rank 1
   { id:'medium',  name:'T-34-85',     icon:'🇷🇺', scale:1.0,  hp:1.0,  speed:1.0,  turn:1.0,  turret:1.0,  reload:1.0, dmg:1.0,  armor:[90,60,45], tArmor:[90,75,52], slope:[60,40,50], pen:135, rank:1, rp:0,    prereq:null,      price:0 },
   { id:'m4',      name:'M4A3 谢尔曼',  icon:'🇺🇸', scale:1.0,  hp:1.15, speed:0.95, turn:1.0,  turret:1.0,  reload:1.1, dmg:0.95, armor:[100,60,45], tArmor:[90,60,50], slope:[45,10,30], pen:110, rank:1, rp:200,  prereq:null,      price:800 },
+  { id:'m109',    name:'M109 圣骑士',  icon:'🇺🇸', scale:1.0,  hp:0.95, speed:0.8,  turn:0.9,  turret:0.9,  reload:2.4, dmg:0,    armor:[35,22,16], tArmor:[22,16,12], slope:[25,0,10], pen:0,   rank:3, rp:1000, prereq:'m4',    price:3200, arty:true }, // 美系曲射自行火炮：45° 抛物线自动瞄准，命中/爆炸范围内=减半血；薄皮——被贴脸就完蛋
   { id:'t26',     name:'T-26',        icon:'🇷🇺', scale:0.75, hp:0.55, speed:1.15, turn:1.5,  turret:1.5,  reload:0.6, dmg:0.5,  armor:[15,15,12], tArmor:[15,12,12], slope:[15,0,0], pen:35,  rank:1, rp:100,  prereq:null,      price:500 },
   { id:'pz38t',   name:'38(t)',       icon:'🇩🇪', scale:0.75, hp:0.55, speed:1.3,  turn:1.45, turret:1.4,  reload:0.65,dmg:0.5,  armor:[25,15,15], tArmor:[25,15,15], slope:[15,0,0], pen:45,  rank:1, rp:150,  prereq:null,      price:700 },
   { id:'matilda', name:'玛蒂尔达 II', icon:'🇬🇧', scale:1.0,  hp:1.1,  speed:0.55, turn:0.75, turret:0.9,  reload:1.0, dmg:0.75, armor:[78,65,55], tArmor:[75,70,60], slope:[15,0,0], pen:70,  rank:1, rp:150,  prereq:null,      price:900 },
@@ -156,6 +175,7 @@ const TANK_TYPES = [
   { id:'light',   name:'M24 霞飞',     icon:'🇺🇸', scale:0.85, hp:0.75, speed:1.5,  turn:1.5,  turret:1.7,  reload:0.7, dmg:0.8,  armor:[38,25,19], tArmor:[38,25,25], slope:[55,0,0], pen:60,  rank:2, rp:300,  prereq:'medium',  price:1500 },
   { id:'scout',   name:'234/2 美洲狮', icon:'🇩🇪', scale:0.8,  hp:0.5,  speed:1.7,  turn:1.8,  turret:1.8,  reload:0.6, dmg:0.5,  armor:[30,20,15], tArmor:[30,20,15], slope:[30,0,0], pen:65,  rank:2, rp:350,  prereq:'medium',  price:1200 },
   { id:'aa',      name:'ZSU-23-4 石勒喀河', icon:'🇷🇺', scale:0.85, hp:0.7, speed:1.2, turn:1.5, turret:2.0, reload:0.1, dmg:0.4, armor:[15,15,15], tArmor:[15,15,15], slope:[30,0,0], pen:520, rank:2, rp:400, prereq:'medium', price:1500 }, // 防空坦克：高仰角速射打飞机；穿深拉满(什么坦克都能穿,靠低伤害+速射平衡——AI 不开此车
+  { id:'vads',   name:'M163 火神',     icon:'🇺🇸', scale:0.9,  hp:1.9, speed:1.5, turn:1.7, turret:2.3, reload:0.08, dmg:0.38, armor:[45,32,22], tArmor:[30,25,18], slope:[40,10,15], pen:560, rank:6, rp:5000, prereq:'m4', price:16000 }, // 美系顶级防空：转管速射(射速/装甲/速度全面压制 ZSU-23-4)——AI 不开此车
   // ===== 二战中后期（1942-1945）=====
   // Rank 3
   { id:'pz4',     name:'四号 F2',      icon:'🇩🇪', scale:1.0,  hp:1.05, speed:1.0,  turn:1.0,  turret:1.0,  reload:1.05,dmg:1.3,  armor:[50,30,30], tArmor:[50,30,30], slope:[12,0,15], pen:130, rank:3, rp:700,  prereq:'panzer2', price:3000 },
@@ -226,8 +246,8 @@ function randomTankType(playerRank = 6) {
   let lo = 1, hi = playerRank;
   if (r >= 0.55 && r < 0.85) { lo = hi = Math.min(6, playerRank + 1); }   // 高一档
   else if (r >= 0.85) { lo = Math.min(6, playerRank + 2); hi = lo; }     // 班长车：硬骨头，正面打不动才见跳弹/未击穿
-  let pool = TANK_TYPES.filter((t) => t.rank >= lo && t.rank <= hi && t.id !== 'aa');
-  if (!pool.length) pool = TANK_TYPES.filter((t) => t.rank <= cap && t.id !== 'aa');
+  let pool = TANK_TYPES.filter((t) => t.rank >= lo && t.rank <= hi && t.id !== 'aa' && t.id !== 'vads' && t.id !== 'm109');
+  if (!pool.length) pool = TANK_TYPES.filter((t) => t.rank <= cap && t.id !== 'aa' && t.id !== 'vads' && t.id !== 'm109');
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
@@ -238,9 +258,44 @@ const AI_NAMES = [
   '暗影', '公牛', '风暴', '猎户',
 ];
 
+// —— 战雷式名字距离标签：敌我载具头顶 [名字 · 距离m]，敌红友蓝 ——
+// Canvas 重绘按 10m 桶节流（30 个单位 × 8Hz 也不烫）；Sprite 缩放随距离补偿（远处也读得清）。
+function makeNameLabel(entity) {
+  const cv = document.createElement('canvas');
+  cv.width = 256; cv.height = 56;
+  const ctx = cv.getContext('2d');
+  const tex = new THREE.CanvasTexture(cv);
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }));
+  spr.visible = false;
+  return { entity, spr, ctx, tex, cv, lastBucket: -1, lastName: '' };
+}
+function refreshNameLabel(L, camPos) {
+  const e = L.entity;
+  if (!e.alive) { L.spr.visible = false; return; }
+  const d = e.position.distanceTo(camPos);
+  if (d > 750) { L.spr.visible = false; return; }
+  L.spr.visible = true;
+  L.spr.position.set(e.position.x, e.position.y + (e.forwardVector ? 5.5 : 7.2), e.position.z);
+  const k = clamp(d * 0.055, 5, 30);
+  L.spr.scale.set(k * 2.6, k * 0.57, 1);
+  const bucket = Math.round(d / 10);
+  const name = e.displayName || '';
+  if (bucket === L.lastBucket && name === L.lastName) return;   // 没变不重绘
+  L.lastBucket = bucket; L.lastName = name;
+  const ctx = L.ctx;
+  ctx.clearRect(0, 0, 256, 56);
+  ctx.font = 'bold 30px sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const txt = `${name} · ${bucket * 10}m`;
+  ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(0,0,0,.85)';
+  ctx.strokeText(txt, 128, 30);
+  ctx.fillStyle = e.team === 'red' ? '#ff7a66' : '#8ecbff';
+  ctx.fillText(txt, 128, 30);
+  L.tex.needsUpdate = true;
+}
+
 // 征服模式据点头顶字母牌（A/B/C）：Canvas 贴图 Sprite，永远面向相机，颜色随归属染色。
-function zoneLetterSprite(letter) {
-  const c = document.createElement('canvas');
+function zoneLetterSprite(letter) {  const c = document.createElement('canvas');
   c.width = c.height = 128;
   const ctx = c.getContext('2d');
   ctx.font = 'bold 92px sans-serif';
@@ -290,7 +345,18 @@ const PLANE_TYPES = [
   { id:'ah64',   name:'AH-64 阿帕奇', icon:'🇺🇸', hp:3.5,  speed:1.8,  agi:1.8, dmg:2.0,  heli:true, missiles:true, rank:6, rp:15000, prereq:'heavy',  price:60000 }, // 无敌神器：属性条全满格，天价研发
 ];
 function planeTypeById(id) { return PLANE_TYPES.find((p) => p.id === id) || PLANE_TYPES[0]; }
-function randomPlaneType() { const pool = PLANE_TYPES.filter((p) => !p.heli); return pool[Math.floor(Math.random() * pool.length)]; }   // AI 不开直升机（飞行AI不适配悬停物理）
+// AI 出机三档分房（战雷式，与坦克 randomTankType 同款）：同级为主(55%) + 高一档(30%) + 高两档硬骨头(15%)。
+// 原全池均匀随机：R1 初教-6 会撞 F-35/B-21（血 3 倍火力 2.6 倍），新手空战难度随机爆炸。
+// 直升机不参与（AI 不开——飞行AI不适配悬停物理，敌方直升机走 _spawnEnemy 的 15% 单独分支）。
+function randomPlaneType(playerRank = 6) {
+  const r = Math.random();
+  let lo = 1, hi = playerRank;
+  if (r >= 0.55 && r < 0.85) { lo = hi = Math.min(6, playerRank + 1); }   // 高一档
+  else if (r >= 0.85) { lo = Math.min(6, playerRank + 2); hi = lo; }     // 班长机：硬骨头
+  let pool = PLANE_TYPES.filter((p) => !p.heli && p.rank >= lo && p.rank <= hi);
+  if (!pool.length) pool = PLANE_TYPES.filter((p) => !p.heli && p.rank <= Math.min(6, playerRank + 2));
+  return pool[Math.floor(Math.random() * pool.length)];
+}
 
 
 
@@ -478,12 +544,14 @@ class HUD {
       <div id="center-msg"></div>
       <div id="capture-bar" style="position:absolute;top:54px;left:50%;transform:translateX(-50%);width:340px;max-width:80vw;height:20px;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.3);border-radius:10px;overflow:hidden;display:none;"><div id="capture-fill" style="position:absolute;left:0;top:0;bottom:0;width:50%;background:#9a8a4a;transition:width .1s,background .2s;"></div><span id="capture-label" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:12px/1 sans-serif;color:#fff;text-shadow:0 1px 2px #000;">占领</span></div>
       <div id="lock-prompt">点击画面锁定鼠标 · 解锁炮塔无限旋转</div>
+      <div id="btn-corner" title="暂停 / 设置">⏸</div>
       <div id="result" class="hidden">
         <div class="result-card">
           <h2 id="result-title"></h2>
           <p id="result-sub"></p>
           <div id="result-stats" style="display:none;margin:8px 0 14px;padding:10px 14px;background:rgba(0,0,0,.35);border-radius:8px;text-align:left;font:12px/1.9 sans-serif;color:#cdd;"></div>
           <button id="btn-again">再来一局</button>
+          <button id="btn-loadout">🔧 调整配置</button>
           <button id="btn-menu">返回主菜单</button>
         </div>
       </div>
@@ -624,6 +692,20 @@ class HUD {
     this.leadEl.style.top = `${(-ndcY * 0.5 + 0.5) * window.innerHeight}px`;
   }
 
+  // —— 帧率角标：左上角实时 FPS（绿≥55 / 黄30-55 / 红<30），设置可关 ——
+  setFps(v, show) {
+    if (!this._fpsEl) {
+      this._fpsEl = document.createElement('div');
+      this._fpsEl.style.cssText = 'position:absolute;left:12px;top:64px;z-index:24;font:700 13px monospace;text-shadow:0 1px 3px #000;background:rgba(20,28,22,0.45);padding:3px 8px;border-radius:7px;pointer-events:none';
+      this.container.appendChild(this._fpsEl);
+    }
+    if (!show) { this._fpsEl.style.display = 'none'; return; }
+    this._fpsEl.style.display = '';
+    const col = v >= 55 ? '#7CFC00' : (v >= 30 ? '#ffd870' : '#ff5a4a');
+    this._fpsEl.style.color = col;
+    this._fpsEl.textContent = `FPS ${Math.round(v)}`;
+  }
+
   // 只切十字准星显隐（不动 hitmarker）：进瞄准镜时分化替代十字，命中标记仍要闪。
   setCrosshairVisible(v) {
     if (this.crosshair) this.crosshair.style.display = v ? '' : 'none';
@@ -697,9 +779,11 @@ class HUD {
       <span style="color:${p.alive ? (p.team === 'blue' ? '#9fd0ff' : '#ff9d8a') : '#777'}">${p.alive ? '' : '☠ '}${p.name}${p.boss ? ' 【精英】' : ''}</span>
       <span>击杀 ${p.kills} · ${p.alive ? '战斗中' : '已损失'}</span></div>`;
     const mm = Math.floor(data.time / 60), ss = String(Math.floor(data.time % 60)).padStart(2, '0');
-    const head = data.conquest
-      ? `征服 · 我方 ${Math.ceil(data.blueT)} ── ${Math.ceil(data.redT)} 敌方票`
-      : `歼灭 ${data.kills}/${data.enemyTickets}`;
+    const head = data.mp
+      ? `🌐 对战 · 率先 ${data.target || 15} 杀获胜`
+      : data.conquest
+        ? `征服 · 我方 ${Math.ceil(data.blueT)} ── ${Math.ceil(data.redT)} 敌方票`
+        : `歼灭 ${data.kills}/${data.enemyTickets}`;
     const log = data.log.slice(-9).map((l) =>
       `<div style="padding:2px 8px;color:${l.aTeam === 'blue' ? '#9fd0ff' : '#ff9d8a'}">${l.t}　${l.a} <span style="color:#888">▰</span> ${l.v}</div>`).join('');
     this._boardCard.innerHTML =
@@ -836,8 +920,10 @@ class HUD {
       this.container.appendChild(el);
       this._shellEl = el;
     }
-    this._shellEl.innerHTML = `${shell.icon}${shell.name} <span style="color:#9fd0ff">${Math.round(pen)}mm</span><span style="color:#777;font-size:11px">炮口</span>` +
-      `<span style="color:#888;font-size:11px"> (1/2/3切换)</span>`;
+    this._shellEl.innerHTML = shell.id === 'arty'
+      ? `${shell.icon}${shell.name} <span style="color:#ff8a5a">一炮毙命 · 13m 杀伤圈 · 自带跟踪</span>`
+      : `${shell.icon}${shell.name} <span style="color:#9fd0ff">${Math.round(pen)}mm</span><span style="color:#777;font-size:11px">炮口</span>` +
+        `<span style="color:#888;font-size:11px"> (1/2/3切换)</span>`;
   }
 
   // 受击方向指示：屏幕边缘按方位角闪红色弧形提示（angle=入射相对玩家朝向的角，0=正前）。
@@ -956,8 +1042,29 @@ class HUD {
       : (progress > 1 ? `占领中 ${Math.floor(progress)}%` : progress < -1 ? `敌方占领 ${Math.floor(-progress)}%` : '争夺中');
   }
 
+  // 键位提示：展示 12s 后自动收起成小角标（按 H 或点角标再展开）——老玩家不用一直看说明书
   setHint(text) {
+    this._hintFull = text;
+    this.hint.classList.remove('minimized');
     this.hint.innerHTML = text;
+    clearTimeout(this._hintTO);
+    this._hintTO = setTimeout(() => this.minimizeHint(), 12000);
+    if (!this._hintWired) {
+      this._hintWired = true;
+      this.hint.addEventListener('click', () => this.expandHint());   // 点击角标展开
+    }
+  }
+  minimizeHint() {
+    if (!this._hintFull) return;
+    this.hint.classList.add('minimized');
+    this.hint.innerHTML = '⌨ 键位 · 按 H 或点击展开';
+  }
+  expandHint() {
+    if (!this._hintFull) return;
+    this.hint.classList.remove('minimized');
+    this.hint.innerHTML = this._hintFull;
+    clearTimeout(this._hintTO);
+    this._hintTO = setTimeout(() => this.minimizeHint(), 12000);   // 再给 12s，继续收起
   }
 
   // "点击锁定鼠标"提示：坦克模式下指针未锁定时显示，引导玩家点击以启用无限旋转。
@@ -1086,12 +1193,13 @@ class HUD {
   }
 
   // 显示胜负面板，按钮回调每次重绑。
-  showResult({ win, kills, onAgain, onMenu, endless = false, stats = null, wave = 0 }) {
+  showResult({ win, kills, onAgain, onMenu, onLoadout, endless = false, stats = null, wave = 0, records = null }) {
     this.resultTitle.textContent = win ? '胜利！' : (endless ? '本局阵亡' : '失败');
     this.resultTitle.style.color = win ? '#7CFC00' : (endless ? '#ffd86b' : '#ff5555');
     this.resultSub.textContent = wave > 0 ? `🌊 撑到第 ${wave} 波 · 击毁 ${kills} 个目标` : (endless ? `坚持击毁 ${kills} 个目标` : `本局击毁 ${kills} 个目标`);
     // 战雷式结算统计:命中率/判定分布/殉爆数/弹种使用——装甲系统的学习效果可量化
     const stEl = this.container.querySelector('#result-stats');
+    const recLine = (records && records.length) ? `<div style="margin-top:6px;color:#ffd870;font-weight:600">📊 新纪录：${records.join(' · ')}</div>` : '';
     if (stEl) {
       if (stats && stats.fired > 0) {
         const acc = Math.round(stats.hits / stats.fired * 100);
@@ -1099,7 +1207,10 @@ class HUD {
         stEl.innerHTML =
           `命中率 ${acc}%（${stats.hits}/${stats.fired}）<br>` +
           `<span style="color:#ffe9a0">击穿 ${stats.pen}</span> · <span style="color:#fff">跳弹 ${stats.bounce}</span> · <span style="color:#7a9ab8">未击穿 ${stats.nopen}</span><br>` +
-          `殉爆击杀 ${stats.ammoKills} · 弹种 穿甲榴弹${sh.ap || 0}/硬芯${sh.apcr || 0}/榴弹${sh.he || 0}`;
+          `殉爆击杀 ${stats.ammoKills} · 弹种 穿甲榴弹${sh.ap || 0}/硬芯${sh.apcr || 0}/榴弹${sh.he || 0}` + recLine;
+        stEl.style.display = 'block';
+      } else if (recLine) {
+        stEl.innerHTML = recLine;
         stEl.style.display = 'block';
       } else stEl.style.display = 'none';
     }
@@ -1107,18 +1218,24 @@ class HUD {
 
     const again = this.container.querySelector('#btn-again');
     const menu = this.container.querySelector('#btn-menu');
+    const load = this.container.querySelector('#btn-loadout');
+    if (load) load.style.display = onLoadout ? '' : 'none';   // 联机等场景无此路径时隐藏
     const a = () => { cleanup(); onAgain(); };
     const m = () => { cleanup(); onMenu(); };
+    const l = () => { cleanup(); onLoadout(); };
     const cleanup = () => {
       this.result.classList.add('hidden');
       again.removeEventListener('click', a);
       menu.removeEventListener('click', m);
+      if (load) load.removeEventListener('click', l);
     };
     again.addEventListener('click', a);
     menu.addEventListener('click', m);
+    if (load && onLoadout) load.addEventListener('click', l);
   }
 
   dispose() {
+    clearTimeout(this._hintTO);
     this.container.innerHTML = '';
   }
 }
@@ -1189,13 +1306,24 @@ class Projectile {
   }
 
   update(dt, obstacles) {
+    // —— 曲射炮弹自带跟踪系统（M109）：①导引头——无锁定/目标中途阵亡时，下落段自动
+    //    捕获瞄准点附近最近敌接管追踪（不用瞄得很准也能咬住）；
+    //    ②末段制导——进入下落段且水平接近目标后激活追踪，修正弹道直扑目标，锁定必中。
+    if (this.guided && this.velocity.y < 0 && this.seekFn && (!this.target || !this.target.alive)) {
+      const q = this.seekFn();
+      if (q) this.target = q;
+    }
+    if (this.guided && !this.homing && this.target && this.target.alive && this.velocity.y < 0) {
+      const gdx = this.target.position.x - this.mesh.position.x, gdz = this.target.position.z - this.mesh.position.z;
+      if (Math.hypot(gdx, gdz) < 380) this.homing = 4.5;
+    }
     if (this.homing && this.target && this.target.alive) {
       const desired = this.target.position.clone().sub(this.mesh.position).normalize();
       const cur = this.velocity.clone().normalize();
       cur.lerp(desired, clamp(this.homing * dt, 0, 1)).normalize();
       this.velocity.copy(cur.multiplyScalar(this.velocity.length()));
-      // —— 避障（追踪弹专属）：地形上抬 + 建筑侧绕，避免一头拍在山/楼上 ——
-      this._avoidObstacles(dt, obstacles);
+      // —— 避障（追踪弹专属；制导炮弹不走避障——抛物线本来就越山，末段俯冲就该直扑目标）——
+      if (!this.guided) this._avoidObstacles(dt, obstacles);
     }
     if (this.gravity) this.velocity.y -= this.gravity * dt;
     this._prev.copy(this.mesh.position);   // 移动前快照：本帧扫掠线段起点
@@ -1549,19 +1677,25 @@ class PostFX {
       uniforms: { tDepth: { value: null }, uProj: { value: new THREE.Vector2(1, 1) }, uNear: { value: 0.5 }, uFar: { value: 3000 } },
       vertexShader: vs,
       fragmentShader: `uniform sampler2D tDepth; uniform vec2 uProj; uniform float uNear, uFar; varying vec2 vUv;
+        float hash(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
         float linD(vec2 uv){ float z = texture2D(tDepth, uv).x * 2.0 - 1.0; return (2.0 * uNear * uFar) / (uFar + uNear - z * (uFar - uNear)); }
         void main(){
           float d = linD(vUv);
           if (d > 900.0) { gl_FragColor = vec4(1.0); return; }   // 远处不算
+          // 每像素随机旋转采样环：打散固定 16 采样环在地形缓坡上的"一条一条"条带 banding
+          // （残余旋转噪声由随后的高斯模糊 pass 压平——不会满屏爬行）
+          float rot = hash(vUv * 913.7) * 6.28318;
+          float cs = cos(rot), sn = sin(rot);
           float occ = 0.0;
           for (int i = 0; i < 16; i++) {
             float a = float(i) * 0.3927;   // 2π/16
             vec2 off = vec2(cos(a), sin(a)) * (0.004 + 0.010 * fract(float(i) * 0.618));   // 金角螺旋半径
+            off = vec2(off.x * cs - off.y * sn, off.x * sn + off.y * cs);
             float ds = linD(vUv + off * uProj);
             float diff = d - ds;
             occ += clamp(diff * 0.08, 0.0, 1.0) * clamp(3.0 / (1.0 + diff * 0.05), 0.0, 1.0);   // 近差遮蔽、远差衰减
           }
-          float ao = 1.0 - occ / 16.0 * 1.4;
+          float ao = 1.0 - occ / 16.0 * 1.25;
           gl_FragColor = vec4(vec3(clamp(ao, 0.35, 1.0)), 1.0);
         }`
     });
@@ -1569,11 +1703,11 @@ class PostFX {
       uniforms: { tDiffuse: { value: null }, tBloom: { value: null }, strength: { value: 0.85 },
         tAO: { value: null }, uAO: { value: 0 }, uSharp: { value: 0 },
         uSun: { value: new THREE.Vector2(0.5, 0.5) }, uSunOn: { value: 0 }, uTexel: { value: new THREE.Vector2(1, 1) },
-        uTime: { value: 0 } },
+        uTime: { value: 0 }, uGrain: { value: 0.018 } },
       vertexShader: vs,
       fragmentShader: `uniform sampler2D tDiffuse; uniform sampler2D tBloom; uniform float strength;
-        uniform sampler2D tAO; uniform float uAO, uSharp, uSunOn; uniform vec2 uSun, uTexel; uniform float uTime; varying vec2 vUv;
-        float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        uniform sampler2D tAO; uniform float uAO, uSharp, uSunOn, uGrain; uniform vec2 uSun, uTexel; uniform float uTime; varying vec2 vUv;
+        float hash(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
         void main(){
           vec2 cc = vUv - 0.5;
           float ca = dot(cc, cc) * 0.9;   // 镜头色差：离中心越远 RGB 分离越大（真实镜头感）
@@ -1587,12 +1721,12 @@ class PostFX {
           c = mix(vec3(l), c, 0.87);   // 降饱和：真实摄影质感
           c = clamp((c - 0.5) * 1.04 + 0.5 + vec3(0.002, 0.004, 0.010), 0.0, 4.0);
           // SSAO：乘环境光遮蔽（缝隙/轮拱/贴地处变暗——接地感）
-          if (uAO > 0.5) c *= mix(1.0, texture2D(tAO, vUv).r, 0.85);
-          // 轻锐化（unsharp 3×3）：高清档纹理更锐
+          if (uAO > 0.5) c *= mix(1.0, texture2D(tAO, vUv).r, 0.75);
+          // 轻锐化（unsharp 3×3）：高清档纹理更锐（0.16：太锐会放大颗粒/AO 噪点）
           if (uSharp > 0.5) {
             vec3 nb = texture2D(tDiffuse, vUv + vec2(uTexel.x, 0.0)).rgb + texture2D(tDiffuse, vUv - vec2(uTexel.x, 0.0)).rgb
                     + texture2D(tDiffuse, vUv + vec2(0.0, uTexel.y)).rgb + texture2D(tDiffuse, vUv - vec2(0.0, uTexel.y)).rgb;
-            c += (c * 4.0 - nb) * 0.22;
+            c += (c * 4.0 - nb) * 0.16;
           }
           // God Rays：向太阳屏幕位置采样亮部拉光束（亮图自身近似遮挡）
           if (uSunOn > 0.5) {
@@ -1612,9 +1746,16 @@ class PostFX {
           // 暗角：四角压暗
           vec2 d = vUv - 0.5;
           c *= 1.0 - dot(d, d) * 0.55;
-          // 胶片颗粒：细噪去 CG 数字感（像现实照片的底片感）
-          c += (hash(vUv * vec2(1920.0, 1080.0) + fract(uTime) * 7.13) - 0.5) * 0.028;
-          gl_FragColor = vec4(pow(max(c, vec3(0.0)), vec3(0.4545)), 1.0);   // linear→sRGB
+          // 胶片颗粒：静态像素对齐细噪（不随时间换纹——换纹=12Hz 全屏抖动，平地上就是"沙沙闪"；
+          // 静态细噪仍有底片质感且零时间闪烁）。uGrain 由设置面板开关。
+          c += (hash(gl_FragCoord.xy + 7.13) - 0.5) * uGrain;
+          vec3 outC = pow(max(c, vec3(0.0)), vec3(0.4545));   // linear→sRGB
+          // Bayer 抖动：平滑渐变量化到 8bit 时的等高线条纹（天空/缓坡地面"一条一条的线"）——
+          // 低于 1 LSB 的静态有序抖动肉眼看不出，专杀色带。
+          float bay2 = fract(floor(gl_FragCoord.x) * 0.5 + floor(gl_FragCoord.y) * floor(gl_FragCoord.y) * 0.75);
+          float bay = fract(floor(gl_FragCoord.x * 0.5) * 0.5 + floor(gl_FragCoord.y * 0.5) * floor(gl_FragCoord.y * 0.5) * 0.75) * 0.25 + bay2;
+          outC += (bay - 0.47) * (2.2 / 255.0);
+          gl_FragColor = vec4(outC, 1.0);
         }`
     });
   }
@@ -1628,16 +1769,20 @@ class PostFX {
     this.rtB.setSize(Math.max(2, W >> 1), Math.max(2, H >> 1));
   }
   setQuality(hq) { this.hq = hq; }
+  setGrain(on) { this.grainAmp = on ? 0.018 : 0; }   // 胶片颗粒开关（设置面板）
   setSunScreen(x, y, on) { this.matComp.uniforms.uSun.value.set(x, y); this.matComp.uniforms.uSunOn.value = on ? 1 : 0; }
   render(scene, camera) {
     const r = this.renderer;
     r.setRenderTarget(this.rtScene); r.render(scene, camera);
     const q = (mat, rt) => { this.quad.material = mat; r.setRenderTarget(rt); r.render(this.quadScene, this.quadCam); };
-    if (this.hq) {   // SSAO（高清档）：半分辨率深度差采样
+    if (this.hq) {   // SSAO（高清档）：半分辨率深度差采样 + 可分离高斯模糊（旋转噪声打散条带 → 模糊压平噪声）
       this.matSSAO.uniforms.tDepth.value = this.rtScene.depthTexture;
       this.matSSAO.uniforms.uProj.value.set(1 / this.rtAo.width, 1 / this.rtAo.height);
       this.matSSAO.uniforms.uNear.value = camera.near; this.matSSAO.uniforms.uFar.value = camera.far;
       q(this.matSSAO, this.rtAo);
+      this.matBlur.uniforms.texel.value.set(1 / this.rtB.width, 1 / this.rtB.height);
+      this.matBlur.uniforms.tDiffuse.value = this.rtAo.texture; this.matBlur.uniforms.dir.value.set(1, 0); q(this.matBlur, this.rtB);
+      this.matBlur.uniforms.tDiffuse.value = this.rtB.texture; this.matBlur.uniforms.dir.value.set(0, 1); q(this.matBlur, this.rtAo);
     }
     this.matBright.uniforms.tDiffuse.value = this.rtScene.texture;
     q(this.matBright, this.rtA);
@@ -1651,6 +1796,7 @@ class PostFX {
     this.matComp.uniforms.uSharp.value = this.hq ? 1 : 0;
     this.matComp.uniforms.uTexel.value.set(1 / this.rtScene.width, 1 / this.rtScene.height);
     this.matComp.uniforms.uTime.value = performance.now() * 0.001;
+    this.matComp.uniforms.uGrain.value = (typeof window !== 'undefined' && window.__wtGrain != null) ? window.__wtGrain : (this.grainAmp != null ? this.grainAmp : 0.018);
     q(this.matComp, null);
   }
   dispose() {
@@ -1855,6 +2001,7 @@ class EntityManager {
       if (p.size >= 0.4) this.sfx.gunshot(p.mesh.position, p.pen || 100);
       else this.sfx.mg(p.mesh.position);
     }
+    if (this.mpShootHook) { try { this.mpShootHook(p); } catch (e) { console.error('⚠ 联机广播弹丸失败（已忽略，不挡开火）:', e); } }   // 联机：广播本机玩家的弹丸（网络层异常绝不打断本地开火管线）
   }
   addEffect(e) {
     this.effects.push(e); if (e.mesh) this.scene.add(e.mesh);
@@ -1935,7 +2082,7 @@ class EntityManager {
 
   update(dt) {
     for (const t of this.tanks) if (t.alive) t.update(dt);
-    for (const p of this.planes) if (p.alive) p.update(dt);
+    for (const p of this.planes) if (p.alive && !p.netGhost) p.update(dt);   // 联机幽灵飞机：物理由网络插值驱动（mp.tick），本地不跑飞行模型
     for (const p of this.projectiles) p.update(dt, this.obstacles);
     for (const e of this.effects) e.update(dt);
 
@@ -1990,13 +2137,19 @@ class EntityManager {
         if (p.isBomb) {   // 炸弹落地/命中：范围爆炸（冲击波）
           const _bp = p.mesh.position.clone();
           const _nuke = p.isNuke;
-          this.addEffect(new Explosion(_bp.clone().add(new THREE.Vector3(0, _nuke ? 10 : 2, 0)), _nuke ? 40 : 14, _nuke ? 0xff2200 : 0xff6600));
+          this.addEffect(new Explosion(_bp.clone().add(new THREE.Vector3(0, p.artyShell ? 4 : (_nuke ? 10 : 2), 0)), p.artyShell ? 16 : (_nuke ? 40 : 14), p.artyShell ? 0xff5030 : (_nuke ? 0xff2200 : 0xff6600)));
+          if (p.artyShell) this.addEffect(new SplashRing(_bp.clone()));   // 曲射炮：地面冲击尘环
           if (_nuke) this.addEffect(new Explosion(_bp.clone().add(new THREE.Vector3(0, 20, 0)), 60, 0xff8800));   // 核弹蘑菇云
           const _R = p.bombRadius || 20;
           for (const t of [...this.tanks, ...this.planes]) {
-            if (!t.alive || t === p.owner) continue;
+            if (!t.alive || t === p.owner || p.netVisual) continue;   // netVisual=远端视觉弹：不造成本地伤害（伤害由射手端上报）
             const _d = t.position.distanceTo(_bp);
-            if (_d < _R) { t.onHit(p.damage * (_nuke ? Math.max(0.7, 1 - _d / _R) : Math.max(0.6, 1 - _d / _R))); t._lastAttacker = p.owner; _nuked++; }
+            if (_d < _R) {
+              // 曲射炮语义：命中或处于爆炸范围内直接大额伤害——玩家发射=一炮毙命（artyOneShot），敌方/Boss=减一半血
+              let _dmg = p.artyShell ? (p.artyOneShot ? t.maxHealth * 3 : t.maxHealth * 0.5) : p.damage * (_nuke ? Math.max(0.7, 1 - _d / _R) : Math.max(0.6, 1 - _d / _R));
+              if (t.netGhost && this.mpGhostHit) { this.mpGhostHit(t, _dmg, p, null, p.artyShell ? 'arty' : 'bomb'); continue; }   // 联机幽灵：上报主机
+              t.onHit(_dmg, p.artyShell ? null : p); t._lastAttacker = p.owner; _nuked++;
+            }
           }
           if (_nuke && _nuked > (meta.astats.nukeBest || 0)) { meta.astats.nukeBest = _nuked; checkAchievements(); }
         }
@@ -2017,7 +2170,7 @@ class EntityManager {
   checkCollisions(targets) {
     const hits = [];
     for (const p of this.projectiles) {
-      if (!p.alive) continue;
+      if (!p.alive || p.netVisual) continue;   // netVisual=远端玩家的视觉弹：伤害由射手端上报主机，本地不判定
       let bestT = Infinity, bestTarget = null;
       for (const t of targets) {
         if (!t.alive) continue;
@@ -2033,6 +2186,12 @@ class EntityManager {
         t._lastHitT = performance.now();   // 受击时间戳：AI 规避用（近期被命中=有人在扫我）
         // 弹着点=线段进入命中球面的精确交点（部位判定+回放共用）
         const hitPoint = new THREE.Vector3().lerpVectors(p._prev, p.mesh.position, bestT);
+        if (p.artyShell) {   // 曲射炮弹道直接命中：不在空中走装甲结算，就地爆炸（爆炸循环按「半血」语义处理范围内全员）
+          p.mesh.position.copy(hitPoint);
+          p.mesh.position.y += 0.6;
+          p.alive = false;
+          continue;
+        }
         const verdict = t.onHit(p.damage, p, hitPoint);   // p/hitPoint 供装甲判定+部位判定
         // —— 可见跳弹：弹丸不销毁，沿装甲板法线反射弹飞（战雷式"叮"+曳光飞走）——
         // 掉一半穿深/伤害（撞板失能），弹开的弹丸下一帧照常参与碰撞——还能打到别的车，甚至再跳一次。
@@ -2071,7 +2230,11 @@ class EntityManager {
         if (verdict === 'nopen') t.takeDamage(p.damage * 0.15);   // 未击穿啃 15% 血：超压震伤/崩落装甲碎片，低穿车对硬目标不再零作为
         p.alive = false;
         if (p.isRocket) { this.rocketBoom(p); }   // 火箭：大火球+8m 溅射（替换单点小爆炸）
-        else this.addEffect(new Explosion(hitPoint, t.radius ? t.radius * 0.6 : 1, 0xffa040));
+        else {
+          this.addEffect(new Explosion(hitPoint, t.radius ? t.radius * 1.1 : 1.6, 0xffa040));   // 击杀爆：火球放大
+          for (let k = 0; k < 4; k++) this.addEffect(new Smoke(hitPoint.clone().add(new THREE.Vector3(randRange(-2, 2), 1 + k * 1.6, randRange(-2, 2))), 0x1d1812, randRange(1.6, 2.6), randRange(2.4, 3.6), 2.8));   // 滚滚黑烟柱
+          this.addEffect(new SplashRing(hitPoint.clone()));   // 地面冲击尘环
+        }
         hits.push({ owner: p.owner, target: t, proj: p, killed: wasAlive && !t.alive, crit: t.lastCrit, verdict, hitPoint, penInfo: t.lastPenInfo });
       }
     }
@@ -2143,6 +2306,7 @@ const GEOM = {
   light:   { hull:[2.9, 1.0, 4.6], turret:'dome',     turretSize:[1.9, 0.9 ], barrel:[0.14, 2.6], wheels:5, brake:false, slope:0.60, susp:'christie' }, // M24 霞飞
   scout:   { hull:[2.6, 0.9, 4.0], turret:'box',      turretSize:[1.5, 0.6 ], barrel:[0.12, 2.2], wheels:4, brake:false, slope:0.50, susp:'road' }, // 234/2 美洲狮（8 轮轮式）
   aa:      { hull:[3.0, 1.0, 5.0], turret:'box',      turretSize:[2.2, 1.0], barrel:[0.06, 2.0], wheels:6, brake:false, slope:0.50, susp:'std', radar:true }, // 防空坦克
+  vads:    { hull:[2.9, 1.15, 4.9], turret:'box',    turretSize:[2.0, 0.95], barrel:[0.06, 2.1], wheels:5, brake:false, slope:0.55, susp:'std', radar:true }, // M163 火神（M113 底盘+转管炮塔）
   pz4:     { hull:[3.1, 1.15,5.0], turret:'box',      turretSize:[2.0, 0.85], barrel:[0.12, 3.4], wheels:6, brake:false, slope:0.40, susp:'std' }, // 四号 F2（长 75）
   cromwell:{ hull:[3.1, 1.15,5.2], turret:'box',      turretSize:[2.1, 0.9 ], barrel:[0.12, 3.2], wheels:6, brake:false, slope:0.45, susp:'christie' }, // 克伦威尔（克里斯蒂悬挂飞车）
   td:      { hull:[3.6, 1.1, 6.2], turret:'casemate', turretSize:[3.0, 1.0 ], barrel:[0.26, 4.8], wheels:6, brake:true,  slope:0.70, susp:'std' }, // SU-100
@@ -2201,8 +2365,11 @@ class Tank {
     if (!isEnemy && tt.dmg >= 2.5) this.shellDamage = 99999;   // 玩家方"一击必杀"型号(SU-100/IS-2/T-80U/鼠式)：一炮秒杀，不管打哪
     this.turretSpeed = CONFIG.tank.turretSpeed * tt.turret;
     this.turnSpeed = CONFIG.tank.turnSpeed * tt.turn;
-    if (!isEnemy && type === 'aa') { this.turretSpeed *= 2.5; this.reloadTime *= 0.3; this.maxSpeed *= 1.8; this.turnSpeed *= 1.5; }   // 玩家防空炮：炮塔更快+射速更快+跑得更快+转向更快（buff 须在赋值之后，否则 *= 被下方赋值覆盖失效）
+    if (!isEnemy && (type === 'aa' || type === 'vads')) { this.turretSpeed *= 2.5; this.reloadTime *= 0.3; this.maxSpeed *= 1.8; this.turnSpeed *= 1.5; }   // 玩家防空炮（ZSU/M163）：炮塔更快+射速更快+跑得更快+转向更快（buff 须在赋值之后，否则 *= 被下方赋值覆盖失效）
     this.fireSpread = isEnemy ? CONFIG.tank.enemySpread : (side === 'ally' ? CONFIG.tank.allySpread : 0);
+    // 曲射自行火炮（M109 圣骑士）：不用直射主炮——45° 抛物线自动瞄准，命中/爆炸范围内=减半血
+    this.isArty = !!tt.arty;
+    if (this.isArty) this.reloadTime = Math.max(this.reloadTime, CONFIG.tank.reloadTime * 2.4);   // 曲射长装填（≈7s/发）
     // 装甲/穿深（战争雷霆式：armor[前,侧,后]mm 车体甲，tArmor 炮塔甲；slope/tSlope 装甲倾角°；pen 穿深 mm；老型号无则退化弱值，行为兜底）
     this.armor = tt.armor || [30, 20, 15];
     this.tArmor = tt.tArmor || this.armor;
@@ -2385,8 +2552,8 @@ class Tank {
     barrel.position.set(0, 0, bl * 0.5);
     barrel.castShadow = true;
     this.barrelPivot.add(barrel);
-    // 防空坦克(ZSU-23-4)：双管
-    if (this.type === 'aa') {
+    // 防空坦克(ZSU/M163 转管)：双管
+    if (this.type === 'aa' || this.type === 'vads') {
       const barrel2 = barrel.clone();
       barrel2.position.x = br * 3;
       this.barrelPivot.add(barrel2);
@@ -2587,7 +2754,7 @@ class Tank {
     const forward = new THREE.Vector3(Math.sin(this.heading), 0, Math.cos(this.heading));
     // 履带损坏→严重减速；发动机损坏→中度减速
     const mul = (this.modules.track > 0 ? 0.25 : 1) * (this.modules.engine > 0 ? 0.5 : 1);
-    const sp = (throttle >= 0 ? this.maxSpeed : this.maxSpeed * 0.6) * throttle * mul;
+    const sp = (throttle >= 0 ? this.maxSpeed : this.maxSpeed * 0.6) * throttle * mul * (this.buffSpeed || 1);
     this.group.position.addScaledVector(forward, sp * dt);
     const lim = this.worldSize;
     this.group.position.x = clamp(this.group.position.x, -lim, lim);
@@ -2729,11 +2896,56 @@ class Tank {
     const frac = Math.max(0, this.health / this.maxHealth);
     this.healthFg.scale.x = frac;
     this.healthFg.position.x = -(1 - frac) * 1.5;
+    // 受损可视：半血冒灰烟、残血黑烟（战斗状态一眼可读；限近处省粒子）
+    if (this.alive && frac < 0.5 && this.em && (!this.em.listener || this.position.distanceTo(this.em.listener.position) < 170)) {
+      this._dmgSmokeT = (this._dmgSmokeT || 0) - dt;
+      if (this._dmgSmokeT <= 0) {
+        this._dmgSmokeT = frac < 0.25 ? 0.32 : 0.7;
+        const col = frac < 0.25 ? 0x17130e : 0x57524b;
+        this.em.addEffect(new Smoke(this.group.position.clone().add(new THREE.Vector3(randRange(-1, 1), 2.4, randRange(-1, 1))), col, randRange(0.7, 1.2), randRange(1.2, 1.8), 1.5));
+      }
+    }
   }
 
   canFire() { return this.alive && this.reloadTimer <= 0 && this.modules.barrel <= 0; }
 
+  // 曲射炮开火（M109 圣骑士）：45° 抛物线 + 末段制导（guided=true，锁定必中）。
+  // 伤害语义与 Boss 攻城炮一致：命中或处于爆炸范围内 = 减一半血（EntityManager 爆炸循环的 artyShell 分支）。
+  tryFireArty(em, tgt, lockTgt) {
+    if (!this.canFire()) return false;
+    if (!tgt) return false;
+    const from = this.getMuzzleWorld ? this.getMuzzleWorld() : this.position.clone();
+    const t = tgt.clone(); t.y = terrainHeight(t.x, t.z);
+    if (t.distanceTo(this.position) < 30) { if (this.em && this.em.sfx) this.em.sfx.nopen(); return false; }   // 太近：45° 抛物线够不着（最小射程 30m）
+    const dist = Math.hypot(t.x - from.x, t.z - from.z);
+    const gArty = 25;
+    const v0 = Math.sqrt(Math.max(400, dist * gArty));
+    const vel = t.clone().sub(from).setY(0).normalize().multiplyScalar(v0 * Math.SQRT1_2).setY(v0 * Math.SQRT1_2);
+    const proj = new Projectile({ position: from, direction: vel.clone().normalize(), speed: v0, damage: 0, owner: this, ownerTeam: this.team, gravity: gArty, life: 14, color: 0xffd070, size: 0.55, pen: 0, shellDef: { id: 'he', name: '曲射炮弹', penMul: 1, dmgMul: 1, bounceDeg: 90, noBounce: true, penDrop: 0 } });
+    proj.isBomb = true; proj.bombRadius = 13; proj.artyShell = true;
+    proj.guided = true;   // 自带跟踪系统：导引头+末段制导（见 Projectile.update）
+    if (this.side === 'player') proj.artyOneShot = true;   // ★ 玩家的曲射炮：一炮毙命（敌方曲射仍是半血）
+    if (lockTgt && lockTgt.alive) proj.target = lockTgt;   // 开火前已锁定：直接咬住
+    const aimPt = t.clone();   // 瞄准落点（导引头捕获基准）
+    proj.seekFn = () => {   // 导引头：捕获瞄准点附近 90m 内最近敌（只咬地面载具；没锁住/目标中途阵亡时自动接管）
+      let best = null, bd = Infinity;
+      for (const q of [...em.tanks, ...em.planes]) {
+        if (!q.alive || q === this || q.team === this.team || typeof q.forwardVector === 'function') continue;   // 不追飞机/直升机
+        const d2 = q.position.distanceToSquared(aimPt);
+        if (d2 < bd) { bd = d2; best = q; }
+      }
+      return bd <= 90 * 90 ? best : null;
+    };
+    em.addProjectile(proj);
+    em.addEffect(new MuzzleFlash(from));
+    this.recoilVel += 5;   // 开炮后坐（轻一点）
+    this.reloadTimer = this.reloadTime * (this.buffReload || 1);
+    if (this.ammoLimit) this.ammo--;
+    return true;
+  }
+
   tryFire(em) {
+    if (this.isArty) return this.tryFireArty(em, this._artyAim, this._artyLockTgt);   // 曲射炮：抛物线+末段制导（目标点/锁定目标由 Game 的准星喂进来）
     if (!this.canFire()) return false;
     if (this.ammoLimit && this.ammo <= 0) return false;   // 弹尽：去补给区（HUD 由主循环提示）
     const muzzleWorld = this.getMuzzleWorld();
@@ -2751,9 +2963,9 @@ class Tank {
     }));
     em.addEffect(new MuzzleFlash(muzzleWorld));
     // 弹壳从炮塔侧抛出（铜壳侧飞+落地弹跳）
-    if (this.type !== 'aa') em.ejectShell(this.turret ? this.turret.getWorldPosition(_tmpV3) : muzzleWorld, this.heading + this.turretYaw);
+    if (this.type !== 'aa' && this.type !== 'vads') em.ejectShell(this.turret ? this.turret.getWorldPosition(_tmpV3) : muzzleWorld, this.heading + this.turretYaw);
     // 炮口硝烟：沿炮管向侧后喷散的灰白烟（口径越大团数越多）
-    const nSmk = 2 + Math.round(clamp(this.pen / 120, 0, 3));
+    const nSmk = 3 + Math.round(clamp(this.pen / 100, 0, 4));   // 炮烟加浓：口径越大烟越滚
     for (let i = 0; i < nSmk; i++) {
       em.addEffect(new Smoke(
         muzzleWorld.clone().addScaledVector(dir, -0.8 - i * 0.5).add(new THREE.Vector3(randRange(-0.5, 0.5), randRange(0, 0.8), randRange(-0.5, 0.5))),
@@ -2764,7 +2976,21 @@ class Tank {
     this.recoilVel += 6.0 * clamp(55 / (this.maxHealth || 55), 0.45, 1.1) * randRange(0.85, 1.15);
     // 结算统计:玩家主炮发射按弹种计数(经 em 挂钩,Game 读取)
     if (this.side === 'player') { em.pShells = em.pShells || { ap: 0, apcr: 0, he: 0 }; em.pShells[sh.id] = (em.pShells[sh.id] || 0) + 1; }
-    this.reloadTimer = this.reloadTime;
+    // 巨兽 Boss：双管齐射（第二发从主炮侧旁出膛，0.7 倍伤害）
+    if (this.bossType === 'twin') {
+      const bd = this.getBarrelDir();
+      _tmpV3.set(bd.z, 0, -bd.x).normalize();   // 炮管右向
+      const m2 = muzzleWorld.clone().addScaledVector(_tmpV3, this._twinFlip ? 0.9 : -0.9);
+      this._twinFlip = !this._twinFlip;
+      em.addProjectile(new Projectile({
+        position: m2, direction: this._spread(bd, this.fireSpread),
+        speed: tankShellSpeed(this.shellKind), damage: this.shellDamage * sh.dmgMul * 0.7,
+        owner: this, ownerTeam: this.team,
+        gravity: CONFIG.tank.shellGravity, life: CONFIG.tank.shellLife,
+        color: 0xff7755, size: 0.45, pen: this.pen * sh.penMul, shellDef: sh,
+      }));
+    }
+    this.reloadTimer = this.reloadTime * (this.buffReload || 1);
     if (this.ammoLimit) this.ammo--;
     return true;
   }
@@ -2781,6 +3007,76 @@ class Tank {
     }));
     this.mgTimer = 0.1;
     return true;
+  }
+
+  // —— 车顶自动炮台（空投奖励·无限弹药模式）：车体后上部的遥控机枪塔 ——
+  // 自动索敌（就近敌机/敌坦克，150m）+ 视线/烟雾纪律 + 提前量解；拾取空投升级（Lv3 双管）。
+  installHullTurret(level = 1) {
+    this.hullTurretLevel = Math.min(3, (this.hullTurretLevel || 0) + level);
+    if (!this.hullTurret) {
+      const mount = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color: 0x2c2c30, roughness: 0.6, metalness: 0.5 });
+      mount.add(new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.44, 0.32, 10), mat));
+      const gun = new THREE.Group(); gun.position.y = 0.3;
+      const mkBarrel = (sx) => {
+        const brl = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.062, 1.15, 6), new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.7 }));
+        brl.rotation.x = Math.PI / 2; brl.position.set(sx * 0.14, 0, 0.58);
+        gun.add(brl);
+      };
+      mkBarrel(0);
+      mount.add(gun);
+      mount.position.set(0, 1.42, -(this.hullLen || 5) * 0.18);   // 车顶后部
+      this.group.add(mount);
+      this._hullGun = gun;
+      this._hullMount = new THREE.Object3D(); this._hullMount.position.set(0, 0, 1.18); gun.add(this._hullMount);
+      this.hullTurret = { dir: new THREE.Vector3(0, 1, 0), cooldown: 0, retargetT: 0, target: null };
+    } else if (this.hullTurretLevel >= 3 && this._hullGun.children.length < 3) {
+      const brl = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.062, 1.15, 6), new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.7 }));
+      brl.rotation.x = Math.PI / 2; brl.position.set(0.14, 0, 0.58);
+      this._hullGun.add(brl);
+    }
+    return this.hullTurretLevel;
+  }
+  updateHullTurret(dt, ctx, em) {
+    const ht = this.hullTurret;
+    if (!ht || !this._hullGun || !this.alive) return;
+    if (ht.cooldown > 0) ht.cooldown -= dt;
+    ht.retargetT -= dt;
+    if (ht.retargetT <= 0 || !ht.target || !ht.target.alive) {
+      ht.retargetT = 0.35;
+      let best = null, bd = Infinity;
+      for (const e of ctx.air) { const d = e.position.distanceTo(this.position); if (d < 150 && d < bd) { bd = d; best = e; } }
+      for (const e of ctx.ground) { const d = e.position.distanceTo(this.position); if (d < 150 && d < bd) { bd = d; best = e; } }
+      ht.target = best;
+    }
+    const muz = this._hullMount.getWorldPosition(_ttMuz);
+    let desired;
+    if (ht.target) {
+      const t = ht.target, aim = _ttAim.copy(t.position);
+      if (t.forwardVector) {
+        const tv = t.forwardVector().multiplyScalar(t.speed || 0);
+        let meet = muz.distanceTo(t.position) / 460;
+        for (let i = 0; i < 2; i++) { aim.copy(t.position).addScaledVector(tv, meet); meet = muz.distanceTo(aim) / 460; }
+      } else aim.y += 1.1;
+      desired = _ttDes.copy(aim).sub(muz).normalize();
+    } else desired = _ttDes.set(0, 1, 0);   // 无目标朝天待命
+    ht.dir.lerp(desired, Math.min(1, dt * 5)).normalize();
+    this._hullGun.lookAt(_ttLook.copy(muz).addScaledVector(ht.dir, 10));
+    if (!ht.target) return;
+    const lv = this.hullTurretLevel || 1;
+    if (ht.cooldown <= 0 && ht.dir.dot(desired) > 0.99
+        && !losBlocked(muz, ht.target.position, ctx.obstacles) && !ctx.inSmoke(ht.target.position)) {
+      const dir = this._spread(ht.dir.clone(), 0.02);
+      em.addProjectile(new Projectile({
+        position: muz.clone(), direction: dir, speed: 460,
+        damage: 6 + lv * 4, owner: this, ownerTeam: this.team,   // Lv1~3：10/14/18 每发
+        gravity: 9.81, life: 1.3, color: 0xffe9a0, size: 0.18,
+        pen: 60,   // 速射自动炮级穿深：撕薄皮/中甲侧面，重甲正面穿不动→走溅射也不空手
+        shellDef: { id: 'mg2', name: '自动炮弹', penMul: 1, dmgMul: 1, bounceDeg: 90, noBounce: true, effCap: 500 },   // 永不跳弹（不再"叮"个不停）
+      }));
+      em.addEffect(new MuzzleFlash(muz, 0x222222));
+      ht.cooldown = 0.16 - lv * 0.02;   // Lv1 0.14s → Lv3 0.10s（Lv3 ≈180 伤/秒）
+    }
   }
 
   // 战争雷霆式命中：穿深判定 → 跳弹/未击穿/击穿；击穿后弹药殉爆/起火/模块损坏。
@@ -2926,6 +3222,15 @@ class Tank {
   }
 
   takeDamage(d) {
+    // 护盾（Boss）：正面能量盾先顶——全吸收，破盾后 6s 不再挨打则缓慢再生
+    if (this.shieldHp > 0 && d > 0) {
+      this._shieldIdle = 0;
+      this.shieldHp -= d;
+      if (this.shieldMesh) this.shieldMesh.material.opacity = 0.32 + 0.35 * Math.max(0, this.shieldHp / (this.shieldMax || 1));
+      if (this.shieldHp >= 0) return;   // 盾没破：一滴血不掉
+      d = -this.shieldHp; this.shieldHp = 0;
+      if (this.shieldMesh) this.shieldMesh.visible = false;
+    }
     this.health -= d;
     if (this.health <= 0) {
       this.health = 0; this.alive = false;
@@ -3130,6 +3435,33 @@ class Plane {
     tailH.position.set(0, 0, -halfL * 0.78); tailH.castShadow = true;
     this.group.add(tailH);
 
+    // —— 尾炮塔（轰炸机 Tu-22M / B-21）：机尾遥控双管炮 ——
+    // 炮管指向机尾(-Z 出膛)；AI 炮手常驻（敌方轰炸机常开——别死咬六点，会被尾炮撕），
+    // 玩家按 T 开关自动炮手：优先反击"朝我攻击"的敌机，没有就扫地面坦克（防空车优先）。
+    if (this.type === 'bomber' || planeTypeById(this.type).bombs) {
+      const tg = new THREE.Group();
+      tg.position.set(0, fuseR * 0.55, -halfL * 0.86);
+      const tbase = new THREE.Mesh(new THREE.SphereGeometry(fuseR * 0.58, 10, 8), darkMat);
+      tbase.scale.y = 0.55; tg.add(tbase);
+      const tdome = new THREE.Mesh(new THREE.SphereGeometry(fuseR * 0.5, 10, 8), glassMat);
+      tdome.scale.set(0.88, 0.72, 1.12); tdome.position.y = fuseR * 0.24; tg.add(tdome);
+      const gun = new THREE.Group(); gun.position.y = fuseR * 0.18;
+      for (const sx of [-1, 1]) {
+        const brl = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.07, fuseL * 0.15, 8), darkMat);
+        brl.rotation.x = Math.PI / 2;               // 沿 Z 轴
+        brl.position.set(sx * 0.15, 0, fuseL * 0.075);   // 炮口朝 +Z（gun.lookAt 目向后即指向机尾）
+        gun.add(brl);
+      }
+      tg.add(gun);
+      this.group.add(tg);
+      this.tailMount = new THREE.Object3D();
+      this.tailMount.position.set(0, 0, fuseL * 0.15);   // 双管中间的出膛点
+      gun.add(this.tailMount);
+      this._tailGun = gun;
+      this.tailTurret = { dir: new THREE.Vector3(0, 0, -1), cooldown: 0, retargetT: Math.random() * 0.3, target: null };
+      this.tailGunOn = this.side !== 'player';   // AI 常开；玩家默认关、按 T 开
+    }
+
     // 垂尾：以底边为支点绕 X 轴后掠（真后掠，不再用 Y 旋转把它 yaw 歪）+ 背鳍
     const finGroup = new THREE.Group();
     finGroup.position.set(0, fuseR * 0.55, -halfL * 0.74);
@@ -3192,6 +3524,62 @@ class Plane {
     this.blob.rotation.x = -Math.PI / 2;
     this.blob.renderOrder = 1;
     this.blobWrap.add(this.blob);
+
+    // —— 起落架（前三点：前支柱+左右主支柱）：地面滑跑放下、离地爬升自动收起 ——
+    this._buildGear(g, darkMat);
+  }
+
+  // 起落架：支柱+机轮，收起时向前折进机腹；gearAnim 0=收起 1=放下。
+  // gearHeight=主轮底到机身中线距离（地面滑跑贴轮高度用，替代旧的定值 1.15）。
+  _buildGear(g, darkMat) {
+    const halfL = g.fuse[0] / 2, halfSpan = g.wing / 2, fuseR = g.fuse[1];
+    const tireMat = new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: 0.9 });
+    const hubMat = new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: 0.35, metalness: 0.8 });
+    const mkStrut = (len, wr) => {   // 单支柱组：原点在机腹安装位，向下伸出
+      const gr = new THREE.Group();
+      const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, len, 6), darkMat);
+      strut.position.y = -len / 2; gr.add(strut);
+      // 斜撑（后侧八字撑杆，视觉细节）
+      const brace = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, len * 1.15, 4), darkMat);
+      brace.position.set(0, -len * 0.35, len * 0.24); brace.rotation.x = 0.55; gr.add(brace);
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(wr, wr, wr * 0.72, 12), tireMat);
+      wheel.rotation.z = Math.PI / 2; wheel.position.y = -len; wheel.castShadow = true; gr.add(wheel);
+      const hub = new THREE.Mesh(new THREE.CylinderGeometry(wr * 0.4, wr * 0.4, wr * 0.78, 8), hubMat);
+      hub.rotation.z = Math.PI / 2; hub.position.y = -len; gr.add(hub);
+      return gr;
+    };
+    const mainLen = fuseR * 1.45 + 0.35, noseLen = fuseR * 1.1 + 0.25;
+    const mainR = Math.max(0.26, fuseR * 0.34), noseR = mainR * 0.72;
+    this.gearGroup = new THREE.Group();
+    this._gearNose = mkStrut(noseLen, noseR);
+    this._gearNose.position.set(0, -fuseR * 0.5, halfL * 0.6);
+    this._gearML = mkStrut(mainLen, mainR);
+    this._gearML.position.set(-halfSpan * 0.4, -fuseR * 0.5, -halfL * 0.1);
+    this._gearMR = mkStrut(mainLen, mainR);
+    this._gearMR.position.set(halfSpan * 0.4, -fuseR * 0.5, -halfL * 0.1);
+    this.gearGroup.add(this._gearNose, this._gearML, this._gearMR);
+    this.group.add(this.gearGroup);
+    this.gearAnim = 1; this.gearTarget = 1;   // 出厂默认放下（机场待命/停机）
+    // 主轮底到机身中线：安装高度(-fuseR*0.5) + 支柱长 + 轮半径
+    this.gearHeight = fuseR * 0.5 + mainLen + mainR;
+  }
+
+  // 收放逻辑（update 每帧调；联机幽灵也由 mp 侧驱动）：
+  // 滑跑=放下；离地 >18m 收起；低空(<12m)平飞/下降=放下（随时可迫降）。
+  gearTick(dt) {
+    if (!this.gearGroup) return;
+    const gy = terrainHeight(this.group.position.x, this.group.position.z);
+    const hAg = this.group.position.y - gy;
+    if (this.onGround) this.gearTarget = 1;
+    else if (hAg > 18) this.gearTarget = 0;
+    else if (hAg < 12) this.gearTarget = 1;
+    const sp = dt * 1.5;   // 全程 ~0.7s
+    this.gearAnim += clamp(this.gearTarget - this.gearAnim, -sp, sp);
+    const fold = (1 - this.gearAnim) * 1.5;   // 收起：支柱向前折进机腹
+    this._gearNose.rotation.x = fold;
+    this._gearML.rotation.x = fold * 1.06;
+    this._gearMR.rotation.x = fold * 1.06;
+    this.gearGroup.visible = this.gearAnim > 0.02;   // 全收隐藏（省渲染）
   }
 
   get position() { return this.group.position; }
@@ -3225,17 +3613,28 @@ class Plane {
   }
 
   // 玩家用：直接由光标相对屏幕中心的偏移驱动（右移→右滚右转，上移→抬头，回中→自动改平）。
-  // nx 右为正、ny 上为正，范围 -1..1。方向明确，不依赖相机射线。
+  // manualCtrl（设置关掉"飞行辅助"）：纯手动虚拟杆——光标偏移=滚转/俯仰速率，回中=保持当前姿态，
+  // 不自动改平、不自动修高度，全凭手感。
   mouseAim(nx, ny, dt) {
+    const q = this.group.quaternion;
+    const rot = (axis, ang) => q.multiply(new THREE.Quaternion().setFromAxisAngle(axis, ang));
+    if (this.onGround) { this._gndRud = nx; this._gndPull = ny; return; }   // 地面滑跑：姿态由 update 接管，只记方向舵/带杆量
+    this._gndRud = nx; this._gndPull = ny;
+    if (this.manualCtrl) {
+      const dead = 0.05;
+      const ax = Math.abs(nx) > dead ? nx : 0, ay = Math.abs(ny) > dead ? ny : 0;
+      rot(new THREE.Vector3(0, 0, 1), -ax * INST.rollRate * (this.agility || 1) * dt);
+      rot(new THREE.Vector3(1, 0, 0), -ay * INST.pitchRate * (this.agility || 1) * dt);
+      q.normalize();
+      return;
+    }
     const targetBank = clamp(nx, -1, 1) * INST.maxBank;
     const targetPitch = clamp(ny, -1, 1) * INST.maxPitch;
     const bank = this.getBank();
     const pitch = this.getPitch();
-    const q = this.group.quaternion;
-    const rot = (axis, ang) => q.multiply(new THREE.Quaternion().setFromAxisAngle(axis, ang));
-    rot(new THREE.Vector3(0, 0, 1), -clamp((targetBank - bank) * INST.rollK, -1, 1) * INST.rollRate * (this.agility || 1) * dt);
     // 协调转弯：绕世界竖直轴偏航，避免侧滑掉高度（保证转向时仍能爬升）
     q.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), bank * INST.yawGain * (this.agility || 1) * dt));
+    rot(new THREE.Vector3(0, 0, 1), -clamp((targetBank - bank) * INST.rollK, -1, 1) * INST.rollRate * (this.agility || 1) * dt);
     rot(new THREE.Vector3(1, 0, 0), -clamp((targetPitch - pitch) * INST.pitchK, -1, 1) * INST.pitchRate * (this.agility || 1) * dt);
     q.normalize();
   }
@@ -3264,11 +3663,24 @@ class Plane {
       if (this.health <= 0) { this.health = 0; this.alive = false; }
     }
     if (this.extCooldown > 0) this.extCooldown -= dt;
-    const target = lerp(CONFIG.plane.minSpeed, CONFIG.plane.maxSpeed, this.throttle) * this.speedMult;
+    this.gearTick(dt);   // 起落架收放（滑跑放下/离地收起/低空放下；滑跑 return 前也要动）
+    const target = lerp(CONFIG.plane.minSpeed, CONFIG.plane.maxSpeed, this.throttle) * this.speedMult * (this.buffSpeed || 1);
     this.speed += (target - this.speed) * Math.min(1, 1.5 * dt);
     const forward = this.forwardVector();
     this.group.position.addScaledVector(forward, this.speed * dt);
     // 接地暗影同步：贴地面、对齐航向、随高度淡出；机体入场景后 wrapper 挂同一场景
+    // 受损可视：半血拖灰烟、残血黑烟（发动机位置）
+    {
+      const fp = this.health / this.maxHealth;
+      if (this.alive && fp < 0.5 && this.em) {
+        this._dmgSmokeT = (this._dmgSmokeT || 0) - dt;
+        if (this._dmgSmokeT <= 0) {
+          this._dmgSmokeT = fp < 0.25 ? 0.3 : 0.65;
+          const p2 = this.group.position.clone().addScaledVector(this.forwardVector(), -this.type ? -3 : -3);
+          this.em.addEffect(new Smoke(p2.add(new THREE.Vector3(randRange(-0.5, 0.5), 0, randRange(-0.5, 0.5))), fp < 0.25 ? 0x17130e : 0x57524b, randRange(0.6, 1.0), randRange(1.0, 1.6), 1.3));
+        }
+      }
+    }
     if (this.blobWrap) {
       if (!this.blobWrap.parent && this.group.parent) this.group.parent.add(this.blobWrap);
       if (this.blobWrap.parent) {
@@ -3280,6 +3692,22 @@ class Plane {
       }
     }
     const liftFactor = clamp(this.speed / CONFIG.plane.maxSpeed, 0, 1);
+    // —— 地面滑跑（机场起飞）：贴地、锁平姿态、方向舵转向；速度≥起飞值且带杆→离地 ——
+    if (this.onGround) {
+      const gy = terrainHeight(this.group.position.x, this.group.position.z);
+      const fwd0 = this.forwardVector();
+      const yaw0 = Math.atan2(fwd0.x, fwd0.z);
+      this.group.quaternion.setFromEuler(new THREE.Euler(-0.03, yaw0, 0, 'YXZ'));   // 机首微抬 2°，机轮姿态
+      this.group.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), clamp(this._gndRud || 0, -1, 1) * 0.85 * dt);   // 方向舵
+      this.group.position.y = gy + (this.gearHeight || 1.15);   // 贴轮（起落架主轮底；前进积分已在上方统一做过，不重复）
+      const takeV = CONFIG.plane.minSpeed * (this.speedMult || 1) * 0.92;
+      if (this.speed >= takeV && (this._gndPull || 0) > 0.25) {
+        this.onGround = false;
+        this.group.rotateX(-0.3);   // 抬轮攻角
+        if (this.em && this.em.sfx) this.em.sfx._blip(300, 520, 0.3, 0.2, 'sine');   // 离地轻响
+      }
+      return;   // 地面段不走重力/撞地逻辑
+    }
     this.group.position.y -= CONFIG.plane.gravity * dt * (1 - liftFactor) * 0.5;
     const gnd = terrainHeight(this.group.position.x, this.group.position.z) + 2;
     if (this.group.position.y <= gnd) {
@@ -3368,7 +3796,7 @@ class Plane {
     };
     em.addProjectile(mk(mL)); em.addProjectile(mk(mR));
     em.addEffect(new MuzzleFlash(mL, 0x222222)); em.addEffect(new MuzzleFlash(mR, 0x222222));
-    this.reloadTimer = this.fireCooldown;
+    this.reloadTimer = this.fireCooldown * (this.buffReload || 1);
     return true;
   }
 
@@ -3405,6 +3833,92 @@ class Plane {
     em.addProjectile(proj);
     this.missiles -= 1; this.missileCooldown = mc.cooldown;
     return true;
+  }
+
+  // —— 尾炮塔自动炮手（轰炸机）——
+  // 目标优先级：①附近（330m 内）的敌机，就近开打（近 6s 打中过我的优先反击）②没有敌机才扫地面坦克（防空车最优先）。
+  // 开火纪律：视线被障碍/山脊挡住不打、目标在烟里不打——AI 炮手不朝掩体浪费子弹。
+  updateTailTurret(dt, ctx, em) {
+    const tt = this.tailTurret;
+    if (!tt || !this._tailGun) return;
+    if (tt.cooldown > 0) tt.cooldown -= dt;
+    tt.retargetT -= dt;
+    const on = this.tailGunOn && this.alive;
+    if (!on) tt.target = null;
+    else if (tt.retargetT <= 0 || !tt.target || !tt.target.alive) {
+      tt.retargetT = 0.3;   // 换目标评估节流（0.3s 一次，不逐帧扫全场）
+      tt.target = this._tailPickTarget(ctx);
+    }
+    const muz = this.tailMount.getWorldPosition(_ttMuz);
+    // 期望指向：有目标=提前量拦截解；无目标=机尾正后方缓慢归位
+    let desired;
+    if (on && tt.target) {
+      const t = tt.target;
+      const aim = _ttAim.copy(t.position);
+      if (t.forwardVector) {
+        const tv = t.forwardVector().multiplyScalar(t.speed || 0);
+        let meet = muz.distanceTo(t.position) / CONFIG.plane.bulletSpeed;
+        for (let i = 0; i < 2; i++) {
+          aim.copy(t.position).addScaledVector(tv, meet);
+          meet = muz.distanceTo(aim) / CONFIG.plane.bulletSpeed;
+        }
+      } else if (t.velX !== undefined) {
+        aim.set(t.position.x + t.velX * 0.4, t.position.y + 1.1, t.position.z + t.velZ * 0.4);   // 地面目标慢，粗提前量够用
+      } else aim.y += 1.1;   // 静止目标（据点桩等）瞄车体高度
+      desired = _ttDes.copy(aim).sub(muz).normalize();
+    } else {
+      desired = _ttDes.set(0, 0, -1).applyQuaternion(this.group.quaternion);   // 机尾归位
+    }
+    // 炮塔限速转动（~4.5rad/s，转得快看得见）+ 炮管姿态同步
+    tt.dir.lerp(desired, Math.min(1, dt * 4.5)).normalize();
+    this._tailGun.lookAt(_ttLook.copy(muz).addScaledVector(tt.dir, 10));
+    if (!on || !tt.target) return;
+    const t = tt.target;
+    const isAir = !!t.forwardVector;
+    const dist = muz.distanceTo(t.position);
+    if (tt.cooldown <= 0 && dist < (isAir ? 320 : 420)
+        && tt.dir.dot(desired) > 0.995
+        && !losBlocked(muz, t.position, ctx.obstacles)
+        && !ctx.inSmoke(t.position)) {
+      this._tailFire(em, muz);
+    }
+  }
+  _tailPickTarget(ctx) {
+    const now = performance.now();
+    let best = null, bestScore = Infinity;
+    for (const e of ctx.air) {
+      const d = e.position.distanceTo(this.position);
+      if (d > 330) continue;
+      const hitMe = this._lastAttacker === e && this._lastHitT && now - this._lastHitT < 6000;
+      const score = d * (hitMe ? 0.5 : 1);   // 附近有敌机就打（就近）；打中过我的算半距=优先反击
+      if (score < bestScore) { bestScore = score; best = e; }
+    }
+    if (best) return best;
+    // 地面坦克：防空车（ZSU-23-4）最优先，其余就近
+    let aa = null, aaD = Infinity, tnk = null, tnkD = Infinity;
+    for (const tk of ctx.ground) {
+      const d = tk.position.distanceTo(this.position);
+      if (d > 460) continue;
+      if (tk.type === 'aa' || tk.type === 'vads') { if (d < aaD) { aaD = d; aa = tk; } }
+      else if (d < tnkD) { tnkD = d; tnk = tk; }
+    }
+    return aa || tnk;
+  }
+  _tailFire(em, muz) {
+    const tt = this.tailTurret;
+    const dir = this._spread(tt.dir.clone(), 0.02);   // 遥控尾炮散布略大
+    const proj = new Projectile({
+      position: muz.clone(), direction: dir,
+      speed: CONFIG.plane.bulletSpeed, damage: this.bulletDamage * 0.7,   // 遥控炮后效七折（平衡）
+      owner: this, ownerTeam: this.team,
+      gravity: 0, life: 1.6,
+      color: this.team === 'blue' ? 0xfff2a0 : 0xff8855, size: 0.2,
+      pen: 20, shellDef: { id: 'cannon', name: '航炮弹', penMul: 1, dmgMul: 1, bounceDeg: 74, noBounce: false },
+    });
+    proj.isTail = true;   // 日常任务：尾炮击杀统计
+    em.addProjectile(proj);
+    em.addEffect(new MuzzleFlash(muz, 0x222222));
+    tt.cooldown = 0.11;
   }
 
   // 投炸弹（无追踪、有重力、落地范围爆炸）
@@ -3638,8 +4152,9 @@ class TankAI {
     const aimThresh = isEnemy ? 0.045 : 0.10;
     const fireChance = isEnemy ? CONFIG.tank.enemyFireChance : 0.85;
     const isAirTarget = isAir;   // 目标是飞机
-    // 视线检查：炮口到目标连线被建筑/岩石挡住 → 不开火（炮弹会拍墙上白装填；掩体后目标先机动绕出再打）
-    const losBlocked = !isAir && this._losBlocked(tank.position, target.position, obstacles);
+    // 视线检查：炮口到目标连线被建筑/岩石挡住 → 不开火（炮弹会拍墙上白装填；掩体后目标先机动绕出再打）。
+    // 对空也查——躲掩体后朝天上泼弹一样是浪费（仰射弹道过楼顶/山脊同样会被挡）。
+    const losBlocked = this._losBlocked(tank.position, target.position, obstacles);
     // 对空削弱：敌方坦克打飞机射程 240→160、开火率减半（玩家飞机不再被防空火力秒）
     const airRange = isAir ? (isEnemy ? 160 : 240) : 240;
     const airChance = (isAir && isEnemy) ? fireChance * 0.5 : fireChance;
@@ -3825,7 +4340,7 @@ class Heli {
         ? { id: 'cannon', name: '航炮弹', penMul: 1, dmgMul: 1, bounceDeg: 74, noBounce: false }                                    // 敌方：正常装甲判定（打薄甲行、重甲乏力）
         : { id: 'cannon', name: '航炮弹', penMul: 1, dmgMul: 1, bounceDeg: 90, noBounce: true, effCap: 500 },   // 玩家：必穿
     }));
-    this.reloadTimer = this.fireCooldown;
+    this.reloadTimer = this.fireCooldown * (this.buffReload || 1);
     return true;
   }
   // 导弹位（右键/X）：AH-64=地狱火追踪导弹（锁准星前半球目标）；Mi-24/直-10=无制导火箭巢齐射
@@ -4033,10 +4548,11 @@ class HeliAI {
     // 敌方机炮带 45% 停顿（泼弹节奏化），玩家/友军连射
     if (flatDist < 260 && p.canFire() && !losBlocked(p.position, target.position, obstacles)
         && (p.team === 'red' ? Math.random() < 0.55 : true)) p.tryFire(em);
+    const tgtLos = !losBlocked(p.position, target.position, obstacles);   // 火箭/导弹也看视线：隔着楼扔=白扔
     if (p.type === 'ah64') {
-      if (flatDist < 200 && p.missiles > 0 && Math.random() < dt * 0.7) p.tryFireMissile(em, enemies);
-      if (flatDist < 150 && Math.random() < dt * 3) p.tryFireRockets(em, true);
-    } else if (flatDist < 180 && p.missiles > 0 && Math.random() < dt * 0.8) {
+      if (tgtLos && flatDist < 200 && p.missiles > 0 && Math.random() < dt * 0.7) p.tryFireMissile(em, enemies);
+      if (tgtLos && flatDist < 150 && Math.random() < dt * 3) p.tryFireRockets(em, true);
+    } else if (tgtLos && flatDist < 180 && p.missiles > 0 && Math.random() < dt * 0.8) {
       p.tryFireMissile(em, enemies);
     }
   }
@@ -4074,6 +4590,48 @@ class Debris {
     }
   }
   dispose() { this.mesh.geometry.dispose(); this.mesh.material.dispose(); this.mesh.removeFromParent(); }
+}
+
+// ===== 空投补给：降落伞木箱 + 落地绿烟信标，驶入/飞近拾取随机增益 =====
+class Airdrop {
+  constructor(scene, x, z) {
+    this.t = 0; this.landed = false; this.alive = true; this.life = 30;
+    this.group = new THREE.Group();
+    const crate = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.4, 1.7), new THREE.MeshStandardMaterial({ color: 0x8a6d3a, roughness: 0.8 }));
+    crate.castShadow = true; this.group.add(crate);
+    const band = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.28, 1.8), new THREE.MeshBasicMaterial({ color: 0xffd870 }));   // 识别条
+    band.position.y = 0.35; this.group.add(band);
+    this.chute = new THREE.Mesh(
+      new THREE.ConeGeometry(3.4, 3.6, 10, 1, true),
+      new THREE.MeshStandardMaterial({ color: 0xd8dde4, transparent: true, opacity: 0.85, side: THREE.DoubleSide, roughness: 1 })
+    );
+    this.chute.position.y = 4.4; this.group.add(this.chute);
+    this.group.position.set(x, 130, z);
+    this.gy = terrainHeight(x, z) + 0.8;
+    this.smokeT = 0;
+    this.pos = this.group.position;
+    scene.add(this.group);
+  }
+  update(dt, em) {
+    if (!this.landed) {
+      this.t += dt;
+      this.group.position.y -= Math.min(15, 7 + this.t * 2.5) * dt;   // 先慢后快的伞降
+      this.group.rotation.y += dt * 0.7;
+      if (this.group.position.y <= this.gy) { this.group.position.y = this.gy; this.landed = true; this.chute.visible = false; }
+    } else {
+      this.life -= dt;
+      this.smokeT -= dt;
+      if (this.smokeT <= 0) {   // 绿烟信标柱：远处也找得到
+        this.smokeT = 0.5;
+        em.addEffect(new Smoke(this.group.position.clone().add(new THREE.Vector3(randRange(-0.4, 0.4), 1.4, randRange(-0.4, 0.4))), 0x53c22a, randRange(0.9, 1.4), randRange(2.0, 3.0), 2.4));
+      }
+      if (this.life <= 0) this.alive = false;
+    }
+  }
+  dispose() {
+    this.group.traverse((c) => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+    this.group.removeFromParent();
+  }
 }
 
 // ===== 坠机（战雷式）：飞机尾冒火坠落 / 直升机螺旋下坠空中解体 =====
@@ -4120,11 +4678,14 @@ class CrashFall {
     if (this.isHeli) { this.mesh.rotation.y += this.spin * dt; this.roll += 0.55 * dt; this.mesh.rotation.z = Math.min(this.roll, 0.6) * Math.sign(this.spin); }
     else { this.roll += this.spin * dt; this.mesh.rotation.z = this.roll; this.mesh.rotation.x += 0.12 * dt; }
     this.fire.material.opacity = 0.7 + Math.random() * 0.3;
-    // 拖烟
+    // 拖烟（加倍：一黑一灰双层）+ 机身火花
     this.smokeT -= dt;
     if (this.smokeT <= 0) {
-      this.smokeT = 0.07;
-      this.em.addEffect(new Smoke(this.mesh.position.clone().add(new THREE.Vector3(randRange(-0.6, 0.6), randRange(0, 1), randRange(-0.6, 0.6))), this.isHeli ? 0x1a1613 : 0x231e18, randRange(0.5, 0.9), randRange(1.0, 1.6), 1.2));
+      this.smokeT = 0.05;
+      const sp = this.mesh.position.clone().add(new THREE.Vector3(randRange(-0.6, 0.6), randRange(0, 1), randRange(-0.6, 0.6)));
+      this.em.addEffect(new Smoke(sp, this.isHeli ? 0x1a1613 : 0x231e18, randRange(0.6, 1.0), randRange(1.1, 1.8), 1.3));
+      this.em.addEffect(new Smoke(sp.clone().add(new THREE.Vector3(randRange(-1, 1), randRange(0, 1.5), randRange(-1, 1))), 0x4d443c, randRange(0.4, 0.7), randRange(0.8, 1.3), 1.0));
+      if (Math.random() < 0.5) this.em.addEffect(new Smoke(sp, 0xff8030, randRange(0.25, 0.45), randRange(0.5, 0.8), 0.5));   // 火花碎焰
     }
     // 直升机：空中解体——一边掉一边甩碎块
     if (this.isHeli && this.t > 0.6) {
@@ -4135,19 +4696,21 @@ class CrashFall {
         this.em.addEffect(new Debris(this.mesh.position.clone().add(new THREE.Vector3(randRange(-2, 2), randRange(-1, 1), randRange(-2, 2))), this.em, v));
       }
     }
-    // 触地：爆炸+焦黑+碎块四散
+    // 触地：大爆炸+冲击尘环+焦黑+碎块四散+残骸余火
     const g = terrainHeight(this.mesh.position.x, this.mesh.position.z) + 1.2;
     if (this.mesh.position.y <= g) {
       this.mesh.position.y = g;
       this.landed = true;
-      this.em.addEffect(new Explosion(this.mesh.position.clone(), this.isHeli ? 5 : 4, 0xff8030));
+      this.em.addEffect(new Explosion(this.mesh.position.clone().add(new THREE.Vector3(0, 2, 0)), this.isHeli ? 8 : 6.5, 0xff8030));
+      this.em.addEffect(new SplashRing(this.mesh.position.clone()));
+      for (let k = 0; k < 3; k++) this.em.addEffect(new Smoke(this.mesh.position.clone().add(new THREE.Vector3(randRange(-3, 3), 2 + k * 2.2, randRange(-3, 3))), 0x15100c, randRange(1.8, 3.0), randRange(2.6, 4.0), 3.2));
       this.mesh.traverse((c) => {
         if (c.material && c.material.color) {
           (Array.isArray(c.material) ? c.material : [c.material]).forEach((m) => { if (m.color) { m.color.multiplyScalar(0.18); m.roughness = 1; m.metalness = 0; } });
         }
       });
-      if (this.fire) { this.fire.visible = false; }
-      const n = this.isHeli ? 7 : 5;
+      if (this.fire) { this.fire.visible = true; this.fire.scale.setScalar(1.8); }   // 残骸余火（触地后继续烧）
+      const n = this.isHeli ? 12 : 8;
       for (let i = 0; i < n; i++) {
         const v = new THREE.Vector3(randRange(-14, 14), randRange(5, 14), randRange(-14, 14));
         this.em.addEffect(new Debris(this.mesh.position.clone(), this.em, v));
@@ -4375,21 +4938,22 @@ function setupEnvironment(scene, mode, renderer, isNight = false, isRain = false
   if (isNight) {
     skyColor = 0x0b1526; top = 0x020610;
     scene.background = new THREE.Color(0x05080f);
-    scene.fog = new THREE.Fog(0x070d18, 65, mode === 'plane' ? 520 : 320);   // 夜里雾近而浓：远处溶进黑暗
+    scene.fog = new THREE.Fog(0x070d18, 65, mode === 'plane' ? 780 : 480);   // 夜里雾近而浓：远处溶进黑暗
     renderer.toneMappingExposure = 1.35;   // 夜间提曝光保可见度（ACES 会压暗）
   } else if (isRain) {
     skyColor = 0x8d97a1; top = 0x5d6772;
     scene.background = new THREE.Color(0x99a3ad);
-    scene.fog = new THREE.Fog(0x8a949e, 70, mode === 'plane' ? 560 : 340);   // 雨天灰雾压低能见度
+    scene.fog = new THREE.Fog(0x8a949e, 70, mode === 'plane' ? 840 : 520);   // 雨天灰雾压低能见度
     renderer.toneMappingExposure = 1.1;
   } else {
     skyColor = mode === 'plane' ? 0x9ec9e8 : 0xbfd3c4;
     scene.background = new THREE.Color(skyColor);
-    scene.fog = new THREE.Fog(skyColor, 120, mode === 'plane' ? 700 : 450);
+    scene.fog = new THREE.Fog(skyColor, 120, mode === 'plane' ? 1050 : 700);
     top = mode === 'plane' ? 0x3f74ad : 0x6fa0c8;
   }
+  const domeR = (mode === 'plane' ? CONFIG.plane.worldSize : CONFIG.tank.worldSize) + 500;   // 穹顶随地图放大（飞到边缘不出天）
   const dome = new THREE.Mesh(
-    new THREE.SphereGeometry(1600, 24, 16),
+    new THREE.SphereGeometry(domeR, 24, 16),
     new THREE.MeshBasicMaterial({ map: makeSkyTexture(top, skyColor), side: THREE.BackSide, fog: false, depthWrite: false })
   );
   scene.add(dome);
@@ -4430,8 +4994,8 @@ function setupEnvironment(scene, mode, renderer, isNight = false, isRain = false
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);   // 4096 在集成显卡上代价过高；2048 在 120m 视景内 texel≈12cm，肉眼难辨
   sun.shadow.camera.near = 10;
-  sun.shadow.camera.far = 520;          // 低角度长影需要更远的阴影视景
-  const s = 120;
+  sun.shadow.camera.far = 650;          // 低角度长影需要更远的阴影视景
+  const s = 150;   // 阴影视景 ±150m（跟随后覆盖玩家四周，远处阴影更完整）
   sun.shadow.camera.left = -s;
   sun.shadow.camera.right = s;
   sun.shadow.camera.top = s;
@@ -4440,6 +5004,7 @@ function setupEnvironment(scene, mode, renderer, isNight = false, isRain = false
   sun.shadow.normalBias = 0.6;   // 法线偏移：消除斜射面上的阴影条纹（acne）
   sun.shadow.camera.updateProjectionMatrix(); // 改过视景边界后必须更新投影矩阵
   scene.add(sun);
+  sun.userData.off = sun.position.clone();   // 光向偏移快照：Game 每帧平移跟随玩家（远处不再"无影区/闪边"）
   scene.userData.sun = sun;   // 动态画质：运行时调阴影分辨率用
   // 方向光目标默认在原点，跟随太阳方向照射
 
@@ -4506,7 +5071,7 @@ const MAPS = [
 ];
 
 // 创建地面 + 障碍物 + 边界，返回 { group, obstacles, half }。mapId 决定地形主题。
-function createTerrain(scene, mode, mapId) {
+function createTerrain(scene, mode, mapId, dualRunway = false) {
   const group = new THREE.Group();
   const obstacles = [];
 
@@ -4521,7 +5086,7 @@ function createTerrain(scene, mode, mapId) {
 
   // 地面（细分高度场 + 顶点色：按地图调色板，低处→高处渐变）
   const groundSize = half * 2 + 400;
-  const groundGeo = new THREE.PlaneGeometry(groundSize, groundSize, 120, 120);
+  const groundGeo = new THREE.PlaneGeometry(groundSize, groundSize, 150, 150);
   groundGeo.rotateX(-Math.PI / 2);
   const gpos = groundGeo.attributes.position;
   const gcol = [];
@@ -4581,15 +5146,46 @@ function createTerrain(scene, mode, mapId) {
     ? [[-zh * 0.58, -zh * 0.10], [0, zh * 0.06], [zh * 0.58, -zh * 0.10]]
     : [];
   const nearZone = (x, z, r = 34) => zPts.some(([zx, zz]) => Math.hypot(x - zx, z - zz) < r);
+  // 跑道避让（空战模式）：跑道带及周边别刷楼/岩石，起飞净空（跑道 z∈[-(half-400), -(half-60)]，留边）；
+  // 联机（dualRunway）：南北两条跑道带都避让
+  const onRunwayZone = (x, z) => (mode === 'plane' || dualRunway) && Math.abs(x) < 26 && (
+    (mode === 'plane' && z < -(half - 440) && z > -(half - 10)) ||
+    (dualRunway && ((z < -(half - 440) && z > -(half - 10)) || (z > half - 440 && z < half - 10)))
+  );
   const baseCount = (mode === 'plane' ? 24 : 46) * (spread / 260);
   const obstacleCount = Math.round(baseCount * (theme.density || 1));
   const buildPal = theme.build || 0x80766a;
+  // —— 静态障碍合批：同材质的楼/岩石/矮墙/废墟各自合并成一个 mesh（150+ draw call → 5 个；阴影 pass 同步减半）——
+  // 画面零变化（同几何同材质）；碰撞用 obstacles 数组（与 mesh 无关），照旧。
+  const _buckets = new Map();   // key: color|rough|metal|flat → { items: [{geo, matrix}], mat }
+  const _m4 = new THREE.Matrix4(), _q4 = new THREE.Quaternion(), _e4 = new THREE.Euler(), _v4 = new THREE.Vector3(), _sc4 = new THREE.Vector3(1, 1, 1);
+  const addStatic = (color, rough, metal, flat, geo, px, py, pz, rotY = 0) => {
+    const key = color + '|' + rough + '|' + metal + '|' + flat;
+    let b = _buckets.get(key);
+    if (!b) { b = { items: [], mat: new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal, ...(flat ? { flatShading: true } : {}) }) }; _buckets.set(key, b); }
+    _e4.set(0, rotY, 0); _q4.setFromEuler(_e4); _v4.set(px, py, pz);
+    b.items.push({ geo, matrix: new THREE.Matrix4().compose(_v4, _q4, _sc4) });
+  };
+  const flushStatics = () => {
+    for (const b of _buckets.values()) {
+      if (!b.items.length) continue;
+      let total = 0;
+      const parts = b.items.map((it) => { const g = it.geo.index ? it.geo.toNonIndexed() : it.geo; g.applyMatrix4(it.matrix); total += g.attributes.position.count; return g; });
+      const pos = new Float32Array(total * 3), nor = new Float32Array(total * 3);
+      let o = 0;
+      for (const g of parts) { pos.set(g.attributes.position.array, o); nor.set(g.attributes.normal.array, o); o += g.attributes.position.count * 3; g.dispose(); }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+      const mesh = new THREE.Mesh(geo, b.mat);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      group.add(mesh);
+    }
+    _buckets.clear();
+  };
   const addBuilding = (x, z, pal, big) => {
     const w = randRange(big ? 11 : 7, big ? 22 : 16), h = randRange(big ? 9 : 6, big ? 26 : 18), d = randRange(big ? 11 : 7, big ? 22 : 16);
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: pal, roughness: 0.9 }));
-    m.position.set(x, h / 2 + terrainHeight(x, z), z);
-    m.castShadow = true; m.receiveShadow = true;
-    group.add(m);
+    addStatic(pal, 0.9, 0, false, new THREE.BoxGeometry(w, h, d), x, h / 2 + terrainHeight(x, z), z, 0);
     obstacles.push({ position: new THREE.Vector3(x, 0, z), radius: Math.max(w, d) / 2, height: h + terrainHeight(x, z) });
   };
 
@@ -4604,10 +5200,9 @@ function createTerrain(scene, mode, mapId) {
         for (let bz = -spread; bz < spread; bz += cell + street) {
           if (Math.hypot(bx, bz) < 75 || nearZone(bx, bz)) continue;
           const w = randRange(14, 20), h = randRange(8, 14), d = randRange(12, 18);
-          const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: buildPal, roughness: 0.85, metalness: 0.2 }));
-          m.position.set(bx + randRange(-2, 2), h / 2 + terrainHeight(bx, bz), bz + randRange(-2, 2));
-          m.castShadow = true; m.receiveShadow = true; group.add(m);
-          obstacles.push({ position: new THREE.Vector3(m.position.x, 0, m.position.z), radius: Math.max(w, d) / 2, height: h + terrainHeight(m.position.x, m.position.z) });
+          const px2 = bx + randRange(-2, 2), pz2 = bz + randRange(-2, 2);
+          addStatic(buildPal, 0.85, 0.2, false, new THREE.BoxGeometry(w, h, d), px2, h / 2 + terrainHeight(px2, pz2), pz2, 0);
+          obstacles.push({ position: new THREE.Vector3(px2, 0, pz2), radius: Math.max(w, d) / 2, height: h + terrainHeight(px2, pz2) });
           const sx = bx + randRange(-cell / 2, cell / 2), sz = bz + randRange(-cell / 2, cell / 2);
           if (Math.random() < 0.6 && !nearZone(sx, sz)) addBuilding(sx, sz, 0x4a4a50);
         }
@@ -4622,9 +5217,7 @@ function createTerrain(scene, mode, mapId) {
           const place = (ox, oz) => {
             if (nearZone(bx + ox, bz + oz)) return;
             const w = randRange(8, 14), h = ph + randRange(-3, 3), d = randRange(8, 14);
-            const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: buildPal, roughness: 0.9 }));
-            m.position.set(bx + ox, h / 2 + terrainHeight(bx + ox, bz + oz), bz + oz);
-            m.castShadow = true; m.receiveShadow = true; group.add(m);
+            addStatic(buildPal, 0.9, 0, false, new THREE.BoxGeometry(w, h, d), bx + ox, h / 2 + terrainHeight(bx + ox, bz + oz), bz + oz, 0);
             obstacles.push({ position: new THREE.Vector3(bx + ox, 0, bz + oz), radius: Math.max(w, d) / 2, height: h + terrainHeight(bx + ox, bz + oz) });
           };
           place(randRange(-cell / 3, cell / 3), -cell / 2 + randRange(-2, 2));
@@ -4640,7 +5233,7 @@ function createTerrain(scene, mode, mapId) {
   // 小镇群（散落村镇）
   for (let c = 0; c < (theme.towns || 0); c++) {
     const cx = randRange(-spread * 0.8, spread * 0.8), cz = randRange(-spread * 0.8, spread * 0.8);
-    if (Math.hypot(cx, cz) < 60 || nearZone(cx, cz, 60)) continue;
+    if (Math.hypot(cx, cz) < 60 || nearZone(cx, cz, 60) || onRunwayZone(cx, cz)) continue;
     for (let k = 0; k < randInt(6, 10); k++) {
       const x = cx + randRange(-26, 26), z = cz + randRange(-26, 26);
       if (Math.abs(x) < 24 && Math.abs(z) < 24) continue;
@@ -4657,41 +5250,86 @@ function createTerrain(scene, mode, mapId) {
     const x = randRange(-spread, spread), z = randRange(-spread, spread);
     if (Math.abs(x) < 24 && Math.abs(z) < 24) continue;
     if (nearZone(x, z)) continue;   // 据点周边留空（散落掩体也别糊点）
+    if (onRunwayZone(x, z)) continue;   // 跑道净空
     const type = pickType();
     let mesh, radius;
     // （trees 已在循环外声明）
     if (type === 'building') {
       const w = randRange(8, 18), h = randRange(7, 22), d = randRange(8, 18);
-      mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: buildPal, roughness: 0.9 }));
-      mesh.position.set(x, h / 2 + terrainHeight(x, z), z); radius = Math.max(w, d) / 2;
+      addStatic(buildPal, 0.9, 0, false, new THREE.BoxGeometry(w, h, d), x, h / 2 + terrainHeight(x, z), z, 0);
+      radius = Math.max(w, d) / 2;
     } else if (type === 'rock') {
       const r = randRange(2, 6);
-      mesh = new THREE.Mesh(new THREE.DodecahedronGeometry(r, 0), new THREE.MeshStandardMaterial({ color: 0x807872, roughness: 1, flatShading: true }));
-      mesh.position.set(x, r * 0.7 + terrainHeight(x, z), z); mesh.rotation.set(randRange(0, 1), randRange(0, 1), randRange(0, 1)); radius = r;
+      const _rq = new THREE.Quaternion().setFromEuler(new THREE.Euler(randRange(0, 1), randRange(0, 1), randRange(0, 1)));
+      const _rb = _buckets.get('0x807872|1|0|true') || { items: [], mat: new THREE.MeshStandardMaterial({ color: 0x807872, roughness: 1, flatShading: true }) };
+      _buckets.set('0x807872|1|0|true', _rb);
+      _rb.items.push({ geo: new THREE.DodecahedronGeometry(r, 0), matrix: new THREE.Matrix4().compose(new THREE.Vector3(x, r * 0.7 + terrainHeight(x, z), z), _rq, _sc4) });
+      radius = r;
     } else if (type === 'tree') {
       // 树改走 InstancedMesh（循环后统一建）：几百棵树从几百 draw call 压成 1 个——性能大头
       trees.push({ x, z, s: randRange(0.8, 1.5), rot: Math.random() * Math.PI * 2 });
       radius = 2.5; mesh = null;
     } else if (type === 'wall') {
       const w = randRange(8, 16), h = randRange(1.6, 2.4), d = randRange(1.5, 2.5);
-      mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: theme.wall || 0x6b5d3f, roughness: 1, flatShading: true }));
-      mesh.position.set(x, h / 2 + terrainHeight(x, z), z); mesh.rotation.y = randRange(0, Math.PI); radius = w / 2;
+      addStatic(theme.wall || 0x6b5d3f, 1, 0, true, new THREE.BoxGeometry(w, h, d), x, h / 2 + terrainHeight(x, z), z, randRange(0, Math.PI));
+      radius = w / 2;
     } else { // ruin
       const w = randRange(3, 6);
-      mesh = new THREE.Mesh(new THREE.BoxGeometry(w, w, w * 1.4), new THREE.MeshStandardMaterial({ color: 0x3a3530, roughness: 1, metalness: 0.3, flatShading: true }));
-      mesh.position.set(x, w * 0.5 + terrainHeight(x, z), z); mesh.rotation.set(randRange(-0.4, 0.4), randRange(0, 6.28), randRange(-0.4, 0.4)); radius = w;
+      const _uq = new THREE.Quaternion().setFromEuler(new THREE.Euler(randRange(-0.4, 0.4), randRange(0, 6.28), randRange(-0.4, 0.4)));
+      const _ub = _buckets.get('0x3a3530|1|0.3|true') || { items: [], mat: new THREE.MeshStandardMaterial({ color: 0x3a3530, roughness: 1, metalness: 0.3, flatShading: true }) };
+      _buckets.set('0x3a3530|1|0.3|true', _ub);
+      _ub.items.push({ geo: new THREE.BoxGeometry(w, w, w * 1.4), matrix: new THREE.Matrix4().compose(new THREE.Vector3(x, w * 0.5 + terrainHeight(x, z), z), _uq, _sc4) });
+      radius = w;
     }
     if (type === 'tree') {
       // 树实例：障碍项记录 idx（撞倒走 setMatrixAt），高度近似
       obstacles.push({ position: new THREE.Vector3(x, 0, z), radius, height: terrainHeight(x, z) + 10, treeIdx: trees.length - 1 });
     } else {
-      mesh.castShadow = true; mesh.receiveShadow = true;
-      group.add(mesh);
-      obstacles.push({ position: new THREE.Vector3(x, 0, z), radius, height: mesh && mesh.geometry && mesh.geometry.parameters && mesh.geometry.parameters.height ? mesh.geometry.parameters.height + terrainHeight(x, z) + 2 : 30 });   // 树冠等杂物的近似顶高
+      // 已进合批桶；障碍高度用类型近似（合批后拿不到单几何参数）
+      const approxH = type === 'building' ? 24 : (type === 'rock' ? 8 : (type === 'wall' ? 3 : 8));
+      obstacles.push({ position: new THREE.Vector3(x, 0, z), radius, height: approxH + terrainHeight(x, z) + 2 });
     }
   }
+  flushStatics();   // 楼/岩/墙/废墟合并成 4~6 个 mesh 落地
 
   scene.add(group);
+  // —— 机场跑道（战雷式起飞）：跑道头横杠在起飞端（朝向敌方的端头） ——
+  // 单机空战：南侧一条，头朝北；联机（dualRunway）：南北各一条镜像（蓝南朝北 / 红北朝南）
+  if (mode === 'plane' || dualRunway) {
+    const mkRunway = (cz, flip) => {
+      const rw = new THREE.Group();
+      const gndY = terrainHeight(0, cz);
+      const asMat = new THREE.MeshStandardMaterial({ color: 0x3a3d40, roughness: 0.95 });
+      const strip = new THREE.Mesh(new THREE.PlaneGeometry(26, 340), asMat);
+      strip.rotation.x = -Math.PI / 2;
+      strip.position.set(0, gndY + 0.06, cz);
+      strip.receiveShadow = true;
+      rw.add(strip);
+      const lineMat = new THREE.MeshBasicMaterial({ color: 0xd8d8d0 });
+      for (let i = 0; i < 10; i++) {   // 中线虚线
+        const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 9), lineMat);
+        dash.rotation.x = -Math.PI / 2;
+        dash.position.set(0, gndY + 0.09, cz - 150 + i * 33);
+        rw.add(dash);
+      }
+      for (const sx of [-9, 9]) {   // 跑道边线
+        const edge = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 330), lineMat);
+        edge.rotation.x = -Math.PI / 2;
+        edge.position.set(sx, gndY + 0.09, cz);
+        rw.add(edge);
+      }
+      for (const sx of [-8, -4, 4, 8]) {   // 跑道头横杠（起飞端）
+        const thr = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 14), lineMat);
+        thr.rotation.x = -Math.PI / 2;
+        thr.position.set(sx, gndY + 0.09, cz + (flip ? 166 : -166));
+        rw.add(thr);
+      }
+      group.add(rw);
+    };
+    const halfRW = mode === 'plane' ? CONFIG.plane.worldSize : half;
+    mkRunway(-(halfRW - 230), false);   // 南跑道：头朝北（默认起飞方向）
+    if (dualRunway) mkRunway(halfRW - 230, true);   // 联机北跑道：头朝南（红军用）
+  }
   // 近景草海（坦克模式）：相机周围铺草，跟随重排
   const grass = (mode === 'tank') ? new GrassField(scene, theme) : null;
   let treeInst = null;
@@ -4757,7 +5395,7 @@ function createTerrain(scene, mode, mapId) {
 // 入口：new Game({ canvas, mode, hudContainer, onExit })。
 // ===== 设置（localStorage 持久化） =====
 const SETTINGS_KEY = 'wt_settings';
-const DEFAULT_SETTINGS = { volume: 0.8, engineVolume: 0.8, shadows: true, invertY: false, planeGain: 1.0 };
+const DEFAULT_SETTINGS = { volume: 0.8, engineVolume: 0.8, shadows: true, invertY: false, planeGain: 1.0, tankGain: 1.0, grain: true, pace: 0, music: 0.5, flightAssist: true, simMode: false, fpsShow: true };   // pace: 0正常 1慢速0.5× 2超慢0.25×；flightAssist: 飞行教官自动改平（关=纯手动杆）；tankGain: 坦克炮塔鼠标灵敏度
 function loadSettings() {
   try { return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); }
   catch (e) { return Object.assign({}, DEFAULT_SETTINGS); }
@@ -4860,6 +5498,12 @@ class Sfx {
   }
   hit() { this._blip(900, 700, 0.08, 0.25, 'sine'); }
   kill() { this._blip(660, 990, 0.18, 0.3, 'triangle'); }
+  // —— 事件音效（氛围）：连杀琶音 / 王牌警报 / 空投风铃 / 波次号角 / 终局号令 ——
+  streak(n) { const b = 480 + Math.min(6, n) * 90; [0, 1, 2].forEach((i) => setTimeout(() => this._blip(b * (1 + i * 0.26), b * (1 + i * 0.26), 0.09, 0.24, 'triangle'), i * 75)); }
+  aceAlarm() { [0, 1, 2, 3].forEach((i) => setTimeout(() => this._blip(i % 2 ? 640 : 880, i % 2 ? 640 : 880, 0.17, 0.2, 'square'), i * 185)); }
+  chime() { [660, 880, 1320].forEach((f, i) => setTimeout(() => this._blip(f, f, 0.13, 0.2, 'sine'), i * 95)); }
+  waveHorn() { this._blip(155, 220, 0.5, 0.28, 'sawtooth'); setTimeout(() => this._blip(220, 155, 0.42, 0.22, 'sawtooth'), 270); }
+  fanfare(win) { (win ? [523, 659, 784, 1047] : [392, 330, 262, 196]).forEach((f, i) => setTimeout(() => this._blip(f, f, 0.24, 0.26, win ? 'triangle' : 'sine'), i * 165)); }
   // 被击中闷响：低频下坠 + 短促重击，与"打中敌人"的高频叮区分开（战场受击感）。
   // 两层：200→60Hz 低音坠落(主体) + 90Hz 三角波垫底(金属钝响)。
   hitTaken() {
@@ -4893,18 +5537,101 @@ class Sfx {
   stopEngine() { if (this.engine) { try { this.engine.osc.stop(); } catch (e) {} this.engine = null; } }
 }
 
+// ===== 动态战斗音乐：三层合成器（平静琶音/战鼓/低音行进），强度随交战实时升降 =====
+// 16 步音序器 + 120ms 前瞻调度（WebAudio 时间轴精确合拍）；挂在 Sfx 的 AudioContext 上走独立分轨。
+class Music {
+  constructor(sfx) {
+    this.sfx = sfx;
+    this.intensity = 0.2; this.target = 0.2;   // 0 平静 … 1 激战（平滑追踪）
+    this.step = 0; this.nextT = 0;
+    this.vol = 0.5;
+    this.timer = null;
+  }
+  _ensure() {
+    if (this.gain || !this.sfx.ctx) return this.gain || null;
+    this.gain = this.sfx.ctx.createGain();
+    this.gain.gain.value = this.vol;
+    this.gain.connect(this.sfx.master);
+    return this.gain;
+  }
+  setVolume(v) { this.vol = v; if (this.gain) this.gain.gain.value = v; }
+  start() { if (!this.timer) this.timer = setInterval(() => this._tick(), 120); }
+  stop() { clearInterval(this.timer); this.timer = null; }
+  combat(level) { this.target = clamp(level, 0, 1); }
+  _tick() {
+    const ctx = this.sfx.ctx;
+    if (!ctx || ctx.state !== 'running' || !this._ensure()) return;
+    this.intensity += (this.target - this.intensity) * 0.1;   // ~1.5s 收敛，不突兀
+    const now = ctx.currentTime;
+    if (this.nextT < now) this.nextT = now + 0.05;
+    while (this.nextT < now + 0.4) {   // 400ms 前瞻：时间轴上排音符，不受 setInterval 抖动影响
+      this._schedule(this.nextT, this.step++);
+      this.nextT += 60 / (86 + this.intensity * 46) / 2;   // 86→132 BPM，越打越快
+    }
+  }
+  _schedule(t, step) {
+    const I = this.intensity;
+    // 低音脉冲（骨架，永远在）：音量随强度
+    if (step % 2 === 0) this._note(t, step % 8 === 0 ? 55 : 82.4, 0.24, 0.08 + I * 0.14, 'sine');
+    // 平静层：慢琶音（小调五声，衬底），强度高时淡出
+    const SCALE = [220, 261.6, 293.7, 329.6, 392, 440];
+    if (I < 0.6 && step % 4 === 2) this._note(t, SCALE[(step >> 2) % SCALE.length], 0.55, 0.045 * (1 - I), 'triangle');
+    // 战斗层：底鼓 + 军鼓碎拍 + 高音琶音，强度 >0.3 渐入
+    if (I > 0.3) {
+      if (step % 4 === 0) this._drum(t, 0.1, 0.05 + I * 0.09);
+      if (I > 0.65 && step % 2 === 1) this._drum(t, 0.045, 0.025 + I * 0.05);
+      if (step % 8 === 4) this._note(t, SCALE[(step >> 1) % SCALE.length] * 2, 0.16, 0.025 + I * 0.045, 'square');
+    }
+    // 高潮层：激战（>0.85）加进行曲低音
+    if (I > 0.85 && step % 8 === 0) this._note(t, 110, 0.3, 0.1, 'sawtooth');
+  }
+  _note(t, freq, dur, gain, type) {
+    const ctx = this.sfx.ctx;
+    const o = ctx.createOscillator(); o.type = type; o.frequency.value = freq;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.002, gain), t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(this.gain);
+    o.start(t); o.stop(t + dur + 0.03);
+  }
+  _drum(t, dur, gain) {
+    const ctx = this.sfx.ctx;
+    const src = ctx.createBufferSource(); src.buffer = this.sfx._noiseBuf(dur);
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 3000;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f); f.connect(g); g.connect(this.gain);
+    src.start(t); src.stop(t + dur + 0.02);
+  }
+}
+
 class Game {
-  constructor({ canvas, mode = 'tank', difficulty = 'normal', tankType = 'medium', planeType = 'fighter', endless = false, objective = 'battle', mapId = 'open', worldwar = false, solo = false, limitedAmmo = false, ownedTanks = ['medium'], ownedPlanes = ['fighter'], hudContainer, onExit, onResult } = {}) {
+  constructor({ canvas, mode = 'tank', difficulty = 'normal', tankType = 'medium', planeType = 'fighter', endless = false, objective = 'battle', mapId = 'open', worldwar = false, solo = false, limitedAmmo = false, ownedTanks = ['medium'], ownedPlanes = ['fighter'], daily = false, tutorial = false, sim = false, mp = null, hudContainer, onExit, onResult } = {}) {
     this.canvas = canvas;
     this.mode = mode;
+    this.mp = mp || null;   // 联机对战（PvP）：非空=联机局（AI/波次/票数等单机规则全部让位，见 _initMatch）
+    if (this.mp) { this.hudContainer = hudContainer; this.mp.attachGame(this); }
+    this.daily = daily;   // 每日挑战：日期种子接管随机流（地形/出生点/事件全确定），dispose 还原
+    if (daily) {
+      const d = dailyInfo();
+      this._dailySeed = d.seed;
+      this.dailyMods = d.mods;   // 供测试/HUD 读取
+      this._origRandom = Math.random;
+      Math.random = mulberry32(d.seed);
+    }
     this.difficulty = difficulty;
     this.tankType = tankType;
     this.planeType = planeType;
     this.endless = endless;
     this.objective = mode === 'tank' ? objective : 'battle';   // 'battle'(歼灭) | 'capture'(占领，仅陆战)
+    this.tutorial = tutorial;   // 新手教学：5 步引导（驾驶/射击/弹种/修理/毕业战）
+    this.sim = this.mp ? false : sim;   // 拟真节奏（战雷式）；联机局禁用（数值不同步）
+    if (tutorial) this.objective = 'tutorial';
     this.solo = solo;   // 无队友模式（成就用）
     this.limitedAmmo = limitedAmmo;   // 有限弹药模式：主炮备弹40发+地图中央补给区
-    this.mapId = mode === 'tank' ? mapId : 'open';             // 地图主题（仅陆战）
+    this.mapId = mapId;                                        // 地图主题（陆战/空战通用；空战地图池由菜单侧把关，跳过纯巷战图）
     this._isNight = !!(MAPS.find((m) => m.id === this.mapId) || {}).night;   // 夜战：月光+星空+车头灯
     this._isRain = !!(MAPS.find((m) => m.id === this.mapId) || {}).rain;     // 雨天：雨幕+湿滑反光
     this.worldwar = worldwar;                                  // 世界大战：混合作战（坦克+飞机同场）
@@ -4914,8 +5641,10 @@ class Game {
     this.onResult = onResult;
     this.state = 'playing';
     this.settings = loadSettings();
+    this.timeScale = [1, 0.5, 0.25][this.settings.pace | 0] || 1;   // 游戏节奏：全局时间流速（慢速/超慢，全世界等比变慢）
+    if (this.mp) this.timeScale = 1;   // 联机局强制正常节奏（各自时流不同步会打不中）
 
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });   // 强制独显：双 GPU Mac 默认可能用核显（性能好也卡的头号原因）
     // 1.5 封顶：Retina 2.0 的填充率开销近乎翻倍（卡顿主因），1.5 肉眼难辨
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -4930,8 +5659,8 @@ class Game {
     this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.5, 3000);
     this.camera.layers.enable(2);   // 层2=燃烧残骸(回放相机不开,避免黑残骸挡克隆车透视)
 
-    setupEnvironment(this.scene, mode, this.renderer, this._isNight && mode === 'tank', this._isRain && mode === 'tank');
-    if (this._isRain && mode === 'tank') this.rain = new RainFX(this.scene);   // 雨幕（跟相机）
+    setupEnvironment(this.scene, mode, this.renderer, this._isNight, this._isRain);   // 夜/雨/雷暴空战：天空雾距 setupEnvironment 已按 plane 模式适配
+    if (this._isRain) this.rain = new RainFX(this.scene);   // 雨幕（跟相机，空战高空一样淋雨）
     this._isStorm = !!(MAPS.find((m) => m.id === this.mapId) || {}).storm;     // 雷暴：随机闪电照亮全场
     this._stormT = randRange(3, 7); this._lightning = 0; this._thunderT = -1;
     // 夜战车头灯：一盏 SpotLight 照玩家车前方（AI 不给灯——黑暗里找灯打也是夜战玩法）
@@ -4963,9 +5692,15 @@ class Game {
     // Esc 暂停/恢复（常驻）：指针锁定时 Esc 被浏览器消费（走 _onPLChange 暂停），页面收不到
     // keydown；这里只处理"未锁定/已暂停"状态的 Esc。
     this._onEscKey = (e) => {
-      if (e.code !== 'Escape' || e.repeat) return;
-      if (this.state !== 'playing' || this._disposed || this._wwPick) return;
-      this._togglePause();
+      if (e.code === 'Escape') {
+        if (e.repeat || this.state !== 'playing' || this._disposed || this._wwPick) return;
+        this._togglePause();
+      } else if (e.code === 'KeyH') {
+        if (this.hud) this.hud.expandHint();   // 键位提示收起后按 H 唤回
+      } else if (e.code === 'KeyB' && this._wwWatch && this.state === 'playing' && !this._disposed) {
+        this._wwWatch = false;   // 世界大战观战中：重开选载具面板
+        this._showWWPanel();
+      }
     };
     window.addEventListener('keydown', this._onEscKey);
     // 指针锁定状态变化跟踪：用于在坦克模式显示/隐藏"点击锁定"提示，
@@ -4983,7 +5718,8 @@ class Game {
         // 指针锁定时按 Esc：浏览器直接退出锁定、页面收不到 keydown Escape → 顺势暂停。
         // 程序化退锁的场景各自有状态守卫：_pause 自身（paused 已 true）、_end（state=over）、
         // 世界大战选载具（_wwPick 先置 true 再退锁）、dispose（_disposed 先置 true）。
-        this._pause();
+        // 联机对战：不暂停（_togglePause 也会拦），只留十字光标提示"点击继续"。
+        if (!this.mp) this._pause();
       }
     };
     document.addEventListener('pointerlockchange', this._onPLChange);
@@ -4992,6 +5728,9 @@ class Game {
     this.sfx = new Sfx();
     this.sfx.setVolume(this.settings.volume);
     this.sfx.setEngineVolume(this.settings.engineVolume ?? 0.8);
+    this.music = new Music(this.sfx);   // 动态战斗音乐：强度由 _update 按交战状态驱动
+    this.music.setVolume(this.settings.music != null ? this.settings.music : 0.5);
+    this.music.start();
     this.sfx.listener = this.camera;
     this.em.sfx = this.sfx;
     this.em.listener = this.camera;
@@ -5008,6 +5747,19 @@ class Game {
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, QM[_q].pr));
     }
     this.postfx.setQuality(this._qLevel === 2);   // 高清档：SSAO+锐化
+    this.postfx.setGrain(this.settings.grain !== false);   // 胶片颗粒（静态细噪，可关）
+    {   // 节奏角标：拟真/慢速生效时常驻左上角（状态可见，不再"感觉慢却不知道为什么"）
+      const tags = [];
+      if (sim) tags.push('⚔ 拟真');
+      if (this.timeScale && this.timeScale !== 1) tags.push(`🐢 ${this.timeScale}×`);
+      if (tags.length) {
+        const el = document.createElement('div');
+        el.style.cssText = 'position:absolute;left:12px;top:96px;z-index:25;color:#ffd870;font-size:13px;font-weight:600;text-shadow:0 1px 3px #000;background:rgba(20,28,22,0.55);padding:4px 10px;border-radius:8px;pointer-events:none';
+        el.textContent = tags.join('　');
+        hudContainer.appendChild(el);
+        this._paceBadge = el;
+      }
+    }
 
     this._onResize = () => this._handleResize();
     window.addEventListener('resize', this._onResize);
@@ -5016,15 +5768,33 @@ class Game {
     this._setupTouchButtons();
     this.clock = new THREE.Clock();
     this._initMatch(mode);
+    if (this.daily) this._applyDailyMods();   // 词条应用（须在 _initMatch 定完队友数之后）
+    try { this.renderer.compile(this.scene, this.camera); } catch (e) {}   // 着色器预热：开局编译完，战斗中不再"首次遇到就卡一下"
 
     this._raf = requestAnimationFrame(this._animate);
   }
 
   _setupHint() {
+    const mpTag = this.mp ? '<b style="color:#ffd870">🌐 联机对战 · Esc 不暂停</b> · ' : '';
     if (this.mode === 'tank') {
-      this.hud.setHint('<b>点击画面锁定鼠标</b>（炮塔可无限转，Esc 暂停）· <b>WASD</b> 车体 · <b>左键</b>主炮 · <b>1/2/3</b>切弹种 · <b>空格</b>机枪 · <b>Shift</b>瞄准镜（<b>滚轮</b>测距 · <b>Z</b>倍率）· <b>R</b>修车 · <b>F</b>灭火 · <b>G</b>烟雾弹 · <b>V</b>标记集火');
+      this.hud.setHint(mpTag + '<b>点击画面锁定鼠标</b>（炮塔可无限转，Esc 暂停）· <b>WASD</b> 车体 · <b>左键</b>主炮 · <b>1/2/3</b>切弹种 · <b>空格</b>机枪 · <b>Shift</b>瞄准镜（<b>滚轮</b>测距 · <b>Z</b>倍率）· <b>R</b>修车 · <b>F</b>灭火 · <b>G</b>烟雾弹 · <b>V</b>标记集火 · <b>H</b>键位');
     } else {
-      this.hud.setHint('<b>点击画面锁定鼠标</b>（指哪飞哪，自动改平，Esc 暂停）· <b>W/S</b>油门 · <b>Shift</b>加力 · <b>左键</b>开火 · <b>右键/X</b>导弹(喷气机) · <b>F</b>灭火');
+      this.hud.setHint(mpTag + '<b>点击画面锁定鼠标</b>（指哪飞哪，自动改平，Esc 暂停）· <b>W/S</b>油门 · <b>Shift</b>加力 · <b>左键</b>开火 · <b>右键/X</b>导弹(喷气机) · <b>B</b>炸弹 · <b>T</b>尾炮自动炮手(轰炸机) · <b>F</b>灭火 · <b>H</b>键位');
+    }
+    // 右上角常驻按钮：单机=暂停；联机（Esc 不暂停）=打开设置——鼠标/触屏保底入口
+    const corner = this.hud.container.querySelector('#btn-corner');
+    if (corner) {
+      corner.textContent = this.mp ? '⚙' : '⏸';
+      corner.title = this.mp ? '设置' : '暂停';
+      if (!this._cornerWired) {   // restart 会再进 _setupHint，只绑一次
+        this._cornerWired = true;
+        corner.addEventListener('click', (e) => {
+          e.stopPropagation();   // 防冒泡到 document 的"点击锁指针"逻辑
+          if (this._disposed || this.state !== 'playing') return;
+          if (this.mp) { if (window.__wtSettings) window.__wtSettings.open(); }
+          else this._togglePause();
+        });
+      }
     }
   }
 
@@ -5054,6 +5824,30 @@ class Game {
     this._tbBomb.style.display = isPlane ? '' : 'none';
     this._tbNuke.style.display = (isPlane && this.player.maxBombs > 0 && this.player.bombs >= 3) ? '' : 'none';
     this._tbJ.style.display = (this.worldwar && this.player && this.player.alive) ? '' : 'none';
+  }
+
+  // 曲射炮（M109）落点指示环：自由瞄准=黄环；已锁定=红橙环（吸附到目标提前量拦截点）
+  _updateArtyAimRing(pt, locked = false) {
+    if (!this._artyAimRing) {
+      const ring = new THREE.Mesh(new THREE.RingGeometry(11.6, 13, 28), new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.visible = false;
+      this.scene.add(ring);
+      this._artyAimRing = ring;
+    }
+    this._artyAimRing.visible = true;
+    this._artyAimRing.position.set(pt.x, terrainHeight(pt.x, pt.z) + 0.3, pt.z);
+    const th = performance.now() / 300;
+    if (locked) {   // 锁定：红橙环+呼吸更亮+外扩脉冲（辨识"已咬住"）
+      this._artyAimRing.material.color.setHex(0xff5a2a);
+      this._artyAimRing.material.opacity = 0.55 + 0.3 * Math.abs(Math.sin(th));
+      const s = 1 + 0.08 * Math.sin(th * 2);
+      this._artyAimRing.scale.set(s, s, 1);
+    } else {
+      this._artyAimRing.material.color.setHex(0xffd23a);
+      this._artyAimRing.material.opacity = 0.4 + 0.25 * Math.abs(Math.sin(th));
+      this._artyAimRing.scale.set(1, 1, 1);
+    }
   }
 
   // 烟雾弹：G 键,一局 3 发,车侧拉一排烟幕 12s(AI 视线被遮不开火)
@@ -5118,12 +5912,24 @@ class Game {
   // —— 比赛初始化 ——
   _initMatch(mode) {
     this.stats = { hits: 0, pen: 0, bounce: 0, nopen: 0, ammoKills: 0, fired: 0 };   // 结算统计(发射数在 _updateHUD 前从 em.pShells 汇总)
+    this._dmgTaken = false;   // 日常任务：无伤判定（被命中即置 true）
     this.sp = 500;              // SP 出生点（世界大战经济）：击杀攒、重生扣
+    this.airdrops = [];         // 空投补给箱（随机事件）
+    this._airdropT = randRange(25, 40);   // 首个空投倒计时
+    this._buffs = [];           // 限时增益（空投拾取）：{p, key, t}
+    this._rc = { reload: 1, dmg: 1, speed: 1, hp: 1, pen: 1, turret: 1, killHeal: 0, waveHeal: 0, dropMul: 1, eSpread: 1, eSpeed: 1, missiles: 0, bombs: 0, goldMul: 1, rpMul: 1 };   // 三选一强化倍率表（波次类模式）
+    this._rcPicks = {};   // 卡片叠加计数（播报显示 ×N）
     this._streak = 0; this._streakT = 0;   // 连杀窗口(8s内连杀累计)
     this._rangeAuto = true; this._rangeSet = null;   // 瞄准镜测距装订（null=未手动装订）
     this._scopeMag = this._scopeMag || 4;             // 倍率偏好跨局保留
     applyDifficulty(this.difficulty); // 按难度重算 CONFIG
-    this.terrain = createTerrain(this.scene, this.worldwar ? 'tank' : mode, this.mapId);   // 世界大战永远用坦克地形（不管玩家选飞机还是坦克）
+    if (this.sim) this._applySim();   // 拟真节奏（战雷式）：车沉炮慢装填长、命中致命——难度基线之上再乘
+    // 联机对战用小图（人少节奏快）：900 → 480；跑道/出生点/障碍密度按新半径自适应（dispose 还原）
+    if (this.mp && CONFIG.tank.worldSize > 600) {
+      this._mpSavedWorldSize = CONFIG.tank.worldSize;
+      CONFIG.tank.worldSize = 480;
+    }
+    this.terrain = createTerrain(this.scene, (this.mp || this.worldwar) ? 'tank' : mode, this.mapId, !!this.mp);   // 世界大战/联机永远用坦克地形；联机画南北双跑道（飞机机场起飞）
     if (this.limitedAmmo && (this.worldwar || mode === 'tank')) {   // 有限弹药：中央补给区地面环
       const ring = new THREE.Mesh(new THREE.RingGeometry(12.5, 14, 40), new THREE.MeshBasicMaterial({ color: 0xffb040, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
       ring.rotation.x = -Math.PI / 2;
@@ -5139,7 +5945,7 @@ class Game {
     this._namePool = [];        // AI 代号池（打乱按序取）
     this._mapBg = null;         // 大地图地形底图缓存（换图失效）
     this.playerLives = R.playerLives;
-    this.enemyTickets = (this.endless || this.objective === 'waves') ? Infinity : (mode === 'tank' ? R.tankTickets : R.planeTickets);
+    this.enemyTickets = (this.endless || this.objective === 'waves' || this.objective === 'bossrush' || this.objective === 'flag') ? Infinity : (mode === 'tank' ? R.tankTickets : R.planeTickets);
     this.enemiesToSpawn = this.objective === 'capture' ? 9999 : this.enemyTickets;   // 征服：增援池挂票数（票未尽援不断），上限在 _updateEnemySpawns 按票算
     this._bleedHolder = null;   // 流失播报状态（占多数点的一方）
     this._noEnemyT = 0;         // 敌方全灭计时（兜底判胜用）
@@ -5152,13 +5958,38 @@ class Game {
     this.enemies = [];
     this.allies = [];
 
+    // —— 联机对战（PvP）：敌方/队友都是真人幽灵（mp 模块按 wt-state 创建），
+    //    不铺 AI、不开波次/空投/票数，胜负走队伍击杀数（率先 targetKills 杀获胜）。
+    if (this.mp) {
+      this.playerLives = Infinity;
+      this.enemyTickets = Infinity;
+      this.enemiesToSpawn = 0;
+      this.allyCount = 0;
+      this._makePlayer();
+      this.em.mpShootHook = (p) => { if (this.mp) this.mp.onLocalProjectile(p); };   // 弹丸广播（视觉弹）
+      this.em.mpGhostHit = (t, dmg, p) => { if (this.mp) this.mp.reportHit(t, dmg, p, null); };   // 范围爆炸波及联机幽灵：上报主机（含曲射炮半血语义）
+      this._setupObjective();   // objective='battle' → 仅清 UI
+      this.hud.setCenterMessage('');
+      this.hud.addFeed(`🌐 联机对战 · 坦克/飞机混编 · 率先 ${this.mp.targetKills} 杀的队伍获胜！`, 'info');
+      this.hud.addFeed('Esc 不暂停 · 阵亡 5 秒后自动重生 · Tab 看计分板', 'info');
+      return;
+    }
+
     this._makePlayer();
 
-    // 波次生存：不铺常规敌（3 秒后第一波来袭），增援池关闭
-    if (this.objective === 'waves') {
+    // 波次类模式（波次生存/Boss连战）：不铺常规敌（3 秒后第一波来袭），增援池关闭
+    if (this.objective === 'waves' || this.objective === 'bossrush') {
       this.wave = 0; this._waveInterT = 3;
       this.enemiesToSpawn = 0;
-      this.hud.setCenterMessage('🌊 波次生存：准备好！');
+      this.hud.setCenterMessage(this.objective === 'bossrush' ? '💀 Boss 连战：准备好！' : '🌊 波次生存：准备好！');
+    } else if (this.objective === 'tutorial') {
+      this.enemiesToSpawn = 0;   // 教学：不铺常规敌，按步骤来
+      this._tutSetup();
+    } else if (this.objective === 'flag') {
+      this._setupFlags();   // 夺旗冲锋：双方基地各一面军旗，3 夺获胜
+      const initial = Math.min(R.maxConcurrentEnemies, 4);
+      for (let i = 0; i < initial; i++) this._spawnEnemy();
+      this.enemiesToSpawn = 9999;   // 守旗敌军持续增援
     } else {
       const initial = Math.min(R.maxConcurrentEnemies, this.enemyTickets);
       for (let i = 0; i < initial; i++) this._spawnEnemy();
@@ -5171,6 +6002,7 @@ class Game {
     this._setupObjective();
     this.hud.setCenterMessage('');
     this.hud.addFeed(this.worldwar ? '世界大战 · 坦克+飞机混合作战！死后按 T/P 选新载具' : (this.objective === 'capture' ? '战斗开始 · 征服 A/B/C 三点！' : '战斗开始 · 队友已就位'), 'info');
+    if (this.timeScale !== 1) this.hud.addFeed(`🐢 ${this.timeScale === 0.5 ? '慢速' : '超慢'}节奏（设置里可切回正常）`, 'info');
   }
 
   // 征服模式（战雷式 A/B/C）：三点各自独立占领，占多数点使对方票数流失，击杀也扣票，先耗尽者输。
@@ -5283,6 +6115,7 @@ class Game {
 
   // 战绩板数据
   _scoreData() {
+    if (this.mp) return this.mp.scoreData({ time: this.matchT });   // 联机：按联机计分板（真人玩家 + 队伍击杀）
     const mk = (v, me = false) => ({ name: v.displayName || '未知', kills: v.killCount || 0, alive: v.alive, team: v.team, boss: !!v.isBoss, me });
     const blue = [], red = [];
     if (this.player) blue.push(mk(this.player, true));
@@ -5317,6 +6150,46 @@ class Game {
   }
 
   _makePlayer() {
+    // —— 联机对战：按绝对队伍出生（蓝=南侧 / 红=北侧），飞机空中出生朝场心 ——
+    if (this.mp) {
+      const side = this.mp.myTeam === 'blue' ? -1 : 1;
+      const h = CONFIG.tank.worldSize;
+      const x = randRange(38, h * 0.25) * (Math.random() < 0.5 ? 1 : -1);   // 横向避开跑道条带（|x|<26），别停在跑道上挡飞机
+      const z = side * (h - 60);
+      if (this.mode === 'tank') {
+        this.player = new Tank({ side: 'player', color: (meta.paints || {})[this.tankType] != null ? meta.paints[this.tankType] : 0x4f7a3a, type: this.tankType });
+        if (this._shellPref) this.player.shellKind = this._shellPref;
+        this.player.group.position.set(x, terrainHeight(x, z), z);
+        this.player.heading = Math.atan2(-x, -z);   // 朝场心
+        this.em.addTank(this.player);
+      } else {
+        const def = planeTypeById(this.planeType);
+        const _pc = (meta.paints || {})[this.planeType] != null ? meta.paints[this.planeType] : null;
+        this.player = def.heli
+          ? new Heli({ side: 'player', color: _pc != null ? _pc : 0x3a5a3a, type: this.planeType })
+          : new Plane({ side: 'player', color: _pc != null ? _pc : 0x3a6b9e, type: this.planeType });
+        this.player.worldSize = h;   // 混合战场：飞机也用坦克地图尺寸
+        if (def.heli) {
+          // 直升机照旧悬停出生（己方半场后部）
+          this.player.group.position.set(x, terrainHeight(x, z) + 18, z);
+        } else {
+          // 战雷式机场起飞（与单机一致）：蓝=南跑道头朝北 / 红=北跑道头朝南
+          const rz = side * (h - 90);
+          const gy = terrainHeight(0, rz);
+          this.player.group.position.set(0, gy + (this.player.gearHeight || 1.15), rz);
+          if (side < 0) this.player.group.quaternion.identity();   // 蓝军：机头朝北
+          else this.player.group.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);   // 红军：机头朝南
+          this.player.speed = 0; this.player.throttle = 0;
+          this.player.onGround = true;
+          this.hud.addFeed('✈ 机场起飞：按住 W 加满油门滑跑，速度够了鼠标上推（带杆）离地', 'info');
+        }
+        this.em.addPlane(this.player);
+      }
+      this.player.displayName = this.mp.myName;
+      if (this.player.mouseAim && this.mode === 'plane') this.player.manualCtrl = this.settings.flightAssist === false;
+      this.mp.noteRespawn();   // 立即广播满血状态（远端幽灵重建）
+      return;
+    }
     const base = this._playerBasePos();
     if (this.mode === 'tank') {
       this.player = new Tank({ side: 'player', color: (meta.paints || {})[this.tankType] != null ? meta.paints[this.tankType] : 0x4f7a3a, type: this.tankType });   // 涂装色
@@ -5330,14 +6203,32 @@ class Game {
       this.player = planeTypeById(this.planeType).heli
         ? new Heli({ side: 'player', color: _pc != null ? _pc : 0x3a5a3a, type: this.planeType })
         : new Plane({ side: 'player', color: _pc != null ? _pc : 0x3a6b9e, type: this.planeType });   // 涂装色
-      this.player.group.position.copy(base);
-      this.player.group.quaternion.identity();
+      if (!this.player.isHeli && !this.worldwar) {
+        // 战雷式机场起飞：喷气机/螺旋桨机停在跑道头，滑跑加速后带杆离地（直升机照旧悬停出生）
+        const gy = terrainHeight(0, -(CONFIG.plane.worldSize - 90));
+        this.player.group.position.set(0, gy + (this.player.gearHeight || 1.15), -(CONFIG.plane.worldSize - 90));
+        this.player.group.quaternion.identity();   // 机头朝北（跑道方向）
+        this.player.speed = 0; this.player.throttle = 0;
+        this.player.onGround = true;
+        this.hud.addFeed('✈ 机场起飞：按住 W 加满油门滑跑，速度够了鼠标上推（带杆）离地', 'info');
+      } else {
+        this.player.group.position.copy(base);
+        this.player.group.quaternion.identity();
+      }
       this.em.addPlane(this.player);
       if (this.worldwar) this.player.worldSize = CONFIG.tank.worldSize;
     }
     this.gunnerView = false;
     this._snapCam = true;
     this.player.displayName = '你';
+    if (this.player.isArty) this.hud.addFeed('📉 曲射炮：准星附近敌车<b>自动锁定</b>（红环=拦截点）· <b>一炮毙命</b>（13m 杀伤圈）· 最小射程 30m', 'info');   // M109 玩法提示（每次重生提醒）
+    if (this.player.mouseAim && this.mode === 'plane') this.player.manualCtrl = this.settings.flightAssist === false;   // 飞行辅助关=纯手动杆（不自动改平/不修高度）
+    if (this._dailyReload && this.player.buffReload == null) this.player.buffReload = this._dailyReload;   // 每日词条：手忙脚乱（重生也生效）
+    {   // 三选一强化基准快照 + 重算（重生后强化依然生效）
+      const p = this.player;
+      p._base = { reload: p.reloadTime, fireCd: p.fireCooldown, dmg: p.shellDamage, bulletDmg: p.bulletDamage, speed: p.maxSpeed, speedMult: p.speedMult, pen: p.pen, turret: p.turretSpeed, hp: p.maxHealth, maxMissiles: p.maxMissiles, maxBombs: p.maxBombs };
+      this._applyRunMods(p);
+    }
     // 预置相机位置，避免第一帧输入用到默认相机（0,0,0）
     if (this.mode === 'tank') this._updateCameraTank(0.016);
     else this._updateCameraPlane(0.016);
@@ -5348,8 +6239,13 @@ class Game {
     const asTank = this.worldwar ? Math.random() < 0.5 : (this.mode === 'tank');
     if (asTank) {
       // 波次生存：rank 随波次爬升（_waveMaxRank）；普通局：三档分房（同级为主+高一档+少量高两档硬骨头）
-      const rk = this.objective === 'waves' ? (this._waveMaxRank || 2) : tankTypeById(this.tankType).rank;
-      const e = new Tank({ side: 'enemy', team: 'red', color: 0x9a7b3e, type: randomTankType(rk).id });
+      const rk = (this.objective === 'waves' || this.objective === 'bossrush') ? (this._waveMaxRank || 2) : tankTypeById(this.tankType).rank;
+      // 世界大战 18% 出防空坦克（ZSU-23-4 速射防空）：威胁我方飞机、给尾炮"优先打防空车"造真目标；
+      // 薄皮 15mm 低伤害速射——坦克两炮报销，不是不可反制。
+      // 世界大战 18% 出防空坦克：玩家高档房一半概率换成美系 M163 火神（更强的防空威胁）
+      const aaType = (tankTypeById(this.tankType).rank >= 4 && Math.random() < 0.5) ? 'vads' : 'aa';
+      const eType = (this.worldwar && Math.random() < 0.18) ? aaType : randomTankType(rk).id;
+      const e = new Tank({ side: 'enemy', team: 'red', color: 0x9a7b3e, type: eType });
       const h = CONFIG.tank.worldSize;
       // 红方一律从地图北侧边缘出生（和蓝方南北对角）
       e.group.position.set(randRange(-h * 0.4, h * 0.4), 0, randRange(h * 0.55, h - 45));
@@ -5361,9 +6257,11 @@ class Game {
     } else {
       const ang = randRange(0, Math.PI * 2);
       const dist = randRange(150, 220);
-      // 敌方空中单位：15% 概率出直升机（HeliAI 驾驶：盘旋+机炮+火箭），其余喷气机
-      if (Math.random() < 0.15) {
-        const heliTypes = PLANE_TYPES.filter((x) => x.heli);
+      // 空战分房 rank（与坦克同款三档）：普通局按玩家所选机型；波次模式随波次爬升
+      const rk = (this.objective === 'waves' || this.objective === 'bossrush') ? (this._waveMaxRank || 2) : planeTypeById(this.planeType).rank;
+      // 敌方空中单位：15% 概率出直升机（HeliAI 驾驶：盘旋+机炮+火箭；rank 限玩家+1——R1 房不出 AH-64 这种怪物），其余喷气机按分房出
+      const heliTypes = PLANE_TYPES.filter((x) => x.heli && x.rank <= rk + 1);
+      if (Math.random() < 0.15 && heliTypes.length) {
         const e = new Heli({ side: 'enemy', team: 'red', color: 0x8a5a42, type: heliTypes[Math.floor(Math.random() * heliTypes.length)].id });
         e.displayName = this._nextName();
         e.group.position.set(Math.sin(ang) * dist, CONFIG.plane.spawnAltitude + randRange(-5, 8), Math.cos(ang) * dist);
@@ -5373,7 +6271,7 @@ class Game {
         if (this.worldwar) e.worldSize = CONFIG.tank.worldSize;
         this.enemies.push(e);
       } else {
-        const e = new Plane({ side: 'enemy', team: 'red', color: 0xb5462e, type: randomPlaneType().id });
+        const e = new Plane({ side: 'enemy', team: 'red', color: 0xb5462e, type: randomPlaneType(rk).id });
         if (e.bulletDamage != null) e.bulletDamage *= 0.6;   // 敌方机炮伤害-40%：不再秒玩家
         e.displayName = this._nextName();
         e.group.position.set(Math.sin(ang) * dist, CONFIG.plane.spawnAltitude + randRange(-10, 12), Math.cos(ang) * dist);
@@ -5391,10 +6289,22 @@ class Game {
       const e = this.enemies[this.enemies.length - 1];
       if (e) { e.maxHealth *= k; e.health = e.maxHealth; }
     }
+    if (this._dailyHpMul) {   // 每日词条：精锐之敌
+      const e = this.enemies[this.enemies.length - 1];
+      if (e) { e.maxHealth *= this._dailyHpMul; e.health = e.maxHealth; }
+    }
+    if (this._rc && (this._rc.eSpread !== 1 || this._rc.eSpeed !== 1)) {   // 三选一：敌军散光/迟滞（只影响新刷的敌）
+      const e = this.enemies[this.enemies.length - 1];
+      if (e) {
+        if (e.fireSpread !== undefined) e.fireSpread *= this._rc.eSpread;
+        if (e.maxSpeed !== undefined) e.maxSpeed *= this._rc.eSpeed;
+        if (e.speedMult !== undefined) e.speedMult *= this._rc.eSpeed;
+      }
+    }
   }
 
   // 精英/Boss 敌方载具：体型更大、血量/伤害更高。
-  _spawnBoss() {
+  _spawnBoss(kind) {
     this._spawnEnemy();
     const e = this.enemies[this.enemies.length - 1];
     if (!e) return;
@@ -5403,7 +6313,24 @@ class Game {
     e.group.scale.setScalar(1.6);
     if (this.mode === 'tank') { e.maxSpeed *= 1.15; if (e.shellDamage != null) e.shellDamage *= 1.5; }
     else { e.speedMult *= 1.15; if (e.bulletDamage != null) e.bulletDamage *= 1.5; }
-    this.hud.addFeed('⚠ 精英敌方载具出现！', 'kill');
+    // —— 独特 Boss：巨兽(双管齐射) / 攻城炮(曲射轰击) / 护盾车(正面能量盾) ——
+    const KINDS = ['twin', 'arty', 'shield'];
+    e.bossType = kind || KINDS[Math.floor(Math.random() * KINDS.length)];
+    const LABEL = { twin: '💀巨兽', arty: '💀攻城炮', shield: '💀护盾车' };
+    e.displayName = (LABEL[e.bossType] || '💀') + (e.displayName || '');
+    if (e.bossType === 'twin') { e.maxSpeed *= 0.8; if (e.reloadTime != null) e.reloadTime *= 1.3; }   // 巨兽：慢而狠
+    if (e.bossType === 'arty') { e._artyCd = 4; if (e.maxSpeed != null) e.maxSpeed *= 0.7; }   // 攻城炮：远程曲射为主
+    if (e.bossType === 'shield' && e.group) {   // 护盾车：正面能量盾（先打盾/绕侧）
+      e.shieldHp = 350; e.shieldMax = 350; e._shieldIdle = 0;
+      const sm = new THREE.Mesh(
+        new THREE.BoxGeometry((e.hullWid || 3.4) * 2.6, 3.4, 0.5),
+        new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: false })
+      );
+      sm.position.set(0, 1.6, (e.hullLen || 5.4) * 0.55 + 1.2);
+      e.group.add(sm);
+      e.shieldMesh = sm;
+    }
+    this.hud.addFeed(`⚠ 精英敌方载具出现！${({ twin: '双管巨兽', arty: '曲射攻城炮', shield: '正面护盾车' })[e.bossType] || ''}`, 'kill');
   }
   _spawnAlly() {
     const asTank = this.worldwar ? Math.random() < 0.5 : (this.mode === 'tank');
@@ -5430,7 +6357,7 @@ class Game {
         this.allies.push(e);
         return;
       }
-      const e = new Plane({ side: 'ally', team: 'blue', color: 0x5a8eb8, type: randomPlaneType().id });
+      const e = new Plane({ side: 'ally', team: 'blue', color: 0x5a8eb8, type: randomPlaneType(planeTypeById(this.planeType).rank).id });   // 队友同难度池（与坦克一致）
       e.displayName = this._nextName();
       e.group.position.set(randRange(-30, 30), CONFIG.plane.spawnAltitude + randRange(-8, 8), randRange(-30, 30));
       e.group.quaternion.identity();
@@ -5572,7 +6499,8 @@ class Game {
 
     // 战争雷霆炮手式：鼠标按"增量"移动瞄准点（从当前瞄准处平滑旋转，不跳到绝对世界点）。
     // 指针锁定时用 movement（无限旋转）；未锁定时用 clientX 差值（保证总能转，只是到屏幕边缘为止）。
-    const YAW_SENS = 0.0026, H_SENS = this.worldwar ? 0.15 : 0.06, R = 90;
+    const TG = this.settings.tankGain != null ? this.settings.tankGain : 1;   // 坦克炮塔灵敏度（设置面板，热生效）
+    const YAW_SENS = 0.0026 * TG, H_SENS = (this.worldwar ? 0.15 : 0.06) * TG, R = 90;
     let mdx, mdy;
     if (document.pointerLockElement === this.canvas) {
       const mv = inp.consumeMovement(); mdx = mv.x; mdy = mv.y;
@@ -5609,6 +6537,51 @@ class Game {
     }
     this._dAim = aimRange;   // 实测射距：瞄准镜测距显示/装订起点都是真值了
     this._aimHitPt = (this._aimHitPt || new THREE.Vector3()).copy(aimWorld);   // 红环=炮塔收敛点（HUD 投影用）
+    if (t.isArty) {   // 曲射炮（M109）：自动锁定——准星方向锥内最近的敌车（不限距离，隔全图也能锁），落点=提前量拦截点
+      const free = this._aimHitPt;
+      // 候选：准星方向 12° 锥内的活敌（角度优先排序，距离只做微权重——曲射炮就该远远地锁）
+      const aimDir = new THREE.Vector3(); this.camera.getWorldDirection(aimDir);
+      const angTo = (e) => {
+        const to = e.position.clone().sub(this.camera.position);
+        const d = to.length();
+        return { ang: Math.acos(clamp(to.normalize().dot(aimDir), -1, 1)) * 180 / Math.PI, d };
+      };
+      const cands = [];
+      for (const en of this.enemies) {
+        if (!en.alive || typeof en.forwardVector === 'function') continue;   // 只锁地面载具（坦克）——不锁飞机/直升机
+        const { ang, d } = angTo(en);
+        if (ang < 12) cands.push([ang + d * 0.002, en]);
+      }
+      cands.sort((a, b) => a[0] - b[0]);
+      // 粘性锁定：已锁目标活着且还在 30° 宽锥内 → 保持（目标机动/瞄准轻微偏离不脱锁）
+      let tgt = null;
+      if (this._artyLock && this._artyLock.alive && angTo(this._artyLock).ang < 30) tgt = this._artyLock;
+      if (!tgt && cands.length) tgt = cands[0][1];
+      if (tgt !== this._artyLock) {
+        this._artyLock = tgt;
+        if (tgt) { this.hud.addFeed(`🔒 曲射锁定：${tgt.displayName || '敌车'}`, 'info'); if (this.sfx) this.sfx.ui(); }
+      }
+      if (this._artyLock) {
+        // 拦截点=目标位置+速度×飞行时间（迭代两次收敛）：弹落地时目标正好走到这
+        const L = this._artyLock;
+        let tp = L.position.clone();
+        for (let it = 0; it < 2; it++) {
+          const d0 = Math.hypot(tp.x - t.position.x, tp.z - t.position.z);
+          const v0 = Math.sqrt(Math.max(400, d0 * 25));
+          const flight = d0 / Math.max(1, v0 * Math.SQRT1_2);
+          tp = L.position.clone();
+          if (typeof L.forwardVector === 'function') tp.addScaledVector(L.forwardVector(), (L.speed || 0) * flight);   // 飞机
+          else if ((L.lastThrottle || 0) > 0.1) { tp.x += Math.sin(L.heading) * (L.maxSpeed || 12) * flight; tp.z += Math.cos(L.heading) * (L.maxSpeed || 12) * flight; }   // 坦克
+        }
+        t._artyAim = tp;
+        t._artyLockTgt = L;   // 开火时带上锁定目标（炮弹末段制导用）
+        this._updateArtyAimRing(tp, true);
+      } else {
+        t._artyAim = free;
+        t._artyLockTgt = null;
+        this._updateArtyAimRing(free, false);
+      }
+    }
     if (this.gunnerView && notches !== 0) {
       if (this._rangeAuto) { this._rangeAuto = false; this._rangeSet = clamp(Math.round(this._dAim / 10) * 10, 20, 700); }   // 首次滚动：从当前实际距离起装订
       this._rangeSet = clamp(this._rangeSet + notches * 10, 20, 700);
@@ -5669,16 +6642,20 @@ class Game {
         this.hud.addFeed('💨 烟雾弹装填完毕 · 剩余 ' + this._smokeAmmo, 'info');
       }
     } else this._smokeReload = 18;
-    // 弹种切换（1/2/3）：偏好存 this._shellPref，跨重生/换车保留
-    for (let i = 0; i < SHELLS.length; i++) {
-      if (this._consumePress(inp, 'Digit' + (i + 1))) {
-        this._shellPref = SHELLS[i].id;
-        t.shellKind = SHELLS[i].id;
-        this.hud.addFeed(`已切换：${SHELLS[i].icon} ${SHELLS[i].name}`, 'info');
-        this.sfx.ui();
+    // 弹种切换（1/2/3）：偏好存 this._shellPref，跨重生/换车保留；曲射炮（M109）无弹种概念
+    if (t.isArty) {
+      this.hud.setShell({ id: 'arty', name: '曲射炮弹', icon: '📉' }, 0);
+    } else {
+      for (let i = 0; i < SHELLS.length; i++) {
+        if (this._consumePress(inp, 'Digit' + (i + 1))) {
+          this._shellPref = SHELLS[i].id;
+          t.shellKind = SHELLS[i].id;
+          this.hud.addFeed(`已切换：${SHELLS[i].icon} ${SHELLS[i].name}`, 'info');
+          this.sfx.ui();
+        }
       }
+      this.hud.setShell(shellById(t.shellKind), t.pen * shellById(t.shellKind).penMul);
     }
-    this.hud.setShell(shellById(t.shellKind), t.pen * shellById(t.shellKind).penMul);
     this.gunnerView = inp.isDown('ShiftLeft') || inp.isDown('ShiftRight');
   }
 
@@ -5824,6 +6801,10 @@ class Game {
       p.tryFireRockets(this.em, true);
     }
     if (this._consumePress(inp, 'KeyV')) this._markTarget();   // 侦察标记(飞机也能标)
+    if (this._consumePress(inp, 'KeyT') && p.tailTurret) {
+      p.tailGunOn = !p.tailGunOn;
+      this.hud.addFeed(p.tailGunOn ? '🎯 尾炮自动炮手：开（附近敌机就打 → 没敌机扫坦克，防空车优先）' : '🛑 尾炮自动炮手：关', 'info');
+    }
     if (this._consumePress(inp, 'KeyB') && p.bombs > 0) {
       if (p.tryDropBomb(this.em)) { this.hud.addFeed(`💣 炸弹 ${p.bombs}/${p.maxBombs}`, 'info'); }
     }
@@ -6018,6 +6999,8 @@ class Game {
     this._raf = requestAnimationFrame(this._animate);
     try {
     let dt = Math.min(this.clock.getDelta(), 0.05);
+    // 游戏节奏（慢速/超慢）：全世界等比变慢——载具/弹道/AI/镜头统一缩放，慢动作瞄准、悠闲开车
+    if (this.timeScale && this.timeScale !== 1) dt *= this.timeScale;
     // 最后一杀慢放：0.25 倍速 1.3s（真实时间倒计时），结束后正式结算
     // 最后一杀慢放：终局回放全场 0.4 倍速（含殉爆炮塔飞出），普通慢放 0.25 倍 1.3s 后结算
     if (this._finalReplay) {
@@ -6027,6 +7010,10 @@ class Game {
       dt *= 0.25;
       if (this._slowMoT <= 0 && this._pendingEnd) { this._pendingEnd = false; this._end(true); return; }
     }
+    // 帧率平滑采样（指数平滑，~1s 收敛；显示走 HUD 节流）
+    this._fpsSmooth = (this._fpsSmooth || 60) + (1 / Math.max(1e-4, dt) - (this._fpsSmooth || 60)) * 0.04;
+    // 联机对战：网络 tick（12Hz 状态广播 + 幽灵插值 + 计分横幅）——暂停屏蔽已保证不会被跳过
+    if (this.mp && this.state === 'playing') this.mp.tick(dt);
     // Esc 暂停/恢复统一走常驻 _onEscKey（锁定时 Esc 由浏览器退锁、_onPLChange 暂停）。
     if (this.paused) { this.postfx.render(this.scene, this.camera); return; }
     if (this.state === 'playing') this.matchT += dt;
@@ -6104,28 +7091,28 @@ class Game {
     if (this._fpsAcc >= 2.5) {
       const avg = this._fpsN / this._fpsAcc;
       this._fpsAcc = 0; this._fpsN = 0;
-      const Q = [{ pr: 1.2, sh: 1024 }, { pr: 1.5, sh: 2048 }, { pr: 2.0, sh: 4096 }];
+      // 防抖三件套：换档冷却 20s（阈值附近反复跳档=反复卡顿）；连续 2 次差评才降；
+      // 阴影贴图开局定死、永不中途重建（dispose+重配 4096 图 = GPU 同步大停顿，是"莫名卡一下"的大头）
+      const Q = [{ pr: 1.2 }, { pr: 1.5 }, { pr: 2.0 }];   // 档位只调渲染分辨率与 SSAO，画质观感基本不变
       this._qLevel = this._qLevel != null ? this._qLevel : 1;
       let nl = this._qLevel;
       const manual = this.settings && this.settings.quality != null && this.settings.quality < 3;   // 手动档：不自动升降
       if (!manual) {
-        if (avg > 57 && this._qLevel < 2) nl = this._qLevel + 1;
-        else if (avg < 42 && this._qLevel > 0) nl = this._qLevel - 1;
+        this._qBad = avg < 42 ? (this._qBad || 0) + 1 : 0;
+        const cooled = performance.now() - (this._qSwapT || 0) > 20000;
+        if (cooled && avg > 57 && this._qLevel < 2) nl = this._qLevel + 1;
+        else if (cooled && this._qBad >= 2 && this._qLevel > 0) nl = this._qLevel - 1;
       }
       if (nl !== this._qLevel) {
         this._qLevel = nl;
-        const q = Q[nl];
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pr));
-        const sun = this.scene.userData.sun;
-        if (sun) {
-          sun.shadow.mapSize.set(q.sh, q.sh);
-          if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }   // 释放旧图让 three 按新尺寸重建
-        }
-        if (this.postfx) this.postfx.setQuality(nl === 2);   // SSAO/锐化随档位
+        this._qSwapT = performance.now();
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, Q[nl].pr));
+        if (this.postfx) this.postfx.setQuality(nl === 2);   // SSAO/锐化随档位（开关便宜，不重建阴影）
         this.hud.addFeed(`🎚 画质自适应：${['流畅', '均衡', '高清'][nl]}（${Math.round(avg)}fps）`, 'info');
       }
     }
     this._hudT = (this._hudT || 0) - dt;
+    if (this.hud && this.hud.setFps) this.hud.setFps(this._fpsSmooth || 60, this.settings.fpsShow !== false);   // 帧率角标（每帧写 textContent 便宜，颜色分级）
     if (this._hudT <= 0) {
       this._hudT = 0.25;
       if (this.aiPilot && this.player && this.player.alive) {
@@ -6223,6 +7210,8 @@ class Game {
         const zoneT = this._zoneTargetFor(e.position, 'red');   // 没附近敌人就抢点
         if (zoneT && (!t || e.position.distanceTo(t.position) > 75)) t = zoneT;
         t = this._stickyTarget(e, t, this._markedTarget);   // 目标粘性：别追两下就换人
+        // 夺旗模式：载着我方军旗的敌军 → 目标强制改回它家（护送军旗得分）
+        if (this.objective === 'flag' && this.flags && this.flags.blue.carrier === e) t = { position: this.flagHome.red, isZone: true, alive: true };
         e.ai.update(dt, e.isHeli
           ? { target: t, threats: [this.player, ...this.allies].filter((x) => x && x.alive), entityManager: this.em, obstacles, enemies: this.enemies }   // 敌直升机/坦克：威胁=蓝方（规避用）
           : { target: t, threats: [this.player, ...this.allies].filter((x) => x && x.alive), entityManager: this.em, obstacles, smokes: this.em.smokes });
@@ -6248,9 +7237,140 @@ class Game {
           : { target: t, threats: redAlive, entityManager: this.em, obstacles, smokes: this.em.smokes });   // 友坦克也喂威胁（蛇形规避用）
       }
 
+      // —— 轰炸机尾炮塔（玩家 T 开关 / AI 常开）：每帧驱动，敌方轰炸机也是威胁源 ——
+      // 目标池按队伍分两份一次构建：蓝方炮手打红方（敌机+敌坦克），红方炮手打蓝方。
+      {
+        const airR = [], airB = [], gndR = [], gndB = [];
+        for (const q of this.em.planes) { if (q.alive) (q.team === 'red' ? airR : airB).push(q); }
+        for (const q of this.em.tanks) { if (q.alive) (q.team === 'red' ? gndR : gndB).push(q); }
+        const _smokes = this.em.smokes || [];
+        const inSmoke = (pos) => _smokes.some((s) => pos.distanceToSquared(s.pos) < s.r * s.r);
+        const _obs = obstacles || [];
+        let hasTT = false;
+        for (const q of this.em.planes) { if (q.tailTurret) { hasTT = true; break; } }
+        const pTank = (this.player && this.player.alive && this.player.hullTurret && typeof this.player.forwardVector !== 'function') ? this.player : null;
+        if (hasTT || pTank) {
+          if (hasTT) for (const q of this.em.planes) {
+            if (!q.alive || !q.tailTurret) continue;
+            q.updateTailTurret(dt, q.team === 'red'
+              ? { air: airB, ground: gndB, obstacles: _obs, inSmoke }   // 红方（敌方轰炸机）：打蓝方
+              : { air: airR, ground: gndR, obstacles: _obs, inSmoke }, this.em);
+          }
+          if (pTank) pTank.updateHullTurret(dt, { air: airR, ground: gndR, obstacles: _obs, inSmoke }, this.em);   // 玩家坦克车顶炮台：打红方
+        }
+      }
+
+      // 名字距离标签（战雷式）：8Hz 刷新，玩家自己不标
+      this._nlT = (this._nlT || 0) - dt;
+      if (this._nlT <= 0) {
+        this._nlT = 0.125;
+        if (!this._nlabels) {
+          this._nlabels = [];
+          for (const q of this.em.tanks) if (q !== this.player) this._nlabels.push(makeNameLabel(q));
+          for (const q of this.em.planes) if (q !== this.player) this._nlabels.push(makeNameLabel(q));
+          for (const L of this._nlabels) this.scene.add(L.spr);
+        }
+        for (const L of this._nlabels) refreshNameLabel(L, this.camera.position);
+        // 后出生的队友/敌军补挂标签
+        const known = new Set(this._nlabels.map((L) => L.entity));
+        for (const q of [...this.em.tanks, ...this.em.planes]) {
+          if (q === this.player || known.has(q) || this._nlabels.find((L) => L.entity === q)) continue;
+          const L = makeNameLabel(q);
+          this._nlabels.push(L);
+          this.scene.add(L.spr);
+        }
+      }
+
       this.em.update(dt);
       if (this.terrain?.grass) this.terrain.grass.update(this.camera.position.x, this.camera.position.z);
       if (this.rain) this.rain.update(dt, this.camera.position);   // 雨幕跟随相机
+      if (this._cardsOpen) { this._cardPickT -= dt; if (this._cardPickT <= 0) this._pickCard(0); }   // 三选一自动选计时（战斗不暂停）
+      // —— 曲射炮（Boss 攻城炮 + M109 圣骑士通用）：45° 抛物线 + 自动瞄准提前量 + 落点红圈警告 ——
+      // 伤害语义：命中或处于爆炸范围内 = 减一半血（见 EntityManager 爆炸循环的 artyShell 分支）
+      for (let bi = this.enemies.length - 1; bi >= 0; bi--) {
+        const e = this.enemies[bi];
+        if (!e || !e.alive || !(e.bossType === 'arty' || e.isArty)) continue;
+        if (e.bossType === 'arty' && !(this.player && this.player.alive)) continue;   // Boss 只打玩家
+        e._artyCd = (e._artyCd ?? randRange(2, 4)) - dt;
+        if (e._artyCd > 0 || e.reloadTimer > 0) continue;
+        e._artyCd = randRange(6, 9);
+        // 目标：敌人曲射炮打玩家（按飞行时间×目标速度算提前量）；队友曲射炮打最近的敌车
+        let tgt = null, warn = false;
+        if (e.team === 'red') {
+          if (!this.player || !this.player.alive) continue;
+          tgt = this.player.position.clone();
+          warn = true;   // 打玩家：画红圈警告
+        } else {
+          let best = null, bd = Infinity;
+          for (const en of this.enemies) { if (!en.alive) continue; const d = en.position.distanceToSquared(e.position); if (d < bd) { bd = d; best = en; } }
+          if (!best) continue;
+          tgt = best.position.clone();
+        }
+        const from = e.position.clone(); from.y += 2.5;
+        // 提前量（自动瞄准）：45° 弹全程时间 = 水平距离 / (v0·cos45°)，再乘目标当前速度
+        {
+          const lead = (target) => {
+            const d0 = Math.hypot(tgt.x - from.x, tgt.z - from.z);
+            const v0t = Math.sqrt(Math.max(400, d0 * 25));
+            const flight = d0 / Math.max(1, v0t * Math.SQRT1_2);
+            if (typeof target.forwardVector === 'function') tgt.addScaledVector(target.forwardVector(), (target.speed || 0) * flight);   // 飞机：航向×空速
+            else if (target.lastThrottle > 0.1) {   // 坦克：车头方向×车速（倒车/静止不打提前）
+              tgt.x += Math.sin(target.heading) * (target.maxSpeed || 12) * flight;
+              tgt.z += Math.cos(target.heading) * (target.maxSpeed || 12) * flight;
+            }
+          };
+          lead(e.team === 'red' ? this.player : null);
+          if (e.team !== 'red') { const best2 = this.enemies.filter((x) => x.alive).sort((a, b) => a.position.distanceToSquared(e.position) - b.position.distanceToSquared(e.position))[0]; if (best2) lead(best2); }
+        }
+        tgt.x += randRange(-4, 4); tgt.z += randRange(-4, 4);   // 打点散布（提前量已算，散布收窄）
+        const dist = Math.hypot(tgt.x - from.x, tgt.z - from.z);
+        const gArty = 25;
+        const v0 = Math.sqrt(Math.max(400, dist * gArty));
+        const vel = tgt.clone().sub(from).setY(0).normalize().multiplyScalar(v0 * Math.SQRT1_2).setY(v0 * Math.SQRT1_2);   // 45° 抛物线正好够到
+        const proj = new Projectile({ position: from, direction: vel.clone().normalize(), speed: v0, damage: 0, owner: e, ownerTeam: e.team, gravity: gArty, life: 9, color: 0xff6040, size: 0.55, pen: 0, shellDef: { id: 'he', name: '曲射炮击', penMul: 1, dmgMul: 1, bounceDeg: 90, noBounce: true, penDrop: 0 } });
+        proj.isBomb = true; proj.bombRadius = 13; proj.artyShell = true;   // 曲射炮：半血语义（爆炸循环按 maxHealth*0.5 结算）
+        this.em.addProjectile(proj);
+        if (warn) {   // 落点警告红圈（闪烁 2.6s，离开红圈可躲）
+          this._artyRings = this._artyRings || [];
+          const ring = new THREE.Mesh(new THREE.RingGeometry(11.6, 13, 28), new THREE.MeshBasicMaterial({ color: 0xff3222, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false }));
+          ring.rotation.x = -Math.PI / 2;
+          ring.position.set(tgt.x, terrainHeight(tgt.x, tgt.z) + 0.3, tgt.z);
+          this.scene.add(ring);
+          this._artyRings.push({ mesh: ring, t: 2.6 });
+          this.hud.addFeed('⚠ 曲射炮击来袭！离开红圈！', 'death');
+          if (this.sfx) this.sfx.alarm();
+        }
+        if (e.shieldMax) {   // 护盾再生：破盾 6s 不挨打缓慢回复
+          e._shieldIdle += dt;
+          if (e.shieldHp <= 0 && e._shieldIdle > 6) {
+            e.shieldHp = Math.min(e.shieldMax, e.shieldHp + 90 * dt);
+            if (e.shieldMesh) { e.shieldMesh.visible = true; e.shieldMesh.material.opacity = 0.32 * (e.shieldHp / e.shieldMax); }
+          }
+        }
+      }
+      if (this._artyRings) {
+        for (let ri = this._artyRings.length - 1; ri >= 0; ri--) {
+          const rr = this._artyRings[ri];
+          rr.t -= dt;
+          rr.mesh.material.opacity = 0.35 + 0.4 * Math.abs(Math.sin(rr.t * 9));
+          if (rr.t <= 0) { this.scene.remove(rr.mesh); rr.mesh.geometry.dispose(); rr.mesh.material.dispose(); this._artyRings.splice(ri, 1); }
+        }
+      }
+      if (this.objective === 'flag' && this.flags) this._updateFlags(dt);   // 夺旗冲锋：旗帜状态机
+      // —— 动态音乐强度：基础紧张 → 近距有敌升温 → 近几秒交火/受击 = 激战 ——
+      if (this.music) {
+        let lvl = 0.18;
+        const now = performance.now();
+        if (this.state === 'playing' && this.player && this.player.alive) {
+          if (this.em.projectiles.some((p) => p.owner === this.player)) this._lastFireT = now;   // 动态音乐：开火标记
+          for (const e of this.enemies) {
+            if (e.alive && e.position.distanceTo(this.player.position) < 240) { lvl = Math.max(lvl, 0.5); break; }
+          }
+          if (this._lastFireT && now - this._lastFireT < 4000) lvl = Math.max(lvl, 0.8);
+          if (this._lastCombatT && now - this._lastCombatT < 3000) lvl = Math.max(lvl, 0.95);
+        } else lvl = 0.1;
+        this.music.combat(lvl);
+      }
       // —— 雷暴：随机闪电（环境光瞬间脉冲照亮全场）+ 1.5~3s 后滚雷 ——
       if (this._isStorm) {
         if (this._lightning > 0) {   // 闪电衰减（两段频闪）
@@ -6272,10 +7392,50 @@ class Game {
         }
       }
       this._updateTreeFalls(dt);   // 撞树倒伏：检测坦克碾压 + 倒下动画
+      // 太阳/月光跟随玩家：阴影相机始终罩住玩家四周（否则开远后出了阴影视景＝远处无阴影+边缘闪烁晃动）
+      {
+        const sunL = this.scene.userData.sun;
+        const pc = this.player ? this.player.position : this.camera.position;
+        if (sunL && sunL.userData.off) {
+          sunL.position.set(pc.x + sunL.userData.off.x, sunL.userData.off.y, pc.z + sunL.userData.off.z);
+          sunL.target.position.set(pc.x, 0, pc.z);
+          sunL.target.updateMatrixWorld();
+        }
+      }
+      // —— 空投补给事件：定时投箱（绿烟信标），玩家驶入/飞近拾取随机增益 ——
+      if (this.player && this.player.alive && !this.mp) {   // 联机对战：不开空投（增益不对等）
+        this._airdropT -= dt;
+        if (this._airdropT <= 0) {
+          this._airdropT = randRange(50, 80) * ((this._rc && this._rc.dropMul) || 1);   // 三选一"空投频道"：更频繁
+          const half = (this.worldwar || this.mode === 'tank') ? CONFIG.tank.worldSize : CONFIG.plane.worldSize;
+          const ang = randRange(0, Math.PI * 2), dd = randRange(45, 95);
+          const ax = clamp(this.player.position.x + Math.sin(ang) * dd, -half + 60, half - 60);
+          const az = clamp(this.player.position.z + Math.cos(ang) * dd, -half + 60, half - 60);
+          this.airdrops.push(new Airdrop(this.scene, ax, az));
+          this.hud.addFeed('📦 补给空投！跟着绿烟去捡（增益随机）', 'info');
+        }
+      }
+      for (let i = this.airdrops.length - 1; i >= 0; i--) {
+        const a = this.airdrops[i];
+        a.update(dt, this.em);
+        if (this.player && this.player.alive && a.landed
+            && this.player.position.distanceTo(a.group.position) < (this.mode === 'plane' ? 15 : 8)) {
+          this._applySupply(this.player);
+          a.alive = false;
+        }
+        if (!a.alive) { a.dispose(); this.airdrops.splice(i, 1); }
+      }
+      // 限时增益倒计时：到期还原倍率
+      for (let i = this._buffs.length - 1; i >= 0; i--) {
+        const b = this._buffs[i];
+        b.t -= dt;
+        if (b.t <= 0) { try { b.p[b.key] = 1; } catch (e) {} this._buffs.splice(i, 1); }
+      }
       if (this.mode === 'tank') this._resolveObstacles();
 
       const targets = this.worldwar ? [...this.em.tanks, ...this.em.planes] : (this.mode === 'tank' ? this.em.tanks : this.em.planes);
       const hits = this.em.checkCollisions(targets);
+      if (hits.length) this._lastCombatT = performance.now();   // 动态音乐：命中事件=激战标记
       // 受击方向指示：被打中时屏幕边缘红色弧块指向攻击者（战雷式受击反馈）
       for (const h of hits) {
         if (h.target === this.player && h.owner && h.owner !== this.player && this.player.alive) {
@@ -6294,8 +7454,11 @@ class Game {
           else this.stats.pen++;
           if (h.killed && h.crit === '弹药殉爆') this.stats.ammoKills++;
           if (h.killed) {
-            this._lastKillShot = { target: h.target, hitPoint: h.hitPoint, proj: h.proj, verdict: h.verdict, crit: h.crit };   // 终局回放快照：若这是赢下比赛的最后一杀，_end 会用它放全屏弹道跟拍
+            this._lastKillShot = { target: h.target, hitPoint: h.hitPoint, proj: h.proj, verdict: h.verdict, crit: h.crit, time: performance.now() };   // 终局回放快照：若这是赢下比赛的最后一杀，_end 会用它放全屏跟拍（time：票数流胜时快照可能早已销毁，过期不放）
             h.target._killDist = h.proj && h.proj.launchPos ? Math.round(h.proj.launchPos.distanceTo(h.hitPoint)) : 0;   // 击杀距离（远程狙杀播报用）
+            h.target._killShell = h.proj && h.proj.shellDef ? h.proj.shellDef.id : null;   // 日常任务：弹种击杀
+            h.target._killIsTail = !!(h.proj && h.proj.isTail);                            // 日常任务：尾炮击杀
+            h.target._killCrit = h.crit;                                                    // 日常任务：殉爆击杀
           }
           // 击杀回放触发：击杀播全套（X光+殉爆名场面）；
           // 跳弹（未击杀）也播：小窗看炮弹"叮"一声弹上天的慢镜头——限流 3s 一次且不抢击杀回放，
@@ -6314,8 +7477,13 @@ class Game {
               this._startKillReplay(h.target, h.hitPoint, false, 'bounce', h.proj, h.proj.shellDef ? h.proj.shellDef.id : null, h.crit);
             }
           }
-          // 命中反馈按判定结果分级：击毁(红)/致命(橙)/击穿(金)/未击穿(灰蓝)/跳弹(白闪)
+          else if (h.killed && h.target && h.target !== this.player && typeof h.target.forwardVector === 'function') {
+            this._startCrashCam(h.target);   // 空战击杀回放：右上小窗跟拍坠机（真机身 CrashFall 坠落/螺旋解体/触地爆炸全程）
+          }
+          // 命中反馈：击毁时轻微震屏（打击感，无数字飘字——玩家不要）
+          if (h.owner === this.player && h.killed) this._shake = Math.max(this._shake || 0, 0.5);
           if (h.verdict === 'bounce') {
+            questEvent('bounce', {});   // 日常任务：玩家跳弹计数
             this.hud.flashHit('bounce'); this.sfx.bounce();
             this.hud.addFeed('⤺ 跳弹', 'death');   // 明确文字提示：装甲弹开
           }
@@ -6330,6 +7498,7 @@ class Game {
         } else if (h.target === this.player && this.player && this.player.alive) {
           // 被击中：低沉闷响 + 屏幕边缘受击方向红弧（与"打中敌人"的清脆音区分，紧张感）
           this.sfx.hitTaken();
+          this._dmgTaken = true;   // 日常任务：无伤判定（被命中即破功）
           // 方向：入射位置(敌弹命中点≈玩家自身)的来源 = 弹丸 owner 方位，转成相对玩家朝向的角
           const src = h.owner && h.owner.position ? h.owner.position : null;
           if (src) {
@@ -6349,8 +7518,10 @@ class Game {
       this.allies = this.allies.filter((a) => a.alive);
 
       this._updatePlayerRespawn(dt);
-      this._updateEnemySpawns(dt);
-      this._updateAllySpawns(dt);
+      if (!this.mp) {   // 联机对战：无 AI 增援（敌人=真人幽灵，由 mp 模块管理增删）
+        this._updateEnemySpawns(dt);
+        this._updateAllySpawns(dt);
+      }
 
       if (this.player && this.player.alive) {
         if (this.mode === 'tank') this._updateCameraTank(dt);
@@ -6445,19 +7616,6 @@ class Game {
       this._checkEnd(dt);
     }
 
-    } catch (err) {
-      // 逐帧异常会让逻辑中断（画面还在但载具"卡住"）——错误必须醒目可见：每个新错误都上屏+2s 限流，
-      // 玩家卡住时屏幕有具体报错信息，可据此定位（F12 Console 也有完整堆栈）。
-      console.error('⚠ _animate:', err);
-      try {
-        const msg = String(err.message || err);
-        const now = performance.now();
-        if (msg !== this._lastErrMsg || now - (this._lastErrT || 0) > 2000) {
-          this._lastErrMsg = msg; this._lastErrT = now;
-          this.hud.addFeed('⚠ ' + msg, 'death');
-        }
-      } catch (e) {}
-    }
     // CCIP 炸弹落点标记的计算已合并到上方主 try 内（原此处重复了一份 1500 步模拟，每帧白跑一遍，已删）
     // God Rays：太阳世界位置投影到屏幕（屏内才开光束；雨/夜关）
     if (this.postfx) {
@@ -6473,7 +7631,7 @@ class Game {
       this.camera.rotateZ(randRange(-1, 1) * s * 0.03);
       this.camera.rotateX(randRange(-1, 1) * s * 0.025);
       this.camera.rotateY(randRange(-1, 1) * s * 0.02);
-      this._shake *= Math.pow(0.001, dt);   // 指数衰减（约 0.35s 抖完）
+      this._shake *= Math.pow(0.001, dt);   // 指数衰减（约 0.35s 抖完）——须在 try 内（dt 在此作用域）
     }
     // 终局回放：全屏渲染回放相机（贴弹丸跟拍），主相机画面让位
     if (this._shellcam && this._shellcam.fullscreen) {
@@ -6481,6 +7639,20 @@ class Game {
     } else {
       this.postfx.render(this.scene, this.camera);
       this._renderShellcam();   // 右上角跟拍小窗（scissor 二次渲染，无小窗时零开销）
+    }
+
+    } catch (err) {
+      // 逐帧异常会让逻辑中断（画面还在但载具"卡住"）——错误必须醒目可见：每个新错误都上屏+2s 限流，
+      // 玩家卡住时屏幕有具体报错信息，可据此定位（F12 Console 也有完整堆栈）。
+      console.error('⚠ _animate:', err);
+      try {
+        const msg = String(err.message || err);
+        const now = performance.now();
+        if (msg !== this._lastErrMsg || now - (this._lastErrT || 0) > 2000) {
+          this._lastErrMsg = msg; this._lastErrT = now;
+          this.hud.addFeed('⚠ ' + msg, 'death');
+        }
+      } catch (e) {}
     }
   };
 
@@ -6609,9 +7781,65 @@ class Game {
     sc.cam.position.copy(sc.p0).add(new THREE.Vector3(0, 3, -6));
     this._shellcam = sc;
   }
+  // —— 空战击杀回放（坠机跟拍）：不克隆任何东西——镜头跟的是真机身 ——
+  // 击杀瞬间敌机交给 CrashFall（尾焰拖烟坠落/直升机螺旋解体），相机在侧后环绕跟拍，
+  // 直到触地爆炸看得差不多才收。PiP 实时；终局全屏版借 _finalReplay 全场 0.4x 慢放。
+  _startCrashCam(plane, fullscreen = false) {
+    const now = performance.now();
+    if (now - (this._lastReplayT || 0) < 700) return;   // 与坦克回放共用节流（连杀防镜头抽搐）
+    this._lastReplayT = now;
+    if (this._shellcam) this._endShellcam();   // 连杀：新击杀替换当前回放
+    if (this.hud) { if (!this.hud.feedEl) this.hud.feedEl = this.hud.container.querySelector('#feed'); if (this.hud.feedEl) this.hud.feedEl.classList.add('below-cam'); }
+    const pos = plane.group.position.clone();
+    const sc = {
+      kind: 'crash', t: 0, fullscreen,
+      dur: fullscreen ? 2.0 : 2.6,   // 最长跟拍（回放时钟：PiP=实时；全屏=0.4x dt，约 5s 真实）
+      landT: -1,
+      cam: new THREE.PerspectiveCamera(50, 1.6, 0.5, 3000),
+      mesh: plane.group,             // 真机身（cullDead 后 CrashFall 接管动画，坠落/解体/触地在主场景真实发生）
+      _look: pos.clone(),
+    };
+    if (fullscreen) sc.cam.aspect = window.innerWidth / window.innerHeight;   // 全屏别沿用小窗 1.6（会拉伸）
+    // 机位：击杀点外围一圈缓慢环绕+缓抬（战雷"死亡相机"观感），视线平滑钉住机身
+    sc.a0 = randRange(0, Math.PI * 2);
+    sc.baseY = pos.y + randRange(6, 12);
+    sc.cam.position.set(pos.x + Math.sin(sc.a0) * 30, sc.baseY, pos.z + Math.cos(sc.a0) * 30);
+    sc.cam.lookAt(pos);
+    sc.cam.updateProjectionMatrix();
+    this._shellcam = sc;
+  }
+  _updateCrashCam(sc, dt) {
+    sc.t += dt;
+    const m = sc.mesh;
+    if (!sc.crash) {   // cullDead 后从 effects 里找到接管机身的 CrashFall（触地时刻从它读）
+      for (const e of this.em.effects) { if (e.mesh === m && e.landed !== undefined) { sc.crash = e; break; } }
+    }
+    const landed = !!(sc.crash && sc.crash.landed);
+    if (landed && sc.landT < 0) {
+      sc.landT = sc.t;
+      if (this.sfx) this.sfx.explosion(m.position);   // 触地轰（跟拍相机离得近，比远处听得真切）
+    }
+    const landHold = sc.fullscreen ? 0.5 : 1.0;   // 触地火球看一会儿再收
+    if ((landed && sc.t >= sc.landT + landHold) || sc.t >= sc.dur) {
+      const wasFinal = sc.fullscreen;
+      this._endShellcam();
+      if (wasFinal) { this._finalReplay = false; this._end(true); }   // 终局跟拍播完 → 真结算
+      return;
+    }
+    // 相机：绕坠落机身缓慢环绕+缓抬（距离渐拉远），视线指数平滑钉住机身——帧率无关、切窗不跳
+    const ang = sc.a0 + sc.t * 0.28;
+    const dist = 28 + sc.t * 3.5;
+    _kcTmp.set(m.position.x + Math.sin(ang) * dist, Math.max(sc.baseY + sc.t * 1.5, m.position.y + 4), m.position.z + Math.cos(ang) * dist);
+    const kp = 1 - Math.exp(-6 * dt);
+    sc.cam.position.lerp(_kcTmp, kp);
+    _scLook.copy(m.position); _scLook.y += 1.5;
+    sc._look.lerp(_scLook, kp);
+    sc.cam.lookAt(sc._look);
+  }
   _updateShellcam(dt) {
     const sc = this._shellcam;
     if (!sc) return;
+    if (sc.kind === 'crash') { this._updateCrashCam(sc, dt); return; }   // 坠机跟拍：独立节奏（跟的是实时世界，不是重演弹道）
     sc.t += dt * (sc.slow ? 0.45 : 1);   // 终局回放慢速重演
     const speedup = sc.realT / sc.replayFly;
     if (!sc.dirEnd) {
@@ -6790,6 +8018,7 @@ class Game {
     const sc = this._shellcam;
     if (!sc) return;
     if (this.hud) { if (!this.hud.feedEl) this.hud.feedEl = this.hud.container.querySelector('#feed'); if (this.hud.feedEl) this.hud.feedEl.classList.remove('below-cam'); }   // 回放结束：击杀记录回到原位
+    if (sc.kind === 'crash') { this._shellcam = null; return; }   // 坠机跟拍零自建资源（跟的是真机身），只摘相机
     // ⚠️ 克隆车 clone(true) 与真车【共享 geometry】——绝不能 dispose，否则把（可能还活着的）
     // 真车 GPU 资源也毁掉，主视角出现渲染异常的幽灵。只释放我们自建的资源：
     // 模块/弹体/枪口闪光/火球/火柱；克隆车只移出场景，geometry 留给真车（或随真车销毁）。
@@ -6830,6 +8059,10 @@ class Game {
 
   // —— 暂停 ——
   _togglePause() {
+    if (this.mp && this.state === 'playing') {   // 联机对战：全世界不等你——不暂停，退锁只当"松开手"
+      this.hud.addFeed('🌐 联机对战不可暂停（点击画面继续操控）', 'info');
+      return;
+    }
     if (this.paused) this._resume();
     else this._pause();
   }
@@ -6844,6 +8077,8 @@ class Game {
     // 纯 Esc 恢复永远锁不上，只能靠点击兜底；其他键/点击则全自动。
     this._onAnyKey = (e) => {
       if (e.repeat || e.code === 'Escape') return;
+      const st = document.getElementById('settings');   // 设置面板开着（从暂停进入）时不响应：滑杆方向键微调别误触恢复
+      if (st && !st.classList.contains('hidden')) return;
       this._resume();
     };
     window.addEventListener('keydown', this._onAnyKey);
@@ -6885,17 +8120,21 @@ class Game {
   _showPauseOverlay() {
     if (this._pauseEl) return;
     const el = document.createElement('div');
-    el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:200;font-family:sans-serif';
-    el.innerHTML = `<div style="background:rgba(20,28,20,.95);border:2px solid rgba(100,180,100,.4);border-radius:14px;padding:28px 40px;text-align:center;color:#eee;min-width:240px">
-      <div style="font-size:26px;margin-bottom:6px">⏸ 已暂停</div>
-      <div style="font-size:13px;color:#aab;margin-bottom:20px">按 <b>任意键</b>（W/空格…）或点击任意处恢复</div>
-      <button id="pause-resume" style="display:block;width:100%;margin:6px 0;padding:10px;font-size:15px;background:rgba(80,140,80,.9);color:#fff;border:none;border-radius:8px;cursor:pointer">继续</button>
-      <button id="pause-menu" style="display:block;width:100%;margin:6px 0;padding:10px;font-size:15px;background:rgba(120,60,60,.9);color:#fff;border:none;border-radius:8px;cursor:pointer">返回主菜单</button>
+    el.className = 'modal-mask';
+    el.innerHTML = `<div class="modal-card">
+      <div class="modal-title">⏸ 已暂停</div>
+      <div class="modal-sub">按 <b>任意键</b>（W/空格…）或点击任意处恢复</div>
+      <button id="pause-resume" class="modal-btn green">继续</button>
+      <button id="pause-settings" class="modal-btn neutral">⚙ 设置（音量/灵敏度…）</button>
+      <button id="pause-menu" class="modal-btn red">返回主菜单</button>
     </div>`;
     document.body.appendChild(el);
     this._pauseEl = el;
     el.addEventListener('click', (e) => { if (e.target === el) this._resume(); });   // 点遮罩背景任意处也恢复（click 手势可重锁）
     el.querySelector('#pause-resume').addEventListener('click', () => this._resume());   // _resume 内自动重新锁定
+    el.querySelector('#pause-settings').addEventListener('click', () => {   // 战斗中调设置：不退局（面板 raised 盖在暂停之上，关闭即回暂停）
+      if (window.__wtSettings) window.__wtSettings.open();
+    });
     el.querySelector('#pause-menu').addEventListener('click', () => {
       this._hidePauseOverlay(); this.paused = false;
       if (this.onExit) this.onExit();
@@ -6910,6 +8149,7 @@ class Game {
   _handleDeaths(removed) {
     const playerRef = this.player;   // 缓存本帧玩家引用：同批死亡里玩家先死时 this.player 已置 null，后续敌人击杀归属会误判为"友方击毁"
     for (const r of removed) {
+      if (r.netGhost) continue;   // 联机幽灵：爆炸/计分/日志均由 mp 模块（wt-kill/_ghostDie）负责，这里不重复处理
       const isPlane = typeof r.forwardVector === 'function';
       const label = isPlane ? '飞机' : '坦克';   // 按实体类型定标签（世界大战里坦克/飞机混编）
       const scale = isPlane ? 2.5 : 3.5;
@@ -6930,15 +8170,27 @@ class Game {
         this.hud.addFeed(`你的${label}被击毁${tag}`, 'death');
         this.hud.hideCrosshair();            // 阵亡：藏掉准星，别让它留在屏上误导
         this._deathCamTarget = null;          // 观战目标重新选
-        this.player = null;
-        this.playerLives -= 1;
-        if (this.objective === 'capture') this.blueTickets = Math.max(0, this.blueTickets - CONFIG.rules.conquest.killCost);   // 征服：阵亡扣己方票
-        if (this.playerLives > 0) this.respawnTimer = this.worldwar ? CONFIG.rules.respawnDelay * 1.8 : CONFIG.rules.respawnDelay;
+        if (this.mp) {
+          // 联机：不扣命（5 秒无限重生）；若不是主机确认的击杀（烧尽/坠机死亡），上报主机补发击杀
+          if (!r._netDead) {
+            const killer = r._netKillerId != null ? r._netKillerId
+              : (r._lastAttacker && r._lastAttacker.netId != null ? r._lastAttacker.netId : undefined);   // 烧尽：击杀归属=最后打我的幽灵
+            this.mp.send({ type: 'wt-died', id: this.mp.myId, fid: killer });
+          }
+          this.player = null;
+          this.respawnTimer = 5;
+        } else {
+          this.player = null;
+          this.playerLives -= 1;
+          if (this.objective === 'capture') this.blueTickets = Math.max(0, this.blueTickets - CONFIG.rules.conquest.killCost);   // 征服：阵亡扣己方票
+          if (this.playerLives > 0) this.respawnTimer = this.worldwar ? CONFIG.rules.respawnDelay * 1.8 : CONFIG.rules.respawnDelay;
+        }
       } else if (r.team === 'red') {
         const wasBoss = r.isBoss;
         this.kills += 1;
         if (this.objective === 'capture') this.redTickets = Math.max(0, this.redTickets - CONFIG.rules.conquest.killCost);     // 征服：击杀扣敌方票
         if (this.endless && this.kills % 10 === 0) this._spawnBoss(); // 每 10 击杀出一只精英
+        else if (this.endless && this.kills % 6 === 0) this._spawnAce();   // 每 6 击杀来一名王牌（与 Boss 错开）
         const atk = r._lastAttacker;
         // SP 奖励(世界大战) + 玩家连杀播报
         const isPlayerKill = (atk === playerRef);
@@ -6947,14 +8199,21 @@ class Game {
           meta.astats.kills = (meta.astats.kills || 0) + 1;
           if (this.player && this.player.isHeli) meta.astats.heliKills = (meta.astats.heliKills || 0) + 1;
           if (wasBoss) meta.astats.bossKills = (meta.astats.bossKills || 0) + 1;
+          if (r.isAce) {   // 王牌悬赏：击杀即领（另享日常任务"折戟王牌"进度）
+            meta.money += 300; meta.rp += 120;
+            this.hud.addFeed(`🎖 王牌悬赏到手：+300💰 +120🔬`, 'kill');
+            saveMeta();
+          }
           checkAchievements();
+          questEvent('kill', { shell: r._killShell, tail: r._killIsTail, dist: r._killDist || 0, crit: r._killCrit || r.lastCrit, target: r, boss: !!r.isBoss, ace: !!r.isAce, heliPilot: !!(this.player && this.player.isHeli), mode: this.mode });   // 日常任务：击杀事件
+          if (this._rc && this._rc.killHeal && this.player && this.player.alive) this.player.health = Math.min(this.player.maxHealth, this.player.health + this._rc.killHeal);   // 三选一：战地输血
           this._streak = (this._streakT > 0) ? this._streak + 1 : 1;
           this._streakT = 8;
           if (this._streak >= 2) {
             const words = { 2: '双杀！', 3: '三杀！', 4: '四杀！', 5: '五杀！🔥' };
             const w = words[this._streak] || '⚔️ 无人能挡！';
             this.hud.setCenterMessage(w + ' ×' + this._streak);
-            if (this.sfx) this.sfx._blip(500 + this._streak * 140, 700 + this._streak * 160, 0.16, 0.3, 'triangle');   // 音调随连杀递升
+            if (this.sfx) { this.sfx._blip(500 + this._streak * 140, 700 + this._streak * 160, 0.16, 0.3, 'triangle'); this.sfx.streak(this._streak); }   // 音调随连杀递升 + 琶音
           }
         }
         const who = isPlayerKill ? '你击毁 ' : (atk && atk.team === 'blue' ? '友方击毁 ' : '击毁 ');
@@ -6966,6 +8225,365 @@ class Game {
       } else if (r.team === 'blue') {
         this.hud.addFeed(`友方${label}被击毁${tag}`, 'death');
         if (this.objective === 'capture') this.blueTickets = Math.max(0, this.blueTickets - CONFIG.rules.conquest.killCost);   // 征服：队友阵亡同样扣票
+      }
+    }
+  }
+
+  // —— 拟真节奏（战雷式）：不是慢动作，是"车更沉、炮塔更慢、装填更长、一炮定胜负"——
+  // 全体机动放缓、精度提高、伤害与致命率上调；难度基线之上按乘法作用。
+  _applySim() {
+    const T = CONFIG.tank, P = CONFIG.plane, C = CONFIG.rules.crit;
+    // ⚠ 拟真 ≠ 慢动作：强制把时间流速归位（曾经点过 🐢 节奏档会一直残留在设置里，叠加后就是纯慢动作）
+    this.timeScale = 1;
+    if (this._paceBadge) {   // 角标同步摘掉 🐢（实际已恢复 1×，显示不能骗人）
+      this._paceBadge.textContent = this._paceBadge.textContent.replace(/　🐢 [^　]*×?/, '');
+      if (!this._paceBadge.textContent.trim()) this._paceBadge.remove();
+    }
+    const st = loadSettings();
+    if ((st.pace | 0) !== 0) { st.pace = 0; saveSettings(st); }
+    T.speed *= 0.85; T.reverseSpeed *= 0.85; T.turnSpeed *= 0.85; T.turretSpeed *= 0.75;   // 车体沉、炮塔慢半拍（幅度温和：不变成慢动作）
+    T.reloadTime *= 1.4; T.enemyReloadTime *= 1.3;                                         // 装填更长：每一炮都要想
+    T.shellDamage *= 1.35; T.enemyShellDamage *= 1.25;                                     // 后效更狠：穿了一炮定音
+    T.enemySpread *= 0.7; T.enemyFireChance *= 0.8;                                        // 敌人更准但不泼水
+    T.maxHealth *= 0.8; T.enemyHealth *= 0.75;                                             // 都更脆：先手优势大
+    C.tankInstant *= 1.8; C.tankFire *= 1.6;                                               // 殉爆/起火更容易
+    P.minSpeed *= 0.85; P.maxSpeed *= 0.85; P.pitchRate *= 0.85; P.rollRate *= 0.9;        // 飞机更重更稳
+    P.fireCooldown *= 1.25; P.enemyFireCooldown *= 1.35;
+    P.bulletDamage *= 1.3; P.enemyBulletDamage *= 1.25;
+    C.planeInstant *= 1.6; C.planeFire *= 1.4;
+    this.hud.addFeed('⚔ 拟真节奏：机动微沉 · 装填更长 · 炮炮致命（战雷式，非慢动作）', 'info');
+  }
+
+  // 每日词条应用：作用于本场（难度基线不受污染，applyDifficulty 每局从 BASE 重算）
+  _applyDailyMods() {
+    const d = dailyInfo();
+    const names = [];
+    for (const m of d.mods) {
+      const def = DAILY_MODS.find((x) => x.id === m);
+      if (def) names.push(def.name);
+      if (m === 'enemy_hp') this._dailyHpMul = 1.3;
+      else if (m === 'player_reload') this._dailyReload = 0.8;
+      else if (m === 'solo') { this.allyCount = 0; for (const a of this.allies) { a.alive = false; } this.allies.length = 0; }   // 已铺的队友撤场
+      else if (m === 'more_enemies') CONFIG.rules.maxConcurrentEnemies += 1;
+    }
+    this.hud.addFeed(`📅 每日挑战（${this.mode === 'tank' ? '陆战' : '空战'}·波次）：${names.join('；')}　撑到第 5 波有奖`, 'info');
+  }
+
+  // 空投增益：按模式与规则随机一条（限时倍率走 _addBuff 到期还原；即时类直接生效）。
+  // 有限弹药=弹药补给入池；无限弹药+坦克=车顶自动炮台（首拾必得，之后可升级到 Lv3）。
+  _applySupply(p) {
+    const isTankBody = typeof p.forwardVector !== 'function';
+    const table = [];
+    if (isTankBody) {
+      if (this.limitedAmmo) table.push({ n: '🧰 弹药补给（主炮备弹补满 + 烟雾弹补满）', f: () => { p.ammo = 40; this._smokeAmmo = 3; } });
+      else if (!p.hullTurret) table.push({ n: '🔧 车顶自动炮台安装！（自动扫射附近敌人，空投可升级）', f: () => { p.installHullTurret(1); } });
+      else if ((p.hullTurretLevel || 1) < 3) table.push({ n: `🔧 车顶炮台升级 → Lv${(p.hullTurretLevel || 1) + 1}（射速/伤害提升）`, f: () => { p.installHullTurret(1); } });
+      table.push(
+        { n: '高效装填（装填 -35% / 25s）', f: () => this._addBuff(p, 'buffReload', 0.65, 25) },
+        { n: '发动机增压（速度 +25% / 25s）', f: () => this._addBuff(p, 'buffSpeed', 1.25, 25) },
+        { n: '战场抢修（满血 + 模块全修 + 灭火）', f: () => { p.health = p.maxHealth; p.burning = false; if (p.modules) for (const k in p.modules) p.modules[k] = 0; } },
+        { n: '弹药补给（烟雾弹 +2）', f: () => { this._smokeAmmo = Math.min((this._smokeAmmo || 0) + 2, 5); } },
+      );
+    } else {
+      table.push(
+        { n: '高效供弹（射速 +60% / 25s）', f: () => this._addBuff(p, 'buffReload', 0.4, 25) },
+        { n: '引擎过载（速度 +20% / 25s）', f: () => this._addBuff(p, 'buffSpeed', 1.2, 25) },
+        { n: '地勤抢修（满血 + 灭火）', f: () => { p.health = p.maxHealth; p.burning = false; } },
+      );
+    }
+    this._supplyN = (this._supplyN || 0) + 1;
+    const b = this._supplyN === 1 ? table[0] : table[Math.floor(Math.random() * table.length)];   // 首个空投必给最有用的
+    b.f();
+    this.hud.addFeed('📦 拾取补给：' + b.n, 'kill');
+    questEvent('supply', {});   // 日常任务：拾取补给
+    if (this.sfx) this.sfx.chime();
+  }
+  _addBuff(p, key, val, dur) { p[key] = val; this._buffs.push({ p, key, t: dur }); }
+
+  // —— 三选一强化：把倍率表作用到玩家（以 _base 基准重算，重生/抽卡后调用不叠加错） ——
+  _applyRunMods(p) {
+    if (!p || !p._base) return;
+    const rc = this._rc, b = p._base;
+    if (b.reload != null && p.reloadTime !== undefined) p.reloadTime = b.reload * rc.reload;
+    if (b.fireCd != null && p.fireCooldown !== undefined) p.fireCooldown = b.fireCd * rc.reload;
+    if (b.dmg != null && p.shellDamage !== undefined) p.shellDamage = b.dmg * rc.dmg;
+    if (b.bulletDmg != null && p.bulletDamage !== undefined) p.bulletDamage = b.bulletDmg * rc.dmg;
+    if (b.speed != null && p.maxSpeed !== undefined) p.maxSpeed = b.speed * rc.speed;
+    if (b.speedMult != null && p.speedMult !== undefined) p.speedMult = b.speedMult * rc.speed;
+    if (b.pen != null && p.pen !== undefined) p.pen = b.pen * rc.pen;
+    if (b.turret != null && p.turretSpeed !== undefined) p.turretSpeed = b.turret * rc.turret;
+    if (b.hp != null && p.maxHealth !== undefined) { const old = p.maxHealth; p.maxHealth = b.hp * rc.hp; p.health = Math.min(p.maxHealth, p.health + Math.max(0, p.maxHealth - old)); }
+    if (rc.missiles && b.maxMissiles != null && p.maxMissiles !== undefined) { const add = b.maxMissiles + rc.missiles - p.maxMissiles; if (add > 0) { p.maxMissiles += add; p.missiles += add; } }
+    if (rc.bombs && b.maxBombs != null && p.maxBombs !== undefined) { const add = b.maxBombs + rc.bombs - p.maxBombs; if (add > 0) { p.maxBombs += add; p.bombs += add; } }
+  }
+  // 开三选一（波次清空时）：不暂停不打断——底部小卡条悬浮在 HUD 上，游戏与倒计时照常跑；
+  // 点卡/按 1-2-3 选择，12s 没选自动拿第一张（选择期间下一波照来）。
+  _openCards() {
+    const pool = RUN_CARDS.filter((c) => (this.mode === 'tank' ? c.mode !== 'plane' : c.mode !== 'tank') && (!c.can || c.can(this)));
+    if (!pool.length) return;
+    this._cardPicks = pool.sort(() => Math.random() - 0.5).slice(0, 3);
+    this._cardsOpen = true;
+    const el = document.createElement('div');
+    el.id = 'rc-panel';
+    el.style.cssText = 'position:absolute;left:50%;bottom:88px;transform:translateX(-50%);z-index:30;display:flex;gap:10px;pointer-events:none;white-space:nowrap';
+    this._cardPicks.forEach((c, i) => {
+      const btn = document.createElement('button');
+      btn.style.cssText = 'pointer-events:auto;cursor:pointer;padding:8px 14px;border-radius:12px;border:1px solid rgba(150,200,150,0.55);background:rgba(20,30,22,0.92);color:#dfe8d8;font-size:13px;text-shadow:0 1px 2px #000';
+      btn.innerHTML = `${c.ico} <b>${c.name}</b> <span style="color:#9fb0a0;font-size:11px">${c.desc} · 按${i + 1}</span>`;
+      btn.onmouseenter = () => { btn.style.borderColor = '#7CFC00'; btn.style.background = 'rgba(40,60,40,0.95)'; };
+      btn.onmouseleave = () => { btn.style.borderColor = 'rgba(150,200,150,0.55)'; btn.style.background = 'rgba(20,30,22,0.92)'; };
+      btn.onclick = () => this._pickCard(i);
+      el.appendChild(btn);
+    });
+    this.hud.container.appendChild(el);
+    this.hud.addFeed('🃏 波间强化：点击或按 1/2/3（12 秒后自动选第一张，战斗不暂停）', 'info');
+    this._cardPickT = 12;
+    const onKey = (e) => {
+      const n = parseInt(e.key, 10);
+      if (n >= 1 && n <= (this._cardPicks || []).length) { window.removeEventListener('keydown', onKey); this._pickCard(n - 1); }
+    };
+    window.addEventListener('keydown', onKey);
+    this._cardKeyH = onKey;
+  }
+  _pickCard(i) {
+    const c = (this._cardPicks || [])[i];
+    if (!c) return;
+    if (c.mul) c.mul(this._rc);
+    if (c.now) c.now(this);
+    this._applyRunMods(this.player);
+    if (c.heal && this.player) this.player.health = this.player.maxHealth;
+    this._rcPicks[c.name] = (this._rcPicks[c.name] || 0) + 1;
+    const n = this._rcPicks[c.name];
+    this.hud.addFeed(`🃏 强化入手：${c.name}${n > 1 ? ` ×${n}` : ''}（${c.desc}）`, 'kill');
+    questEvent('card', {});   // 日常任务：拾取强化卡
+    if (this.sfx) this.sfx.chime();
+    this._closeCards();
+  }
+  _closeCards() {
+    const el = this.hud.container.querySelector('#rc-panel');
+    if (el) el.remove();
+    if (this._cardKeyH) { window.removeEventListener('keydown', this._cardKeyH); this._cardKeyH = null; }
+    this._cardsOpen = false;
+    this._cardPickT = 0;
+  }
+
+  // —— 敌方王牌：分房天花板高配车 + 全面强化 + 专属代号与击毁悬赏 ——
+  _spawnAce() {
+    const asTank = this.worldwar ? Math.random() < 0.5 : (this.mode === 'tank');
+    const rk = Math.min(6, (asTank ? tankTypeById(this.tankType).rank : planeTypeById(this.planeType).rank) + 2);
+    let e;
+    if (asTank) {
+      const pool = TANK_TYPES.filter((t) => t.rank >= rk && t.id !== 'aa' && t.id !== 'vads');
+      const type = (pool.length ? pool : TANK_TYPES.filter((t) => t.id !== 'aa' && t.id !== 'vads'))[Math.floor(Math.random() * Math.max(1, pool.length))].id;
+      e = new Tank({ side: 'enemy', team: 'red', color: 0x6d1f1f, type });
+      e.maxHealth *= 2.2; e.health = e.maxHealth;
+      e.reloadTime *= 0.7; e.fireSpread *= 0.55; e.shellDamage *= 1.4;
+      const h = CONFIG.tank.worldSize;
+      e.group.position.set(randRange(-h * 0.35, h * 0.35), 0, randRange(h * 0.5, h * 0.8));
+      e.heading = Math.atan2(-e.group.position.x, -e.group.position.z);
+      e.ai = new TankAI(e);
+      this.em.addTank(e);
+    } else {
+      e = new Plane({ side: 'enemy', team: 'red', color: 0x8a2418, type: randomPlaneType(Math.min(6, rk + 1)).id });
+      e.maxHealth *= 2.0; e.health = e.maxHealth;
+      if (e.bulletDamage != null) e.bulletDamage *= 1.5;
+      const ang = randRange(0, Math.PI * 2), dist = randRange(180, 260);
+      e.group.position.set(Math.sin(ang) * dist, CONFIG.plane.spawnAltitude + randRange(0, 15), Math.cos(ang) * dist);
+      e.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), this._playerBasePos().clone().sub(e.group.position).normalize());
+      e.ai = new PlaneAI(e);
+      this.em.addPlane(e);
+      if (this.worldwar) e.worldSize = CONFIG.tank.worldSize;
+    }
+    e.isAce = true;
+    e.displayName = '❗' + this._nextName();
+    this.enemies.push(e);
+    this.hud.addFeed(`❗ 敌方王牌『${e.displayName.slice(1)}』登场！击毁悬赏 +300💰`, 'death');
+    this.hud.setCenterMessage(`❗ 王牌『${e.displayName.slice(1)}』登场！`);
+    if (this.sfx) this.sfx.aceAlarm();
+  }
+
+  // —— 夺旗冲锋：南北双方基地各一面军旗，夺对方旗带回己方基地得分，先夺 3 次获胜 ——
+  _setupFlags() {
+    this.flagWin = 3;
+    this.flagScore = { blue: 0, red: 0 };
+    const h = CONFIG.tank.worldSize;
+    this.flagHome = { blue: new THREE.Vector3(0, 0, -(h - 55)), red: new THREE.Vector3(0, 0, h - 55) };
+    this.flags = {
+      red: this._makeFlag(0xff5040, this.flagHome.red),    // 敌方（红）军旗——玩家偷这个
+      blue: this._makeFlag(0x4aa8ff, this.flagHome.blue),  // 己方军旗——别被敌军偷走
+    };
+    this.hud.addFeed('🚩 夺旗冲锋：去北方敌基地夺军旗带回南方己方基地，先夺 3 次获胜！', 'info');
+    this.hud.setCenterMessage('🚩 0 : 0');
+  }
+  _makeFlag(color, pos) {
+    const g = new THREE.Group();
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 4.2, 8), new THREE.MeshStandardMaterial({ color: 0xd8d8d0, roughness: 0.6, metalness: 0.4 }));
+    pole.position.y = 2.1; pole.castShadow = true; g.add(pole);
+    const cloth = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.0), new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide, roughness: 0.9 }));
+    cloth.position.set(0.85, 3.5, 0); g.add(cloth);
+    const beam = new THREE.Mesh(   // 直上光柱信标：全场找得到旗
+      new THREE.CylinderGeometry(0.6, 0.6, 30, 10, 1, true),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.15, side: THREE.DoubleSide, depthWrite: false })
+    );
+    beam.position.y = 15; g.add(beam);
+    g.position.copy(pos); g.position.y = terrainHeight(pos.x, pos.z);
+    this.scene.add(g);
+    return { mesh: g, cloth, home: pos.clone(), at: pos.clone(), carrier: null, returnT: 0 };
+  }
+  _updateFlags(dt) {
+    const p = this.player;
+    const R = this.flags.red, B = this.flags.blue;
+    for (const f of [R, B]) {
+      if (f.carrier && !f.carrier.alive) {   // 携带者阵亡 → 军旗掉落原地，20s 自动回归
+        f.at.copy(f.carrier.position); f.carrier = null; f.returnT = 20;
+        this.hud.addFeed('🚩 军旗掉落！', 'info');
+      }
+      if (!f.carrier && f.at.distanceTo(f.home) > 1) {
+        f.returnT -= dt;
+        if (f.returnT <= 0) { f.at.copy(f.home); this.hud.addFeed('🚩 军旗自动回归原位', 'info'); }
+      }
+      if (f.carrier) { f.mesh.position.copy(f.carrier.position); f.mesh.position.y += 6.4; }
+      else { f.mesh.position.copy(f.at); f.mesh.position.y = terrainHeight(f.at.x, f.at.z); }
+      f.cloth.rotation.y = Math.sin(performance.now() * 0.003) * 0.35;   // 旗面飘动
+    }
+    if (!p || !p.alive) return;
+    // 拾敌方旗
+    if (!R.carrier && p.position.distanceTo(R.at) < 7) {
+      R.carrier = p;
+      this.hud.addFeed('🚩 夺得敌方军旗！带回南方己方基地（旗在你头顶）', 'kill');
+      if (this.sfx) this.sfx.chime();
+    }
+    // 得分（需己方军旗在家——被偷要先夺回）
+    if (R.carrier === p && p.position.distanceTo(this.flagHome.blue) < 13) {
+      if (B.carrier || B.at.distanceTo(B.home) > 1) {
+        this.hud.setCenterMessage('⚠ 己方军旗不在家，先夺回来才能得分！');
+      } else {
+        R.carrier = null; R.at.copy(R.home);
+        this.flagScore.blue++;
+        this.hud.addFeed(`🚩 夺旗成功！${this.flagScore.blue}/${this.flagWin}`, 'kill');
+        this.hud.setCenterMessage(`🚩 ${this.flagScore.blue} : ${this.flagScore.red}`);
+        if (this.sfx) this.sfx.fanfare(true);
+      }
+    }
+    // 捡回己方掉落旗（立刻归位）
+    if (!B.carrier && B.at.distanceTo(B.home) > 1 && p.position.distanceTo(B.at) < 7) {
+      B.at.copy(B.home);
+      this.hud.addFeed('🚩 己方军旗已夺回！', 'kill');
+      if (this.sfx) this.sfx.chime();
+    }
+    // 敌军偷我方旗（只偷在家状态；掉落状态敌军不能捡——给玩家拦截窗口）
+    if (!B.carrier && B.at.distanceTo(B.home) <= 1) {
+      for (const e of this.enemies) {
+        if (e.alive && e.position.distanceTo(B.at) < 7) {
+          B.carrier = e;
+          this.hud.addFeed('⚠ 敌军夺走了我方军旗！拦截它！', 'death');
+          if (this.sfx) this.sfx.aceAlarm();
+          break;
+        }
+      }
+    }
+    // 敌军得分
+    if (B.carrier && B.carrier.position.distanceTo(this.flagHome.red) < 13) {
+      B.carrier = null; B.at.copy(B.home);
+      this.flagScore.red++;
+      this.hud.addFeed(`💔 我方军旗被夺！敌方 ${this.flagScore.red}/${this.flagWin}`, 'death');
+      this.hud.setCenterMessage(`🚩 ${this.flagScore.blue} : ${this.flagScore.red}`);
+    }
+    // 敌方掉落旗被敌军碰到 → 归位（免得一直躺地上）
+    if (!R.carrier && R.at.distanceTo(R.home) > 1) {
+      for (const e of this.enemies) {
+        if (e.alive && e.position.distanceTo(R.at) < 7) { R.at.copy(R.home); break; }
+      }
+    }
+  }
+
+  // —— 新手教学：5 步引导。N 键跳过当前步骤（毕业战除外）——
+  _tutSetup() {
+    this._tutStep = 0;
+    this._tutMarker = null;
+    this.hud.addFeed('🎓 新手教学：跟着大字提示一步步来（按 N 可跳过当前步骤，Esc 退出）', 'info');
+    this._tutKey = (e) => {
+      if (e.code !== 'KeyN' || this._tutStep >= 4) return;
+      this._tutNext('⏭ 已跳过');
+    };
+    window.addEventListener('keydown', this._tutKey);
+  }
+  _tutNext(msg) {
+    this._tutStep++;
+    if (this._tutMarker) { this.scene.remove(this._tutMarker); this._tutMarker.geometry.dispose(); this._tutMarker.material.dispose(); this._tutMarker = null; }
+    this.hud.addFeed(msg, 'kill');
+    if (this.sfx) this.sfx.kill();
+  }
+  _tutUpdate() {
+    const p = this.player;
+    if (!p || !p.alive) return;
+    const S = this._tutStep;
+    const fwdPos = (d) => {
+      const fx = Math.sin(p.heading), fz = Math.cos(p.heading);
+      return { x: p.position.x + fx * d, z: p.position.z + fz * d, heading: Math.atan2(-fx, -fz) };
+    };
+    if (S === 0) {   // ① 驾驶
+      if (!this._tutMarker) {
+        const t = fwdPos(35);
+        const m = new THREE.Mesh(new THREE.RingGeometry(5.5, 6.5, 28), new THREE.MeshBasicMaterial({ color: 0x7CFC00, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+        m.rotation.x = -Math.PI / 2;
+        m.position.set(t.x, terrainHeight(t.x, t.z) + 0.3, t.z);
+        this.scene.add(m);
+        this._tutMarker = m;
+        this.hud.setCenterMessage('🎓 1/5 驾驶：W 前进 · S 后退 · A/D 转向 —— 开进绿色圆圈');
+      }
+      this._tutMarker.material.opacity = 0.5 + 0.3 * Math.sin(performance.now() * 0.005);
+      if (p.position.distanceTo(this._tutMarker.position) < 6) this._tutNext('✅ 开得不错！');
+    } else if (S === 1) {   // ② 瞄准开火
+      if (!this._tutDummy) {
+        const t = fwdPos(70);
+        const d = new Tank({ side: 'enemy', team: 'red', color: 0x8a7560, type: 't26' });
+        d.group.position.set(t.x, 0, t.z); d.heading = t.heading;
+        d.maxHealth = 30; d.health = 30; d.displayName = '靶车'; d.ai = null;
+        this.em.addTank(d); this.enemies.push(d);
+        this._tutDummy = d;
+        this.hud.setCenterMessage('🎓 2/5 瞄准开火：鼠标转炮塔 · 左键开炮 —— 摧毁前方靶车');
+      }
+      if (!this._tutDummy.alive) this._tutNext('✅ 好枪法！');
+    } else if (S === 2) {   // ③ 弹种克制
+      if (!this._tutDummy2) {
+        const t = fwdPos(95);
+        const d = new Tank({ side: 'enemy', team: 'red', color: 0x6a6a72, type: 'tiger2' });
+        d.group.position.set(t.x, 0, t.z); d.heading = t.heading;
+        d.maxHealth = 120; d.health = 120; d.displayName = '重甲靶车'; d.ai = null;
+        this.em.addTank(d); this.enemies.push(d);
+        this._tutDummy2 = d;
+        this.hud.setCenterMessage('🎓 3/5 弹种克制：正面太硬？按 2 换硬芯穿甲弹（穿深更高）再打；打完按 1 换回');
+      }
+      if (!this._tutDummy2.alive) this._tutNext('✅ 穿深克制装甲！');
+    } else if (S === 3) {   // ④ 战地修理
+      if (!this._tutDamaged) {
+        this._tutDamaged = true;
+        p.health = p.maxHealth * 0.45;
+        if (p.modules) p.modules.track = 8;   // 履带损坏：明显跑不动
+        this.hud.setCenterMessage('🎓 4/5 战地修理：履带被打坏了（跑不快）—— 按住 R 修到满血');
+      }
+      if (p.health >= p.maxHealth * 0.99) this._tutNext('✅ 修车大师！');
+    } else if (S === 4) {   // ⑤ 毕业实战
+      if (!this._tutGrad) {
+        this._tutGrad = true;
+        for (let i = 0; i < 2; i++) {
+          const e = new Tank({ side: 'enemy', team: 'red', color: 0x9a7b3e, type: 't26' });
+          e.group.position.set(p.position.x + randRange(-90, 90), 0, p.position.z + randRange(70, 110));
+          e.heading = Math.atan2(-(e.group.position.x - p.position.x), -(e.group.position.z - p.position.z));
+          e.maxHealth *= 0.5; e.health = e.maxHealth;
+          e.ai = new TankAI(e);
+          e.displayName = this._nextName();
+          this.em.addTank(e);
+          this.enemies.push(e);
+        }
+        this.hud.setCenterMessage('🎓 5/5 毕业实战：消灭 2 辆敌军！');
+      }
+      if (this.enemies.filter((e) => e.alive).length === 0) {
+        this._slowPlayed = true;   // 不放终局回放，直接结算
+        if (!meta.tutorialDone) { meta.tutorialDone = true; meta.money += 800; saveMeta(); this.hud.addFeed('🎓 教学毕业！新生奖励 +800💰', 'kill'); }
+        else this.hud.addFeed('🎓 教学毕业！', 'kill');
+        this._end(true);
       }
     }
   }
@@ -6985,11 +8603,23 @@ class Game {
         } else {
           this._makePlayer();
           this.hud.setCenterMessage('');
-          this.hud.addFeed(`已重生（剩余命数 ${this.playerLives}）`, 'info');
+          this.hud.addFeed(this.mp ? '已重生' : `已重生（剩余命数 ${this.playerLives}）`, 'info');
         }
       }
     } else if (this._wwPick) {
       this.hud.setCenterMessage('点击选择新载具');
+    } else if (this._wwWatch) {
+      // 世界大战观战中（选载具面板已收起）：提示重开方式；SP 保底补给防软锁（solo/连败时买不起任何车）
+      this.hud.setCenterMessage(`👁 观战中 · 按 B 选择载具（⚡SP ${this.sp}）`);
+      const min = this._wwMinCost();
+      if (min != null && this.sp < min) {
+        this._spAidT = (this._spAidT || 0) + dt;
+        if (this._spAidT >= 10) {
+          this._spAidT = 0;
+          this.sp = min;   // 直接补足到"最便宜的一辆"，10 秒一次
+          this.hud.addFeed(`⚡ SP 保底补给 → ${this.sp}（可出动最便宜载具）`, 'info');
+        }
+      } else this._spAidT = 0;
     } else if (this.player && this.player.alive) {
       this.hud.setCenterMessage('');
     }
@@ -7002,44 +8632,49 @@ class Game {
     if (p.bombs) return 600;   // 轰炸机
     return 250 + p.rank * 50;
   }
-  // 世界大战载具选择面板：列出已拥有的坦克+飞机，点击选一辆重生
+  // 已拥有载具里的最低出生成本（SP 保底补给补到这个数；null=没有可用载具）
+  _wwMinCost() {
+    let min = null;
+    for (const id of this.ownedTanks) { const c = this._spawnCost('tank', id); if (min == null || c < min) min = c; }
+    for (const id of this.ownedPlanes) { const c = this._spawnCost('plane', id); if (min == null || c < min) min = c; }
+    return min;
+  }
+  // 世界大战载具选择面板：列出已拥有的坦克+飞机，点击选一辆重生；可收起观战（B 重开）
   _showWWPanel() {
     if (this._wwPanel) this._wwPanel.remove();
+    this._wwPick = true; this._wwWatch = false;
     if (this.input) this.input.canvas.style.cursor = 'auto';
     const panel = document.createElement('div');
-    panel.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.9);border:2px solid rgba(100,180,100,.4);border-radius:12px;padding:20px 24px;z-index:100;max-width:80vw;max-height:80vh;overflow-y:auto;font-family:sans-serif;color:#eee';
+    panel.className = 'ww-panel';
     let html = '<div style="text-align:center;font-size:18px;margin-bottom:4px">选择载具（剩余 ' + Math.max(0, this.playerLives) + ' 命）</div>';
     html += '<div style="text-align:center;font-size:15px;color:#ffd86b;margin-bottom:12px">⚡ SP ' + this.sp + ' ——击杀+300 / 队友击杀+120，重生按载具扣费</div>';
-    html += '<div style="display:flex;gap:20px">';
+    html += '<div class="ww-cols">';
     // 坦克
-    html += '<div><div style="font-size:14px;color:#8f8;margin-bottom:8px">🛡 坦克</div>';
+    html += '<div><div class="ww-kind" style="color:#8f8">🛡 坦克</div>';
     for (const id of this.ownedTanks) {
       const t = tankTypeById(id);
       const cost = this._spawnCost('tank', id);
       const afford = this.sp >= cost;
       const sel = (this.mode === 'tank' && this.tankType === id) ? 'border:2px solid #6f6' : 'border:1px solid #555';
-      html += `<div data-mode="tank" data-id="${id}" data-cost="${cost}" style="margin:4px 0;padding:8px 14px;background:rgba(40,60,40,${afford ? '.6' : '.25'});border-radius:6px;cursor:${afford ? 'pointer' : 'not-allowed'};${sel}${afford ? '' : ';opacity:.45'}">${t.icon} ${t.name} <span style="color:#ffd86b;float:right">${cost}SP</span></div>`;
+      html += `<div data-mode="tank" data-id="${id}" data-cost="${cost}" class="ww-row${afford ? '' : ' cant'}" style="${sel}">${t.icon} ${t.name} <span class="ww-cost">${cost}SP</span></div>`;
     }
     html += '</div>';
     // 飞机
-    html += '<div><div style="font-size:14px;color:#8af;margin-bottom:8px">✈ 飞机</div>';
+    html += '<div><div class="ww-kind" style="color:#8af">✈ 飞机</div>';
     for (const id of this.ownedPlanes) {
       const p = planeTypeById(id);
       const cost = this._spawnCost('plane', id);
       const afford = this.sp >= cost;
       const sel = (this.mode === 'plane' && this.planeType === id) ? 'border:2px solid #6f6' : 'border:1px solid #555';
-      html += `<div data-mode="plane" data-id="${id}" data-cost="${cost}" style="margin:4px 0;padding:8px 14px;background:rgba(40,50,70,${afford ? '.6' : '.25'});border-radius:6px;cursor:${afford ? 'pointer' : 'not-allowed'};${sel}${afford ? '' : ';opacity:.45'}">${p.icon} ${p.name} <span style="color:#ffd86b;float:right">${cost}SP</span></div>`;
+      html += `<div data-mode="plane" data-id="${id}" data-cost="${cost}" class="ww-row plane${afford ? '' : ' cant'}" style="${sel}">${p.icon} ${p.name} <span class="ww-cost">${cost}SP</span></div>`;
     }
     html += '</div></div>';
+    html += '<button id="ww-watch" class="modal-btn neutral" style="margin-top:14px">👁 继续观战（按 B 回到本面板）</button>';
     panel.innerHTML = html;
     document.body.appendChild(panel);
     this._wwPanel = panel;
     panel.querySelectorAll('[data-mode]').forEach((el) => {
-      const hoverBg = el.dataset.mode === 'tank' ? 'rgba(60,100,60,.85)' : 'rgba(60,80,110,.85)';
-      const idleBg = el.dataset.mode === 'tank' ? 'rgba(40,60,40,.6)' : 'rgba(40,50,70,.6)';
-      el.onmouseenter = () => { el.style.background = hoverBg; };
-      el.onmouseleave = () => { el.style.background = idleBg; };
-      el.ontouchstart = () => { el.style.background = hoverBg; };   // 触屏无 hover 态：按下即时高亮给反馈
+      // 高亮交给 CSS（.ww-row:hover / .cant 降透明度），不再用 JS 切内联背景
       el.onclick = () => {
         const cost = parseInt(el.dataset.cost, 10) || 0;
         if (this.sp < cost) { this.hud.addFeed('⚡ SP 不足（需 ' + cost + '，当前 ' + this.sp + '）——击杀敌车攒 SP', 'death'); return; }
@@ -7056,6 +8691,12 @@ class Game {
         this.hud.addFeed(`已重生：${name}（剩余 ${this.playerLives}）`, 'info');
       };
     });
+    const watchBtn = panel.querySelector('#ww-watch');
+    if (watchBtn) watchBtn.addEventListener('click', () => {
+      panel.remove(); this._wwPanel = null;
+      this._wwPick = false; this._wwWatch = true;   // 观战中：相机跟队友，按 B 重开本面板
+      if (this.input) this.input.canvas.style.cursor = 'crosshair';
+    });
   }
 
   _updateEnemySpawns(dt) {
@@ -7070,7 +8711,7 @@ class Game {
       ? Math.ceil(this.redTickets / CONFIG.rules.killCost)
       : this.enemyTickets;
     // 波次生存：不自动增援（一波打完等下一波，由 _checkEnd 推进）
-    if (this.objective === 'waves') return;
+    if (this.objective === 'waves' || this.objective === 'bossrush') return;
     if (this._enemySpawnTimer <= 0 &&
         aliveEnemies < maxC &&
         this.enemiesToSpawn > 0 &&
@@ -7104,6 +8745,7 @@ class Game {
   }
 
   _updateHUD() {
+    if (this._artyAimRing && this._artyAimRing.visible && !(this.player && this.player.isArty && this.player.alive && this.mode === 'tank')) this._artyAimRing.visible = false;   // 曲射炮落点环：非 M109/阵亡即隐藏
     const enemiesLeft = this.enemies.length + this.enemiesToSpawn;
     if (this.player && this.player.alive) {
       this.hud.update({
@@ -7111,10 +8753,11 @@ class Game {
         maxHealth: this.player.maxHealth,
         reloadFraction: this.player.reloadFraction,
         kills: this.kills,
-        tickets: this.objective === 'capture' ? null : this.enemyTickets,   // 征服模式票数在顶栏
-        lives: Math.max(0, this.playerLives),
+        tickets: this.mp ? null : (this.objective === 'capture' ? null : this.enemyTickets),   // 征服模式票数在顶栏；联机分数在顶部横幅
+        lives: this.mp ? 0 : Math.max(0, this.playerLives),
         enemiesLeft,
       });
+      if (this.mp && this.hud.scoreEl) this.hud.scoreEl.textContent = `🌐 对战 · 击杀 ${(this.mp.scores.get(this.mp.myId) || {}).k || 0}`;
       this.hud.setMissiles(this.player.missiles ?? 0, this.player.maxMissiles ?? 0);
       this.hud.setBombs(this.player.bombs ?? 0, this.player.maxBombs ?? 0);
       // 小地图：玩家居中、朝上为前进方向；敌人画红点
@@ -7138,50 +8781,84 @@ class Game {
       // 按载具实体类型判（worldwar 下 this.mode 可能与玩家实际载具不同步；坦克实体永远不显示 lead 提前量环）
       if (!this.worldwar && typeof this.player.forwardVector === 'function') this._updateLeadReticle(); else this.hud.positionLead(0, 0, false);   // worldwar 混战不显示 lead 提前量环（玩家反馈不需要）；纯飞机模式才显示
     } else {
-      this.hud.update({ kills: this.kills, tickets: this.objective === 'capture' ? null : this.enemyTickets, lives: Math.max(0, this.playerLives), enemiesLeft });
+      this.hud.update({ kills: this.kills, tickets: this.mp ? null : (this.objective === 'capture' ? null : this.enemyTickets), lives: this.mp ? 0 : Math.max(0, this.playerLives), enemiesLeft });
+      if (this.mp && this.hud.scoreEl) this.hud.scoreEl.textContent = `🌐 对战 · 击杀 ${(this.mp.scores.get(this.mp.myId) || {}).k || 0}`;
       this.hud.setModules(null);
       this.hud.positionLead(0, 0, false);
     }
   }
 
   // 提前量瞄准具：给前方敌机算拦截解（子弹速度+敌速），把命中点画到屏幕上。
+  // 稳定性三件套：目标粘性（不频繁换目标）+ 屏幕位置阻尼（不逐帧抖）+ 宽搜索锥（提前亮，
+  // 敌机刚进视野就给解，不用自己手算提前量）。
   _updateLeadReticle() {
-    if (!this.player || !this.player.alive) { this.hud.positionLead(0, 0, false); return; }
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - (this._leadLastT || now)) / 1000) || 0.016;
+    this._leadLastT = now;
+    if (!this.player || !this.player.alive) { this.hud.positionLead(0, 0, false); this._leadSm = null; this._leadTgt = null; return; }
     const p = this.player;
     const B = CONFIG.plane.bulletSpeed;
     const fwd = p.forwardVector();
-    let best = null, bestScore = Infinity;
-    for (const e of this.enemies) {
-      if (!e.alive) continue;
+    const solve = (e) => {
       const R = e.position.clone().sub(p.position);
       const dist = R.length();
-      if (dist > 700 || dist < 1) continue;
-      if (fwd.dot(R.clone().multiplyScalar(1 / dist)) < 0.3) continue; // 只算前方的目标
-      const Vt = (typeof e.forwardVector === 'function') ? e.forwardVector().multiplyScalar(e.speed) : new THREE.Vector3();   // Tank 无 forwardVector（worldwar 陆空混编），用零向量=不提前量
+      if (dist > 800 || dist < 1) return null;
+      const Vt = (typeof e.forwardVector === 'function') ? e.forwardVector().multiplyScalar(e.speed) : new THREE.Vector3();
       const a = Vt.lengthSq() - B * B, b = 2 * R.dot(Vt), c = R.lengthSq();
       const disc = b * b - 4 * a * c;
-      if (disc < 0) continue;
+      if (disc < 0) return null;
       const sq = Math.sqrt(disc);
       const cand = [(-b + sq) / (2 * a), (-b - sq) / (2 * a)].filter((t) => t > 0).sort((x, y) => x - y);
-      if (!cand.length) continue;
+      if (!cand.length) return null;
       const sp = e.position.clone().addScaledVector(Vt, cand[0]).project(this.camera);
-      if (sp.z > 1) continue;
-      const score = Math.abs(sp.x) + Math.abs(sp.y);
-      if (score < bestScore) { bestScore = score; best = sp; }
+      if (sp.z > 1) return null;
+      return sp;
+    };
+    // 目标粘性：优先沿用上帧目标（环不会因为"谁更靠屏幕中心"每帧切换而瞬移）
+    let sp = null;
+    if (this._leadTgt && this._leadTgt.alive) sp = solve(this._leadTgt);
+    if (!sp) {
+      let best = null, bestScore = Infinity;
+      for (const e of this.enemies) {
+        if (!e.alive) continue;
+        const R = e.position.clone().sub(p.position);
+        const dist = R.length();
+        if (dist > 800 || dist < 1) continue;
+        if (fwd.dot(R.clone().multiplyScalar(1 / dist)) < 0.12) continue;   // 提前亮：搜索锥 ~83°（原 0.3≈72°），敌机刚偏出机头也先亮环
+        const s = solve(e);
+        if (!s) continue;
+        const score = Math.abs(s.x) + Math.abs(s.y);
+        if (score < bestScore) { bestScore = score; best = s; this._leadTgt = e; }
+      }
+      sp = best;
+      if (!sp) this._leadTgt = null;
     }
-    if (best) this.hud.positionLead(best.x, best.y, true);
-    else this.hud.positionLead(0, 0, false);
+    if (!sp) { this.hud.positionLead(0, 0, false); this._leadSm = null; return; }
+    // 屏幕位置阻尼（~0.12s 时间常数）：环平滑滑向解算点，敌机机动时不再逐帧抖动
+    if (!this._leadSm) this._leadSm = { x: sp.x, y: sp.y };
+    const k = 1 - Math.exp(-8 * dt);
+    this._leadSm.x += (sp.x - this._leadSm.x) * k;
+    this._leadSm.y += (sp.y - this._leadSm.y) * k;
+    this.hud.positionLead(this._leadSm.x, this._leadSm.y, true);
   }
 
   _checkEnd(dt = 0.016) {
     if (this.state !== 'playing') return;
-    if (this.objective === 'waves') {
-      // 波次生存：一波全灭 → 4s 休整（回复+补给）→ 下一波更强；撑到玩家命数耗尽为止
+    if (this.mp) return;   // 联机对战：终局由主机判胜广播 wt-end，本地不判（票数/波数规则不适用）
+    if (this.objective === 'waves' || this.objective === 'bossrush') {
+      // 波次类：一波全灭 → 弹三选一（不暂停）+ 正常休整倒计时 → 下一波更强
       if (this.enemies.length === 0 && this.player && this.player.alive) {
+        if (!this._cardsOpen && !this._cardsServed) { this._cardsServed = true; this._openCards(); }
         this._waveInterT -= dt;
         if (this._waveInterT <= 0) this._startWave();
         else this.hud.setCenterMessage(`第 ${this.wave} 波肃清！下一波 ${Math.ceil(this._waveInterT)}s（休整中…）`);
       }
+    } else if (this.objective === 'flag') {
+      // 夺旗冲锋：先夺 3 旗者胜
+      if (this.flagScore.blue >= this.flagWin) { this._end(true); return; }
+      if (this.flagScore.red >= this.flagWin) { this._end(false); return; }
+    } else if (this.objective === 'tutorial') {
+      this._tutUpdate();   // 新手教学：步骤推进（毕业战全灭即通关）
     } else if (this.objective === 'capture') {
       // 征服模式：先耗尽对方票数者获胜（占点流失 + 击杀扣票两条路）
       if (this.redTickets <= 0) { this._end(true); return; }
@@ -7198,23 +8875,42 @@ class Game {
   }
 
   // —— 波次生存：第 N 波出 2+N 辆敌车，rank 随波次爬升（1-2波≤rank2 → 9波+全池），5 波起血量递增 ——
+  // Boss 连战：每波 1~2 只 Boss（血量再随波次攀升）+ 递增护卫，6 波起双 Boss。
   _startWave() {
     this.wave = (this.wave || 0) + 1;
+    this._cardsServed = false;   // 新一波可再弹三选一
     const n = 2 + this.wave;
     this._waveMaxRank = Math.min(6, 1 + Math.floor((this.wave + 1) / 2));
-    for (let i = 0; i < n; i++) this._spawnEnemy();
+    if (this.objective === 'bossrush') {
+      const bosses = this.wave < 6 ? 1 : 2;
+      const guards = Math.min(6, Math.max(0, this.wave - 1));
+      const KINDS = ['twin', 'arty', 'shield'];
+      const k1 = KINDS[(this.wave - 1) % 3];
+      for (let i = 0; i < bosses; i++) {
+        this._spawnBoss(i === 0 ? k1 : KINDS[(KINDS.indexOf(k1) + 1 + Math.floor(Math.random() * 2)) % 3]);   // 双 Boss 期类型错开
+        const b = this.enemies[this.enemies.length - 1];
+        if (b) { b.maxHealth *= 1 + (this.wave - 1) * 0.15; b.health = b.maxHealth; }   // Boss 血量逐波攀升
+      }
+      for (let i = 0; i < guards; i++) this._spawnEnemy();
+      this.hud.addFeed(`💀 Boss 连战 · 第 ${this.wave} 波（${bosses} Boss${guards ? ` + ${guards} 护卫` : ''}）`, 'death');
+    } else {
+      for (let i = 0; i < n; i++) this._spawnEnemy();
+      this.hud.addFeed(`🌊 第 ${this.wave} 波（${n} 辆）`, 'kill');
+    }
     if (this.wave % 5 === 0) { this._spawnBoss(); this.hud.addFeed(`💀 第 ${this.wave} 波 BOSS 出现！`, 'death'); }   // 每 5 波一只精英 Boss
     if (this.wave >= 5) {
       const k = 1 + (this.wave - 4) * 0.08;
       for (const e of this.enemies) { e.maxHealth *= k; e.health = e.maxHealth; }
     }
     this._waveInterT = 4;
-    this.hud.setCenterMessage(`🌊 第 ${this.wave} 波来袭！`);
-    this.hud.addFeed(`🌊 第 ${this.wave} 波（${n} 辆）`, 'kill');
-    // 波间补给：回复 30% 血+清模块伤+烟幕弹补满
+    if (this.wave % 3 === 0) this._spawnAce();   // 每 3 波来一名王牌（悬赏目标，战斗内事件感）
+    this.hud.setCenterMessage(this.objective === 'bossrush' ? `💀 第 ${this.wave} 波 Boss 来袭！` : `🌊 第 ${this.wave} 波来袭！`);
+    if (this.sfx) this.sfx.waveHorn();
+    // 波间补给：回复 30% 血+清模块伤+烟幕弹补满（三选一"波间整备"再加 20%）
     const p = this.player;
     if (p && p.alive) {
       p.health = Math.min(p.maxHealth, p.health + p.maxHealth * 0.3);
+      if (this._rc && this._rc.waveHeal) p.health = Math.min(p.maxHealth, p.health + p.maxHealth * this._rc.waveHeal);
       if (p.modules) for (const k2 in p.modules) p.modules[k2] = 0;
       this._smokeAmmo = 3;
     }
@@ -7222,10 +8918,21 @@ class Game {
 
   _end(win) {
     // 胜利的最后一杀：全屏弹道跟拍回放（镜头贴着炮弹从炮口飞向敌车，命中殉爆炮塔飞出，全场 0.4 倍慢放）
-    if (win && !this._slowPlayed && this.state === 'playing') {
+    if (win && !this._slowPlayed && this.state === 'playing' && !this.mp) {   // 联机局：全场慢放会与其他玩家失同步，不放
       this._slowPlayed = true;
       const ks = this._lastKillShot;
-      if (ks && ks.target && ks.proj && ks.proj.launchPos) {
+      const ksFresh = ks && ks.time && performance.now() - ks.time < 5000;   // 快照 5s 内才放（过旧的残骸/弹丸快照已销毁，重演会渲染幽灵）
+      if (ksFresh && ks.target && typeof ks.target.forwardVector === 'function' && ks.target.group) {
+        // 空战最后一杀：全屏跟拍坠机（_finalReplay 全场 0.4x 慢放，回放收尾自动真结算）
+        this._lastReplayT = 0;   // 绕过回放节流（终局必放）
+        this._startCrashCam(ks.target, true);
+        if (this._shellcam) {
+          this._shellcam.fullscreen = true;
+          this._finalReplay = true;
+          this.hud.setCenterMessage('🎬 ' + ((this.objective === 'waves' || this.objective === 'bossrush') ? `撑到第 ${this.wave} 波！` : '胜利！'));
+          return;
+        }
+      } else if (ksFresh && ks.target && ks.proj && ks.proj.launchPos) {
         this._lastReplayT = 0;   // 绕过回放节流（终局必放）
         this._startKillReplay(ks.target, ks.hitPoint, true, ks.verdict, ks.proj, ks.proj.shellDef ? ks.proj.shellDef.id : null, ks.crit);
         if (this._shellcam) {
@@ -7233,18 +8940,24 @@ class Game {
           sc.fullscreen = true;   // 全屏（不再小窗）
           sc.slow = true;         // 回放自身慢速
           this._finalReplay = true;
-          this.hud.setCenterMessage('🎬 ' + (this.objective === 'waves' ? `撑到第 ${this.wave} 波！` : '胜利！'));
+          this.hud.setCenterMessage('🎬 ' + ((this.objective === 'waves' || this.objective === 'bossrush') ? `撑到第 ${this.wave} 波！` : '胜利！'));
           return;   // 回放结束后自动 _end(true) 真结算
         }
       }
       // 无快照兜底：简单全屏慢放 1.3s
       this._pendingEnd = true;
       this._slowMoT = 1.3;
-      this.hud.setCenterMessage('🎬 ' + (this.objective === 'waves' ? `撑到第 ${this.wave} 波！` : '胜利！'));
+      this.hud.setCenterMessage('🎬 ' + ((this.objective === 'waves' || this.objective === 'bossrush') ? `撑到第 ${this.wave} 波！` : '胜利！'));
       return;
     }
     this.state = 'over';
+    if (this.mp) this.kills = (this.mp.scores.get(this.mp.myId) || {}).k || 0;   // 联机：结算击杀数=计分板人头（本地 this.kills 只统计 AI）
     this._endShellcam();   // 结束比赛：关掉回放小窗，别冻在结算界面旁
+    if (this._cardsOpen) this._closeCards();   // 选卡面板收起
+    if (this._tutKey) { window.removeEventListener('keydown', this._tutKey); this._tutKey = null; }   // 教学按键清理
+    if (this._paceBadge) { this._paceBadge.remove(); this._paceBadge = null; }   // 节奏角标清理
+    if (this._tutMarker) { this.scene.remove(this._tutMarker); this._tutMarker.geometry.dispose(); this._tutMarker.material.dispose(); this._tutMarker = null; }
+    if (this._artyRings) { for (const rr of this._artyRings) { this.scene.remove(rr.mesh); rr.mesh.geometry.dispose(); rr.mesh.material.dispose(); } this._artyRings = []; }   // 炮击警告圈清理
     // 一局结束：释放指针锁让光标出现（点"再来一局/返回菜单"），并藏掉准星。
     // 程序化退出无 ESC 冷却，也顺带消除下一局开局"要点两次才锁上"的问题。
     if (document.pointerLockElement) document.exitPointerLock();
@@ -7256,29 +8969,84 @@ class Game {
     this.hud.setAiStatus(null); this.hud.setSquadPanel(null); this.hud.positionCcip(0, 2, false);   // 仪表/面板/圈清理
     // 成就累计：跳弹数/波次/单挑胜场 → 检查解锁
     meta.astats.bounces = (meta.astats.bounces || 0) + (this.stats ? this.stats.bounce : 0);
-    if (this.objective === 'waves') meta.astats.bestWave = Math.max(meta.astats.bestWave || 0, this.wave || 0);
+    if (this.objective === 'waves' || this.objective === 'bossrush') meta.astats.bestWave = Math.max(meta.astats.bestWave || 0, this.wave || 0);
     if (win && this.solo) meta.astats.soloWins = (meta.astats.soloWins || 0) + 1;
+    // 弹种发射数汇总（终局事件/战绩入册/结算面板三处共用，必须先算）
+    const sh = (this.em && this.em.pShells) || { ap: 0, apcr: 0, he: 0 };
+    const st = this.stats; st.fired = sh.ap + sh.apcr + sh.he;
+    const acc = st.fired > 0 ? Math.round(st.hits / st.fired * 100) : 0;
+    if (!this.mp) questEvent('battle_end', {   // 联机对战：不计日常任务/成就（数值与单机不可比）
+      win, flawless: win && !this._dmgTaken, capture: win && this.objective === 'capture', wave: this.wave || 0,
+      kills: this.kills, acc, fired: st.fired, objective: this.objective, daily: !!this.daily,
+      map: this.mapId, worldwar: !!this.worldwar, night: !!(MAPS.find((m) => m.id === this.mapId) || {}).night,
+      rain: ['rain', 'storm'].includes(this.mapId),
+    });   // 日常任务：终局事件
+    if (this.daily && meta.daily) {   // 每日挑战结算：记最佳波次 + 撑到第 5 波首通奖（每天一次）
+      if ((this.wave || 0) > (meta.daily.bestWave || 0)) meta.daily.bestWave = this.wave || 0;
+      if ((this.wave || 0) >= 5 && !meta.daily.rewarded) {
+        meta.daily.rewarded = true;
+        meta.money += 800;
+        this.hud.addFeed('📅 每日挑战达标（第 5 波）：+800💰 明天再来！', 'kill');
+      }
+      saveMeta();
+    }
     checkAchievements(); saveMeta();
     this.hud.positionLead(0, 0, false);   // 结束时清提前量瞄准环，防卡屏残留
     if (this._bombX) this._bombX.style.display = 'none';
     this.hud.setCenterMessage('');
-    // 弹种发射数汇总 → 结算统计面板
-    const sh = (this.em && this.em.pShells) || { ap: 0, apcr: 0, he: 0 };
-    const st = this.stats; st.fired = sh.ap + sh.apcr + sh.he;
+    if (this.sfx) this.sfx.fanfare(win);   // 终局号令：胜=上行小号 / 负=下行低鸣
+    // —— 战绩入册：单局记录 + 破纪录播报（结算面板金色一行）——
+    const prev = computeBattleRecords(meta.battleLog);
+    const entry = {
+      t: Date.now(),
+      mode: this.mode === 'tank' ? '陆战' : '空战',
+      veh: this.mode === 'tank' ? tankTypeById(this.tankType).name : planeTypeById(this.planeType).name,
+      win: !!win, kills: this.kills,
+      wave: (this.objective === 'waves' || this.objective === 'bossrush' || this.daily) ? (this.wave || 0) : 0,
+      acc, fired: st.fired, matchT: Math.round(this.matchT || 0),
+    };
+    const records = [];
+    if (entry.kills > (prev.mostKills || 0) && entry.kills >= 3) records.push(`单局击杀 ${entry.kills}`);
+    if (st.fired >= 10 && acc > (prev.bestAcc || 0) && acc >= 40) records.push(`命中率 ${acc}%`);
+    if (entry.wave > (prev.mostWave || 0) && entry.wave >= 2) records.push(`波次第 ${entry.wave} 波`);
+    meta.battleLog = [entry, ...((Array.isArray(meta.battleLog) ? meta.battleLog.slice(0, 59) : []))];
+    // 载具战绩本：每辆车的出战数/击杀/胜场（出战页展示，老车养成感）
+    {
+      const vid = this.mode === 'tank' ? this.tankType : this.planeType;
+      meta.vehStats = meta.vehStats || {};
+      const vs = meta.vehStats[vid] = meta.vehStats[vid] || { kills: 0, battles: 0, wins: 0 };
+      vs.kills += this.kills; vs.battles += 1; if (win) vs.wins += 1;
+    }
+    saveMeta();
     this.hud.showResult({
       win,
       kills: this.kills,
       endless: this.endless,
-      wave: this.objective === 'waves' ? this.wave : 0,
+      wave: (this.objective === 'waves' || this.objective === 'bossrush') ? this.wave : 0,
       stats: { ...st, shells: sh },
-      onAgain: () => this.restart(this.mode),
+      records,
+      onAgain: () => {
+        if (this.mp) {   // 联机：回大厅（主机可再开一局，地图可换）
+          const mp = this.mp;
+          mp.detachGame();
+          this.dispose();
+          game = null;   // 菜单作用域的局引用置空（_openVehPicker 的守卫看它）
+          mp.showLobby();
+        } else this.restart(this.mode);
+      },
       onMenu: () => { if (this.onExit) this.onExit(); },
+      onLoadout: this.mp ? null : (() => {   // 换车/换配置直达出战页：省掉 主菜单→点模式 三步
+        const m = this.mode;
+        if (this.onExit) this.onExit();
+        showLoadout(m);
+      }),
     });
-    if (this.onResult) this.onResult({ win, kills: this.kills, endless: this.endless });
+    if (this.onResult) this.onResult({ win, kills: this.kills, endless: this.endless, goldMul: (this._rc && this._rc.goldMul) || 1, rpMul: (this._rc && this._rc.rpMul) || 1 });
   }
 
   restart(mode) {
     this.mode = mode;
+    if (this.daily && this._dailySeed != null) Math.random = mulberry32(this._dailySeed);   // 每日重试：同一天同布局（重来也一致）
     this.em.clear();
     if (this.terrain) this.scene.remove(this.terrain.group);
     this.hud.setCenterMessage('');
@@ -7292,6 +9060,7 @@ class Game {
     this._aErr = false;
     this._deathCamTarget = null;
     this._wwPick = false;
+    this._wwWatch = false;
     this.paused = false;
     this._hidePauseOverlay();
     this._endShellcam();   // 重开：清掉跟拍小窗/X 光组/还原材质
@@ -7311,6 +9080,8 @@ class Game {
     this._disposed = true;
     cancelAnimationFrame(this._raf);
     clearTimeout(this._relockTO);
+    if (this._mpSavedWorldSize != null) { CONFIG.tank.worldSize = this._mpSavedWorldSize; this._mpSavedWorldSize = null; }   // 联机小图还原
+    if (this.mp) { this.mp.detachGame(); }   // 联机：脱钩战局（幽灵/横幅清理，会话保留在大厅）
     this._endShellcam();   // 清理跟拍小窗/X 光组/还原材质
     window.removeEventListener('resize', this._onResize);
     if (this._onDocClickPL) document.removeEventListener('click', this._onDocClickPL);
@@ -7324,8 +9095,14 @@ class Game {
     this.input.dispose();
     this.hud.dispose();
     this.sfx.stopEngine();
+    if (this.music) { this.music.stop(); this.music = null; }   // 动态音乐停播
     this._clearCapture();
     this.em.clear();
+    if (this.flags) { for (const k of ['red', 'blue']) { const f = this.flags[k]; if (f && f.mesh) { f.mesh.traverse((c) => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); }); f.mesh.removeFromParent(); } } this.flags = null; }   // 军旗清理
+    if (this._origRandom) { Math.random = this._origRandom; this._origRandom = null; }   // 每日挑战种子流归还（菜单/AI 随机恢复）
+    for (const a of (this.airdrops || [])) a.dispose();   // 空投箱清理
+    this.airdrops = [];
+    if (this._nlabels) { for (const L of this._nlabels) { this.scene.remove(L.spr); L.tex.dispose(); L.spr.material.dispose(); } this._nlabels = null; }   // 名字标签清理
     if (this.terrain) { this.scene.remove(this.terrain.group); if (this.terrain.grass) this.terrain.grass.dispose(); }
     this._stopPilot && this._stopPilot();   // AI 代打参数还原
     if (this.rain) { this.rain.dispose(); this.rain = null; }
@@ -7377,6 +9154,60 @@ function toggleAchievements() {
   document.body.appendChild(el);
 }
 
+// —— 战绩册：从 battleLog 汇总纪录 + 面板展示（与成就面板同款交互） ——
+function computeBattleRecords(log) {
+  const r = { battles: 0, kills: 0, wins: 0, mostKills: 0, bestAcc: 0, mostWave: 0, longest: 0, shots: 0, hitsSum: 0 };
+  for (const b of (Array.isArray(log) ? log : [])) {
+    r.battles++; r.kills += b.kills || 0; if (b.win) r.wins++;
+    if ((b.kills || 0) > r.mostKills) r.mostKills = b.kills || 0;
+    if ((b.acc || 0) > r.bestAcc && (b.fired || 0) >= 10) r.bestAcc = b.acc;
+    if ((b.wave || 0) > r.mostWave) r.mostWave = b.wave || 0;
+    if ((b.matchT || 0) > r.longest) r.longest = b.matchT || 0;
+    r.shots += b.fired || 0; r.hitsSum += Math.round((b.acc || 0) / 100 * (b.fired || 0));
+  }
+  return r;
+}
+function toggleStatsPanel() {
+  let el = document.getElementById('stats-panel');
+  if (el) { el.remove(); if (el._bd) el._bd.remove(); return; }
+  el = document.createElement('div');
+  el.id = 'stats-panel';
+  el.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:120;';
+  const bd = document.createElement('div');
+  bd.style.cssText = 'position:fixed;inset:0;background:rgba(6,10,8,0.72);z-index:119;';
+  bd.addEventListener('click', () => { el.remove(); bd.remove(); });
+  el._bd = bd;
+  const R = computeBattleRecords(meta.battleLog);
+  const card = (ico, label, val) => `<div style="flex:1;min-width:86px;background:rgba(38,50,42,0.55);border:1px solid rgba(150,180,150,0.22);border-radius:10px;padding:8px 10px;text-align:center"><div style="font-size:18px">${ico}</div><div style="color:#dfe8d8;font-weight:700;font-size:16px">${val}</div><div style="font-size:11px;color:#9fb0a0">${label}</div></div>`;
+  const fmtT = (s) => s >= 60 ? `${Math.floor(s / 60)}分${s % 60}秒` : `${s}秒`;
+  const fmtD = (t) => { const d = new Date(t); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  const log = (Array.isArray(meta.battleLog) ? meta.battleLog : []).slice(0, 30);
+  el.innerHTML = `
+    <div style="width:min(620px,92vw);max-height:82vh;overflow-y:auto;background:rgba(24,34,26,0.97);border:1px solid rgba(150,180,150,0.4);border-radius:14px;padding:20px 24px;">
+      <h2 style="color:#cfe8c0;margin:0 0 12px;text-align:center;">📊 战绩册</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+        ${card('🎮', '总场次', R.battles)}
+        ${card('💀', '总击杀', R.kills)}
+        ${card('🚩', '胜率', R.battles ? Math.round(R.wins / R.battles * 100) + '%' : '—')}
+        ${card('🏆', '单局最多杀', R.mostKills || '—')}
+        ${card('🎯', '最佳命中率', R.bestAcc ? R.bestAcc + '%' : '—')}
+        ${card('🌊', '最深波次', R.mostWave || '—')}
+        ${card('⏱️', '最长一局', R.longest ? fmtT(R.longest) : '—')}
+      </div>
+      <div style="font-size:13px;color:#cfe8c0;font-weight:600;margin:6px 0">最近战斗</div>
+      ${log.length ? log.map((b) => `
+        <div style="display:flex;justify-content:space-between;gap:8px;padding:6px 10px;margin:3px 0;border-radius:8px;background:rgba(30,40,32,0.5);font-size:12px;align-items:center">
+          <span style="color:#8da08d;white-space:nowrap">${fmtD(b.t)}</span>
+          <span style="color:#cfe8c0">${b.mode === '陆战' ? '🛡' : '✈'} ${b.veh || ''}</span>
+          <span style="color:${b.win ? '#a8e8a0' : '#ff9a8a'};font-weight:600">${b.win ? '胜' : '负'}</span>
+          <span style="color:#dfe8d8">${b.kills} 杀${b.wave ? ` · 第${b.wave}波` : ''}${b.acc ? ` · ${b.acc}%` : ''}${b.matchT ? ` · ${fmtT(b.matchT)}` : ''}</span>
+        </div>`).join('') : '<div style="color:#8da08d;font-size:12px;text-align:center;padding:12px">还没有战斗记录，打一局就有了</div>'}
+      <button class="lo-btn" style="margin-top:12px;width:100%" onclick="(function(){const e=document.getElementById('stats-panel');const b=e&&e._bd;if(e)e.remove();if(b)b.remove();})()">关闭</button>
+    </div>`;
+  document.body.appendChild(bd);
+  document.body.appendChild(el);
+}
+
 // 出战选择页元素
 const loEls = {
   mode: document.getElementById('lo-mode'),
@@ -7391,6 +9222,15 @@ const loEls = {
   start: document.getElementById('lo-start'),
 };
 let pendingMode = 'tank';
+// —— 国家锁定：本局只从一个国家选载具（null=全部）——
+let loadoutNation = null;
+const NATION_NAMES = { '🇷🇺': '苏联', '🇩🇪': '德国', '🇺🇸': '美国', '🇨🇳': '中国', '🇬🇧': '英国', '🇫🇷': '法国', '🇯🇵': '日本', '🇪🇺': '欧洲' };
+function renderNationBtn() {
+  const btn = document.getElementById('btn-nation');
+  if (!btn) return;
+  btn.innerHTML = `🏳 国家：${loadoutNation ? `<b>${loadoutNation} ${NATION_NAMES[loadoutNation] || ''}</b>` : '全部'}`;
+  btn.classList.toggle('active', !!loadoutNation);
+}
 
 // —— 成就系统：局内/累计事件驱动，达成即奖励金币+研发点 ——
 const ACHIEVEMENTS = [
@@ -7415,6 +9255,135 @@ function checkAchievements() {
       saveMeta();
       try { if (game && game.hud) game.hud.addFeed(`🏆 成就解锁：${a.name}（+${a.reward}💰）`, 'kill'); } catch (e) {}
     }
+  }
+}
+
+// —— 每日挑战：日期种子定死地图/模式/词条（同一天人人同布局），波次生存，撑到第 5 波领首通奖 ——
+const DAILY_MODS = [
+  { id: 'enemy_hp',       name: '精锐之敌（敌方血量 +30%）' },
+  { id: 'player_reload',  name: '手忙脚乱（装填 -20%）' },
+  { id: 'solo',           name: '孤军奋战（无队友）' },
+  { id: 'more_enemies',   name: '人海战术（同场敌人 +1）' },
+];
+function dailyInfo() {
+  const day = _todayKey();
+  if (meta.daily && meta.daily.date === day && meta.daily.seed != null) return meta.daily;
+  const seed = [...day].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 11);
+  const rng = mulberry32(seed);
+  const mode = rng() < 0.6 ? 'tank' : 'plane';
+  const maps = mode === 'plane' ? PLANE_MAPS : MAPS;
+  const mapId = maps[Math.floor(rng() * maps.length)].id;
+  const pool = [...DAILY_MODS];
+  const mods = [];
+  while (mods.length < 2 && pool.length) mods.push(pool.splice(Math.floor(rng() * pool.length), 1)[0].id);
+  meta.daily = { date: day, seed, mode, mapId, mods, bestWave: 0, rewarded: false };
+  saveMeta();
+  return meta.daily;
+}
+
+// —— 三选一强化（波次类模式）：每清一波弹 3 张战术卡，局内无限叠加，每局 build 都不一样 ——
+// mul 改 _rc 倍率表（重生经 _applyRunMods 从基准重算，不叠加错）；now 立即生效。
+const RUN_CARDS = [
+  { ico: '⏱️', name: '装填提速', desc: '装填时间 -18%', mode: 'all', mul: (rc) => { rc.reload *= 0.82; } },
+  { ico: '💥', name: '火力全开', desc: '伤害 +20%', mode: 'all', mul: (rc) => { rc.dmg *= 1.2; } },
+  { ico: '🏎', name: '引擎调校', desc: '速度 +15%', mode: 'all', mul: (rc) => { rc.speed *= 1.15; } },
+  { ico: '🛡', name: '附加装甲', desc: '血量上限 +25%（并补满）', mode: 'all', mul: (rc) => { rc.hp *= 1.25; }, heal: true },
+  { ico: '🗡', name: '硬化弹芯', desc: '穿深 +15%', mode: 'tank', mul: (rc) => { rc.pen *= 1.15; } },
+  { ico: '🔄', name: '炮塔电机', desc: '炮塔转速 +30%', mode: 'tank', mul: (rc) => { rc.turret *= 1.3; } },
+  { ico: '💨', name: '烟幕储备', desc: '烟雾弹 +3', mode: 'tank', now: (g) => { g._smokeAmmo = Math.min((g._smokeAmmo || 0) + 3, 6); } },
+  { ico: '❤️', name: '战地输血', desc: '之后每次击杀回 12 血', mode: 'all', mul: (rc) => { rc.killHeal += 12; } },
+  { ico: '📦', name: '空投频道', desc: '空投间隔 -30%', mode: 'all', mul: (rc) => { rc.dropMul *= 0.7; } },
+  { ico: '👓', name: '敌军散光', desc: '之后新敌精度 -25%', mode: 'all', mul: (rc) => { rc.eSpread *= 1.25; } },
+  { ico: '🐌', name: '敌军迟滞', desc: '之后新敌速度 -12%', mode: 'all', mul: (rc) => { rc.eSpeed *= 0.88; } },
+  { ico: '🌊', name: '波间整备', desc: '每波开始回 20% 血', mode: 'all', mul: (rc) => { rc.waveHeal = Math.max(rc.waveHeal, 0.2); } },
+  { ico: '🚀', name: '扩展挂架', desc: '导弹 +2', mode: 'plane', can: (g) => g.player && g.player.maxMissiles > 0, mul: (rc) => { rc.missiles += 2; } },
+  { ico: '💣', name: '弹舱扩容', desc: '炸弹 +2', mode: 'plane', can: (g) => g.player && g.player.maxBombs > 0, mul: (rc) => { rc.bombs += 2; } },
+  { ico: '🔧', name: '车顶武器站', desc: '安装/升级车顶自动炮台', mode: 'tank', can: (g) => g.player && g.player.installHullTurret && (!g.player.hullTurret || (g.player.hullTurretLevel || 1) < 3), now: (g) => { g.player.installHullTurret(1); } },
+  { ico: '🩹', name: '应急抢险', desc: '立即满血 + 模块全修 + 灭火', mode: 'all', now: (g) => { const p = g.player; if (p) { p.health = p.maxHealth; p.burning = false; if (p.modules) for (const k in p.modules) p.modules[k] = 0; } } },
+  { ico: '🎁', name: '立即空投', desc: '马上在你附近再投一箱补给', mode: 'all', now: (g) => { const p = g.player; if (p) { const half = (g.worldwar || g.mode === 'tank') ? CONFIG.tank.worldSize : CONFIG.plane.worldSize; const a2 = Math.random() * Math.PI * 2, d2 = randRange(25, 45); g.airdrops.push(new Airdrop(g.scene, clamp(p.position.x + Math.sin(a2) * d2, -half + 60, half - 60), clamp(p.position.z + Math.cos(a2) * d2, -half + 60, half - 60))); } } },
+  { ico: '💰', name: '战争债券', desc: '本局结算金币 +50%', mode: 'all', mul: (rc) => { rc.goldMul *= 1.5; } },
+  { ico: '🔬', name: '研发狂热', desc: '本局结算研发点 +50%', mode: 'all', mul: (rc) => { rc.rpMul *= 1.5; } },
+  { ico: '🎖', name: '沉着车组', desc: '致命一击/起火概率减半', mode: 'all', now: (g) => { const c = CONFIG.rules.crit; c.tankInstant *= 0.5; c.tankFire *= 0.5; c.planeInstant *= 0.5; c.planeFire *= 0.5; } },
+  { ico: '🚀', name: '冲锋精神', desc: '速度 +25%（血量上限 -10%）', mode: 'all', mul: (rc) => { rc.speed *= 1.25; rc.hp *= 0.9; } },
+  { ico: '🧰', name: '备弹扩容', desc: '主炮备弹 +15 发', mode: 'tank', can: (g) => g.player && g.player.ammoLimit, now: (g) => { if (g.player) g.player.ammo += 15; } },
+];
+
+// —— 日常任务（轮换合同）：每天按日期种子从池里发 3 个，战斗内实时累计，完成自动发奖 ——
+// 事件流：kill（弹种/距离/尾炮/王牌/殉爆/目标类型）、bounce（跳弹）、battle_end（无伤/征服/波次）。
+const QUEST_POOL = [
+  { id: 'he5',       ico: '💥', name: '榴弹洗礼', desc: '用榴弹击毁 5 个目标',     goal: 5,  reward: 500, evt: 'kill',       match: (e) => e.shell === 'he' },
+  { id: 'apcr5',     ico: '🎯', name: '硬芯穿刺', desc: '用硬芯穿甲弹击毁 5 个目标', goal: 5,  reward: 500, evt: 'kill',       match: (e) => e.shell === 'apcr' },
+  { id: 'snipe1',    ico: '🔭', name: '千里之外', desc: '在 300m 外完成击杀',      goal: 1,  reward: 600, evt: 'kill',       match: (e) => e.dist >= 300 },
+  { id: 'close3',    ico: '⚔️', name: '贴脸肉搏', desc: '50m 内击毁 3 个目标',     goal: 3,  reward: 450, evt: 'kill',       match: (e) => e.dist > 0 && e.dist <= 50 },
+  { id: 'aa2',       ico: '🚀', name: '猎杀防空', desc: '击毁 2 辆防空坦克',       goal: 2,  reward: 600, evt: 'kill',       match: (e) => e.target && (e.target.type === 'aa' || e.target.type === 'vads') },
+  { id: 'heli2',     ico: '🚁', name: '低空猎手', desc: '击落 2 架直升机',         goal: 2,  reward: 500, evt: 'kill',       match: (e) => e.target && e.target.isHeli },
+  { id: 'tail2',     ico: '🛰', name: '炮手本色', desc: '用尾炮塔击毁 2 个目标',   goal: 2,  reward: 700, evt: 'kill',       match: (e) => e.tail },
+  { id: 'ace1',      ico: '🎖', name: '折戟王牌', desc: '击毁一名敌方王牌',        goal: 1,  reward: 800, evt: 'kill',       match: (e) => e.target && e.target.isAce },
+  { id: 'bounce15',  ico: '🛡', name: '装甲艺术', desc: '打出 15 次跳弹',          goal: 15, reward: 450, evt: 'bounce',     match: () => true },
+  { id: 'boom3',     ico: '💣', name: '弹药殉爆', desc: '触发 3 次弹药殉爆',       goal: 3,  reward: 600, evt: 'kill',       match: (e) => e.crit === '弹药殉爆' },
+  { id: 'flawless1', ico: '✨', name: '毫发无损', desc: '无伤赢下一场战斗',        goal: 1,  reward: 700, evt: 'battle_end', match: (e) => e.flawless },
+  { id: 'cap1',      ico: '🚩', name: '征服者',   desc: '赢得一场征服模式',        goal: 1,  reward: 500, evt: 'battle_end', match: (e) => e.capture },
+  { id: 'wave5',     ico: '🌊', name: '守夜人',   desc: '波次生存撑到第 5 波',     goal: 1,  reward: 600, evt: 'battle_end', match: (e) => e.wave >= 5 },
+  // —— 扩容池（v2）：模式/地图/玩法全覆盖 ——
+  { id: 'boss2',     ico: '💀', name: '巨人克星', desc: '击毁 2 只精英 Boss',       goal: 2,  reward: 700, evt: 'kill',       match: (e) => e.boss },
+  { id: 'ace2',      ico: '🎖', name: '双杀王牌', desc: '击毁 2 名敌方王牌',        goal: 2,  reward: 900, evt: 'kill',       match: (e) => e.ace },
+  { id: 'big10',     ico: '⚔️', name: '大杀特杀', desc: '一局击毁 10 个目标',      goal: 1,  reward: 800, evt: 'battle_end', match: (e) => e.kills >= 10 },
+  { id: 'sharp70',   ico: '🎯', name: '神射手',   desc: '一局命中率 ≥70%（≥15 发）', goal: 1, reward: 700, evt: 'battle_end', match: (e) => e.fired >= 15 && e.acc >= 70 },
+  { id: 'flawless8', ico: '✨', name: '完美风暴', desc: '无伤赢一局且击毁 ≥8',     goal: 1,  reward: 900, evt: 'battle_end', match: (e) => e.flawless && e.kills >= 8 },
+  { id: 'flagwin',   ico: '🚩', name: '旗开得胜', desc: '夺旗冲锋模式获胜',        goal: 1,  reward: 700, evt: 'battle_end', match: (e) => e.objective === 'flag' && e.win },
+  { id: 'boss4',     ico: '💀', name: '连战连捷', desc: 'Boss 连战撑到第 4 波',    goal: 1,  reward: 800, evt: 'battle_end', match: (e) => e.objective === 'bossrush' && e.wave >= 4 },
+  { id: 'dailyq',    ico: '📅', name: '日课',     desc: '完成每日挑战（第 5 波）', goal: 1,  reward: 600, evt: 'battle_end', match: (e) => e.daily && e.wave >= 5 },
+  { id: 'supply3',   ico: '📦', name: '拾荒者',   desc: '拾取 3 次空投补给',       goal: 3,  reward: 450, evt: 'supply',     match: () => true },
+  { id: 'card5',     ico: '🃏', name: '战术收藏家', desc: '拾取 5 张强化卡',        goal: 5,  reward: 500, evt: 'card',       match: () => true },
+  { id: 'nightwin',  ico: '🌙', name: '夜枭',     desc: '夜战地图获胜一局',        goal: 1,  reward: 700, evt: 'battle_end', match: (e) => e.night && e.win },
+  { id: 'rainwar',   ico: '🌧', name: '风雨无阻', desc: '雨天/雷暴完成一局',       goal: 1,  reward: 500, evt: 'battle_end', match: (e) => e.rain },
+  { id: 'wwin',      ico: '🌍', name: '世界大战者', desc: '世界大战模式获胜',       goal: 1,  reward: 800, evt: 'battle_end', match: (e) => e.worldwar && e.win },
+  { id: 'heli3',     ico: '🚁', name: '低空霸主', desc: '驾驶直升机击毁 3 个目标', goal: 3,  reward: 700, evt: 'kill',       match: (e) => e.heliPilot },
+  { id: 'air6',      ico: '✈', name: '苍穹猎人', desc: '空战模式击毁 6 个目标',   goal: 6,  reward: 600, evt: 'kill',       match: (e) => e.mode === 'plane' },
+  { id: 'tank8',     ico: '🛡', name: '钢铁洪流', desc: '陆战模式击毁 8 个目标',   goal: 8,  reward: 600, evt: 'kill',       match: (e) => e.mode === 'tank' },
+];
+function _todayKey() { const d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+// 日期变了就重发 3 个（同一天所有玩家拿到同一组——种子来自日期字符串）
+function rollDailyQuests() {
+  const day = _todayKey();
+  if (meta.quests && meta.quests.date === day && Array.isArray(meta.quests.items) && meta.quests.items.length) return;
+  const rng = mulberry32([...day].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7));
+  const pool = [...QUEST_POOL];
+  const items = [];
+  while (items.length < 3 && pool.length) items.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]);
+  meta.quests = { date: day, items: items.map((q) => ({ id: q.id, prog: 0, done: false })) };
+  saveMeta();
+}
+// 战斗内事件上报：命中匹配的任务进度+1，完成即发奖（💰=reward，🔬=reward×0.4）
+function questEvent(evt, payload) {
+  if (!meta.quests || !Array.isArray(meta.quests.items)) return;
+  let changed = false;
+  for (const it of meta.quests.items) {
+    if (it.done) continue;
+    const def = QUEST_POOL.find((q) => q.id === it.id);
+    if (!def || def.evt !== evt) continue;
+    let ok = false;
+    try { ok = def.match(payload); } catch (e) {}
+    if (!ok) continue;
+    it.prog = Math.min(def.goal, it.prog + 1);
+    changed = true;
+    if (it.prog >= def.goal) {
+      it.done = true;
+      meta.money += def.reward; meta.rp += Math.round(def.reward * 0.4);
+      try { if (game && game.hud) game.hud.addFeed(`📜 日常任务完成：${def.name}（+${def.reward}💰 +${Math.round(def.reward * 0.4)}🔬）`, 'kill'); if (game && game.sfx) game.sfx.chime(); } catch (e) {}
+    }
+  }
+  if (changed) {
+    saveMeta();
+    try { renderMoney(); renderQuests(); } catch (e) {}
   }
 }
 
@@ -7464,7 +9433,11 @@ let game = null;
 let difficulty = 'normal';
 let endless = false;
 let objective = 'battle';   // 陆战目标：'battle'(歼灭) | 'capture'(占领)
-let mapIndex = 0;           // 陆战地图主题索引（MAPS[0]='city' 默认）
+let mapIndex = 0;           // 地图主题索引（坦克默认 MAPS[0]='city'；空战对空战池取模）
+// 空战地图池：跳过纯巷战图（city/factory 的街区建筑只进坦克地形，空战选它们=货不对板的空旷平地）
+const PLANE_MAPS = MAPS.filter((m) => !m.urban);
+function mapCycle() { return (pendingMode === 'plane' && !worldwar) ? PLANE_MAPS : MAPS; }
+function mapIndexSafe() { return mapIndex % mapCycle().length; }
 let worldwar = false;        // 世界大战模式（坦克+飞机混合作战）
 const bestEl = document.getElementById('best');
 const endlessBtn = document.getElementById('btn-endless');
@@ -7501,37 +9474,81 @@ function loadMeta() {
   };
 }
 let meta = loadMeta();
-function saveMeta() { localStorage.setItem(STORAGE_KEY, JSON.stringify(meta)); }
+function saveMeta() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(meta));
+  // 保险文件同步（经游戏中心服务器）：端口变了/dev 与正式版混用也不丢档；独立运行时静默跳过
+  try { fetch(location.origin + '/wt-meta/set', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(meta), keepalive: true }).catch(() => {}); } catch (e) {}
+}
+// 启动时合并保险文件：谁的车库更全用谁（防"随机端口空档"覆盖真档）
+(async () => {
+  try {
+    const r = await fetch(location.origin + '/wt-meta/get', { cache: 'no-store' });
+    if (!r.ok) return;
+    const file = await r.json();
+    if (!file || !Array.isArray(file.owned) || !file.owned.length) return;
+    const richer = (m) => (m.owned.length + ((m.ownedPlanes || []).length)) * 1e6 + (m.money || 0) + (m.achievements || []).length * 1e4;
+    if (richer(file) > richer(meta)) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(file));
+      meta = loadMeta();
+      renderMoney(); renderQuests(); renderDailyBtn();
+    }
+  } catch (e) {}
+})();
 
 function renderMoney() {
   if (moneyEl) moneyEl.textContent = '💰 ' + meta.money;
   if (rpEl) rpEl.textContent = '🔬 ' + meta.rp;
+  updateTTWallet();   // 科技树开着时同步顶栏余额（研发/购买前看得见自己有多少）
+}
+function updateTTWallet() {
+  const w = document.getElementById('tt-wallet');
+  if (w) w.innerHTML = `💰 ${meta.money}　·　🔬 ${meta.rp}`;
 }
 function renderBest() {
   if (!bestEl) return;
   bestEl.textContent = `🏆 无尽最佳 · 坦克 ${meta.bestTankEndless || 0} · 飞机 ${meta.bestPlaneEndless || 0}`;
 }
+// —— 日常任务卡片（主菜单）：日期滚动 + 进度条 + 完成打勾 ——
+function renderQuests() {
+  const el = document.getElementById('quests');
+  if (!el) return;
+  rollDailyQuests();
+  el.innerHTML = meta.quests.items.map((it) => {
+    const def = QUEST_POOL.find((q) => q.id === it.id);
+    if (!def) return '';
+    const pct = Math.round((it.prog / def.goal) * 100);
+    return `<div class="quest${it.done ? ' done' : ''}">
+      <span class="q-ico">${def.ico}</span>
+      <div class="q-body">
+        <div class="q-name">${def.name}<span class="q-desc">　${def.desc}（${it.prog}/${def.goal}）</span></div>
+        <div class="q-prog"><div class="q-bar" style="width:${pct}%"></div></div>
+      </div>
+      <span class="q-rw">+${def.reward}💰</span>
+    </div>`;
+  }).join('');
+}
 function renderEndlessBtn() {
   if (!endlessBtn) return;
-  endlessBtn.textContent = `♾ 无尽模式：${endless ? '开启' : '关闭'}`;
+  endlessBtn.innerHTML = `♾ 无尽模式：${endless ? '<b>开启</b>' : '关闭'}`;
   endlessBtn.classList.toggle('active', endless);
 }
 function renderObjectiveBtn() {
   if (!objectiveBtn) return;
-  objectiveBtn.textContent = `🎯 目标：${objective === 'capture' ? '征服(A/B/C)' : (objective === 'waves' ? '🌊 波次生存' : '歼灭')}`;
-  objectiveBtn.classList.toggle('active', objective === 'capture' || objective === 'waves');
+  const LBL = { battle: '歼灭', capture: '征服(A/B/C)', waves: '🌊 波次生存', bossrush: '💀 Boss连战', flag: '🚩 夺旗冲锋' };
+  objectiveBtn.innerHTML = `🎯 目标：${objective !== 'battle' ? `<b>${LBL[objective] || '歼灭'}</b>` : '歼灭'}`;
+  objectiveBtn.classList.toggle('active', objective !== 'battle');
   objectiveBtn.style.display = (worldwar || pendingMode === 'tank') ? '' : 'none';   // 世界大战时也显示
 }
 function renderMapBtn() {
   if (!mapBtn) return;
-  mapBtn.textContent = `🗺 地图：${MAPS[mapIndex].name}`;
-  mapBtn.style.display = (worldwar || pendingMode === 'tank') ? '' : 'none';   // 世界大战时也显示
+  mapBtn.innerHTML = `🗺 地图：<b>${mapCycle()[mapIndexSafe()].name}</b>`;
+  mapBtn.style.display = '';   // 陆战/空战/世界大战都可选图（空战池自动跳过纯巷战图，夜战/雷暴照飞）
 }
 function renderWorldwarBtn() {
   if (!worldwarBtn) return;
-  worldwarBtn.textContent = `🌍 世界大战：${worldwar ? '开启' : '关闭'}`;
+  worldwarBtn.innerHTML = `🌍 世界大战：${worldwar ? '<b>开启</b>' : '关闭'}`;
   worldwarBtn.classList.toggle('active', worldwar);
-  worldwarBtn.style.display = (worldwar || pendingMode === 'tank') ? '' : 'none';   // 世界大战时始终显示
+  // 按钮已移入「更多选项」弹层，不再随模式隐藏；联机时代码下方统一隐藏
 }
 
 // —— 科技树 ——
@@ -7557,34 +9574,66 @@ function techTreeCard(t, isTank) {
   else if (st === 'researched') action = `💰 ${t.price} 购买`;
   else if (st === 'researchable') action = `🔬 ${t.rp} 研发`;
   else action = `🔒 需 ${typeName(isTank, t.prereq)}`;
-  const cls = 'tt-card ' + st + (st === 'owned' && sel === t.id ? ' selected' : '');
-  return `<div class="${cls}" data-tank="${isTank ? 1 : 0}" data-id="${t.id}">
+  const confirming = _ttSel && _ttSel.isTank === isTank && _ttSel.id === t.id && (st === 'researched' || st === 'researchable');
+  const cls = 'tt-card ' + st + (st === 'owned' && sel === t.id ? ' selected' : '') + (confirming ? ' confirm' : '');
+  // 悬停属性卡（纯文本，white-space:pre 换行）：研究/购买前就能比较载具
+  const pipsN = (v) => Math.max(1, Math.min(5, Math.round(v * 2.5)));
+  const stars = isTank
+    ? [['火力', t.dmg], ['血量', t.hp], ['速度', t.speed], ['机动', (t.turn + t.turret) / 2]]
+    : [['火力', t.dmg], ['血量', t.hp], ['速度', t.speed], ['机动', t.agi]];
+  const tip = `R${t.rank}　${t.name}\n${weaponDesc(isTank, t)}\n` + stars.map(([l, v]) => `${l} ${'★'.repeat(pipsN(v))}${'☆'.repeat(5 - pipsN(v))}`).join('\n');
+  return `<div class="${cls}" data-tank="${isTank ? 1 : 0}" data-id="${t.id}" data-tip="${tip}">
     <div class="tt-rank">R${t.rank}</div><div class="g-icon">${t.icon}</div>
     <div class="g-name">${t.name}</div><div class="tt-action">${action}</div></div>`;
 }
 // 车库分国家分栏：坦克按 🇷🇺苏 / 🇩🇪德 / 🇺🇸美 / 🇨🇳中 / 🇬🇧英 / 🇫🇷法 / 🇯🇵日 分线，飞机按 🇨🇳🇺🇸🇷🇺🇫🇷🇪🇺 归组
 const NATION_ORDER = ['🇷🇺', '🇩🇪', '🇺🇸', '🇨🇳', '🇬🇧', '🇫🇷', '🇯🇵', '🇪🇺'];
+let _ttFilter = 'all';        // all=全部 | owned=已拥有 | avail=可入手（可研发+可购买）
+let _ttSel = null;            // 花钱动作的二次确认选中：{ isTank, id }
 function renderTechTree() {
   if (!techtreeEl) return;
-  const sec = (title, types, isTank) =>
-    `<div class="tt-section"><div class="tt-title">${title}</div><div class="tt-row">${types.map((t) => techTreeCard(t, isTank)).join('')}</div></div>`;
+  const pass = (t, isTank) => {
+    if (_ttFilter === 'all') return true;
+    const st = vehicleState(t, isTank);
+    return _ttFilter === 'owned' ? st === 'owned' : (st === 'researchable' || st === 'researched');
+  };
+  const sec = (title, types, isTank) => {
+    const list = types.filter((t) => pass(t, isTank));
+    if (!list.length) return '';   // 该国在当前过滤下没有卡片：整节隐藏（不渲染空标题）
+    return `<div class="tt-section"><div class="tt-title">${title}</div><div class="tt-row">${list.map((t) => techTreeCard(t, isTank)).join('')}</div></div>`;
+  };
   const byNation = (types, isTank) => NATION_ORDER
     .map((ic) => {
       const group = types.filter((t) => t.icon === ic);
       return group.length ? sec(`${ic} ${tanksNationName(ic)}`, group, isTank) : '';
     })
     .join('');
+  // 二次确认条：选中态还有效才渲染（状态变化则静默作废）
+  let confirmBar = '';
+  if (_ttSel) {
+    const t = (_ttSel.isTank ? TANK_TYPES : PLANE_TYPES).find((x) => x.id === _ttSel.id);
+    const st = t && vehicleState(t, _ttSel.isTank);
+    if (t && (st === 'researched' || st === 'researchable')) {
+      const act = st === 'researched' ? `花费 💰 ${t.price} 金币购买` : `花费 🔬 ${t.rp} 研发点研发`;
+      confirmBar = `<div id="tt-confirm"><span>${t.icon} <b>${t.name}</b> · ${act}</span><button class="cbtn ok" id="tt-confirm-ok">✓ 确认</button><button class="cbtn" id="tt-confirm-no">取消</button></div>`;
+    } else _ttSel = null;
+  }
+  const FLBL = { all: '全部', owned: '已拥有', avail: '可入手' };
   techtreeEl.innerHTML =
-    `<div class="tt-head"><h2>🔬 科技树</h2><button id="tt-close" class="lo-btn">返回</button></div>` +
-    `<div class="tt-kind">🛠 坦克</div>` + byNation(TANK_TYPES, true) +
-    `<div class="tt-kind">✈️ 飞机</div>` + byNation(PLANE_TYPES, false) +
-    `<p class="tip">打仗赚 🔬研发点 与 💰金币 → 研发（解锁购买权）→ 购买 → 出战选用</p>`;
+    `<div class="tt-head"><h2>🔬 科技树</h2><div id="tt-wallet" class="tt-wallet">💰 ${meta.money}　·　🔬 ${meta.rp}</div><button id="tt-close" class="lo-btn">返回</button></div>` +
+    `<div class="tt-tools">` + Object.keys(FLBL).map((k) => `<button class="diff-btn${_ttFilter === k ? ' active' : ''}" data-ttf="${k}">${FLBL[k]}</button>`).join('') +
+    `<span class="sep2"></span><button class="diff-btn" data-tta="tank">↓ 🛠 坦克</button><button class="diff-btn" data-tta="plane">↓ ✈️ 飞机</button></div>` +
+    confirmBar +
+    `<div class="tt-kind" id="tt-kind-tank">🛠 坦克</div>` + byNation(TANK_TYPES, true) +
+    `<div class="tt-kind" id="tt-kind-plane">✈️ 飞机</div>` + byNation(PLANE_TYPES, false) +
+    `<p class="tip">打仗赚 🔬研发点 与 💰金币 → 研发（解锁购买权）→ 购买 → 出战选用 · 花钱需点两次（先选中再确认）</p>`;
   const close = document.getElementById('tt-close');
   if (close) close.addEventListener('click', closeTechTree);
 }
 function tanksNationName(icon) {
   return { '🇷🇺': '苏联', '🇩🇪': '德国', '🇺🇸': '美国', '🇨🇳': '中国', '🇬🇧': '英国', '🇫🇷': '法国', '🇯🇵': '日本', '🇪🇺': '欧洲' }[icon] || '';
 }
+// 花钱动作统一入口：researched/researchable 两段式（首点选中、再点/确认执行）；owned 直接选用
 function techTreeClick(isTank, id) {
   const types = isTank ? TANK_TYPES : PLANE_TYPES;
   const t = types.find((x) => x.id === id);
@@ -7592,13 +9641,31 @@ function techTreeClick(isTank, id) {
   const st = vehicleState(t, isTank);
   const owned = isTank ? meta.owned : meta.ownedPlanes;
   const researched = isTank ? meta.researched : meta.researchedPlanes;
-  if (st === 'owned') { if (isTank) meta.selected = id; else meta.selectedPlane = id; saveMeta(); renderTechTree(); }
-  else if (st === 'researched') {
-    if (meta.money >= t.price) { meta.money -= t.price; owned.push(id); if (isTank) meta.selected = id; else meta.selectedPlane = id; saveMeta(); renderMoney(); renderTechTree(); }
-    else flashMsg('💰 金币不足');
-  } else if (st === 'researchable') {
-    if (meta.rp >= t.rp) { meta.rp -= t.rp; researched.push(id); saveMeta(); renderMoney(); renderTechTree(); flashMsg(`🔬 已研发 ${t.name}`); }
-    else flashMsg('🔬 研发点不足');
+  if (st === 'owned') {
+    if (isTank) meta.selected = id; else meta.selectedPlane = id;
+    _ttSel = null; saveMeta(); renderTechTree();
+  } else if (st === 'researched' || st === 'researchable') {
+    if (_ttSel && _ttSel.isTank === isTank && _ttSel.id === id) {   // 第二次点同一张卡=确认执行
+      if (st === 'researched') {
+        if (meta.money >= t.price) {
+          meta.money -= t.price; owned.push(id);
+          if (isTank) meta.selected = id; else meta.selectedPlane = id;
+          saveMeta(); renderMoney(); flashMsg(`💰 已购买 ${t.name}`);
+        } else flashMsg('💰 金币不足');
+      } else {
+        if (meta.rp >= t.rp) {
+          meta.rp -= t.rp; researched.push(id);
+          saveMeta(); flashMsg(`🔬 已研发 ${t.name}`);
+        } else flashMsg('🔬 研发点不足');
+      }
+      _ttSel = null;
+    } else {
+      _ttSel = { isTank, id };   // 第一次点：只选中，顶栏出确认条
+    }
+    renderTechTree();
+    if (_ttSel == null) renderMoney();   // 执行过了：同步钱包（研发/购买都影响余额显示）
+  } else {
+    flashMsg(`🔒 需先研发 ${typeName(isTank, t.prereq)}`);
   }
 }
 function openTechTree() { renderTechTree(); menu.classList.add('hidden'); techtreeEl.classList.remove('hidden'); }
@@ -7615,11 +9682,13 @@ function flashMsg(text) {
 // —— 出战选择页 ——
 function weaponDesc(isTank, t) {
   if (isTank) {
+    if (t.id === 'aa' || t.id === 'vads') return t.id === 'vads' ? '🔫 20mm 转管速射炮（泼水弹幕）' : '🔫 23mm 双管速射高炮';
     const cal = t.dmg >= 2.5 ? '重型主炮（一击必杀）' : t.dmg >= 1.5 ? '大口径主炮' : t.dmg >= 1 ? '标准主炮' : '轻型主炮';
     return `🔫 ${cal}　·　同轴机枪`;
   }
   const g = t.dmg >= 1.3 ? '20mm 机炮 ×2' : t.dmg >= 1 ? '12.7mm 机枪 ×2' : '7.7mm 机枪 ×2';
-  return `🔫 ${g}`;
+  const tail = (t.id === 'bomber' || t.bombs) ? '　·　🎯 遥控尾炮（T 自动炮手）' : '';
+  return `🔫 ${g}${tail}`;
 }
 function statBars(isTank, t) {
   const items = isTank
@@ -7634,50 +9703,92 @@ function statBars(isTank, t) {
   }).join('');
 }
 function loadoutTypes() {
-  return pendingMode === 'tank'
-    ? { types: TANK_TYPES, owned: meta.owned, sel: meta.selected, set: (id) => { meta.selected = id; } }
-    : { types: PLANE_TYPES, owned: meta.ownedPlanes, sel: meta.selectedPlane, set: (id) => { meta.selectedPlane = id; } };
+  const isTank = pendingMode === 'tank';
+  const base = { types: isTank ? TANK_TYPES : PLANE_TYPES, owned: isTank ? meta.owned : meta.ownedPlanes, sel: isTank ? meta.selected : meta.selectedPlane, set: (id) => { if (isTank) meta.selected = id; else meta.selectedPlane = id; } };
+  // 国家锁定（本局一个国家）：筛选只留该国载具——车库太大选不过来，锁国家后 ◀▶ 只在国家内轮换
+  if (loadoutNation) return { ...base, types: base.types.filter((t) => t.icon === loadoutNation) };
+  return base;
 }
 function renderLoadout() {
   const isTank = pendingMode === 'tank';
+  // （拟真节奏开关已迁至设置页——持久设置；本页摘要行仍显示 ⚔ 拟真 tag 作状态提示）
+  // 国家锁定有效性：该国家没有已拥有载具→回"全部"；按钮每次刷新
+  {
+    const all = isTank ? TANK_TYPES : PLANE_TYPES;
+    const owned = isTank ? meta.owned : meta.ownedPlanes;
+    const flags = [...new Set(all.filter((t) => owned.includes(t.id)).map((t) => t.icon))];
+    if (loadoutNation && !flags.includes(loadoutNation)) loadoutNation = null;
+    renderLoadout._nflags = flags;   // 供国家按钮循环（挂函数对象——函数内 this 是 undefined）
+  }
+  renderNationBtn();
   const { types, owned, sel } = loadoutTypes();
   const t = types.find((x) => x.id === sel) || types[0];
   loEls.mode.textContent = isTank ? '陆战 · 坦克' : '空战 · 飞机';
   loEls.icon.textContent = t.icon;
   loEls.name.textContent = t.name;
   loEls.weapon.textContent = weaponDesc(isTank, t);
-  loEls.stats.innerHTML = statBars(isTank, t);
-  loEls.summary.textContent = `难度：${DIFFICULTY_LABELS[difficulty]}　·　无尽：${endless ? '开' : '关'}${isTank ? `　·　目标：${objective === 'capture' ? '征服' : '歼灭'}　·　🗺 ${MAPS[mapIndex].name}` : ''}${worldwar ? '　·　🌍世界大战' : ''}${solo ? '　·　👥无队友' : ''}　·　💰 ${meta.money}`;
-  updatePreview3d(isTank, t.id, (meta.paints || {})[t.id]);   // 3D 预览（含涂装色）
-  renderEndlessBtn();
-  renderObjectiveBtn();
-  renderMapBtn();
-  renderWorldwarBtn();
-  // 世界大战：允许在出战页切换坦克/飞机
-  if (!loEls.swapType) {
-    const btn = document.createElement('button');
-    btn.className = 'lo-btn';
-    btn.style.cssText = 'display:none;padding:6px 14px;font-size:13px;';
-    btn.textContent = '切换飞机';
-    loEls.back.parentNode.insertBefore(btn, loEls.start);
-    loEls.swapType = btn;
-    btn.addEventListener('click', () => {
+  loEls.stats.innerHTML = statBars(isTank, t) + (() => {   // 载具战绩徽章：本车历史战绩
+    const vs = (meta.vehStats || {})[t.id];
+    if (!vs || !vs.battles) return '';
+    const wr = Math.round(vs.wins / vs.battles * 100);
+    return `<div style="margin-top:8px;font-size:12px;color:#ffd870;text-align:left;text-shadow:0 1px 2px #000">⚙ 本车战绩：${vs.battles} 战 · ${vs.kills} 杀 · 胜率 ${wr}%${vs.kills >= 50 ? ' · 🏅 老兵车' : ''}</div>`;
+  })();
+  {   // 节奏状态可见化：拟真 ⚔ / 慢速 🐢 都亮在摘要行（慢速档独立于拟真，藏着容易被误以为"拟真关了还慢"）
+    const st = loadSettings();
+    const tags = [];
+    if (st.simMode === true) tags.push('⚔ 拟真');
+    if ((st.pace | 0) > 0) tags.push(`🐢 慢速${['', ' 0.5×', ' 0.25×'][st.pace | 0]}（设置里关）`);
+    renderLoadout._paceTags = tags.join('　·　');
+  }
+  loEls.summary.textContent = `难度：${DIFFICULTY_LABELS[difficulty]}　·　无尽：${endless ? '开' : '关'}${isTank ? `　·　目标：${objective === 'capture' ? '征服' : '歼灭'}` : ''}　·　🗺 ${mapCycle()[mapIndexSafe()].name}${renderLoadout._paceTags ? '　·　' + renderLoadout._paceTags : ''}${worldwar ? '　·　🌍世界大战' : ''}${solo ? '　·　👥无队友' : ''}　·　💰 ${meta.money}`;
+   updatePreview3d(isTank, t.id, (meta.paints || {})[t.id]);   // 3D 预览（含涂装色）
+   renderEndlessBtn();
+   renderObjectiveBtn();
+   renderMapBtn();
+   renderWorldwarBtn();
+   // —— 联机对战适配：隐藏单机专属开关（模式/地图/波次由房间统一），出战选择实时生效 ——
+   const mpOn = !!(window.__mp && window.__mp.active);
+   {
+      const hide = ['btn-endless', 'btn-solo', 'btn-ammo', 'btn-objective', 'btn-map', 'btn-worldwar'];   // btn-worldwar 在「更多」弹层内，联机时同样隐藏
+     for (const id of hide) { const b = document.getElementById(id); if (b) b.style.display = mpOn ? 'none' : ''; }
+     if (mpOn) {
+       loEls.summary.textContent = `🌐 联机对战 · 坦克/飞机自由混战 · 选择实时生效（点「确认出战」收起，顶部栏可重开）`;
+       loEls.start.textContent = '✅ 确认出战';
+       loEls.back.textContent = '收起';
+       const hint = document.getElementById('lo-hint');
+       if (hint) hint.textContent = '点击 ◀ ▶ 切换已拥有的载具 · 「切换飞机/坦克」更换类别 · 主机在顶部栏开局';
+       if (window.__mp) window.__mp.myVk = pendingMode;   // 类别同步给联机模块（开局/幽灵重建依据）
+     } else {
+       loEls.start.textContent = '开始战斗 ▶';
+       loEls.back.textContent = '返回';
+     }
+   }
+   // 世界大战/联机：允许在出战页切换坦克/飞机
+   if (!loEls.swapType) {
+     const btn = document.createElement('button');
+     btn.className = 'lo-btn';
+     btn.style.cssText = 'display:none;padding:6px 14px;font-size:13px;';
+     btn.textContent = '切换飞机';
+     loEls.back.parentNode.insertBefore(btn, loEls.start);
+     loEls.swapType = btn;
+     btn.addEventListener('click', () => {
       pendingMode = pendingMode === 'tank' ? 'plane' : 'tank';
       renderLoadout();
     });
-  }
-  if (worldwar) {
-    loEls.swapType.style.display = '';
-    loEls.swapType.textContent = isTank ? '切换飞机 →' : '← 切换坦克';
-  } else {
-    loEls.swapType.style.display = 'none';
-  }
-  // 🎨 涂装按钮：循环色板（默认国家色→沙黄→雪白→丛林绿→城市灰）
-  if (!loEls.paintBtn) {
-    const btn = document.createElement('button');
-    btn.className = 'lo-btn';
-    btn.style.cssText = 'padding:6px 14px;font-size:13px;';
-    loEls.back.parentNode.insertBefore(btn, loEls.start);
+   }
+   if (worldwar || mpOn) {
+     loEls.swapType.style.display = '';
+     loEls.swapType.textContent = isTank ? '切换飞机 →' : '← 切换坦克';
+   } else {
+     loEls.swapType.style.display = 'none';
+   }
+   // 🎨 涂装按钮：循环色板（默认国家色→沙黄→雪白→丛林绿→城市灰）；与国家筛选同排（轮播区）
+   if (!loEls.paintBtn) {
+     const btn = document.createElement('button');
+     btn.className = 'diff-btn';
+     btn.style.cssText = 'padding:9px 10px;font-size:13px;';
+     const opsRow = document.getElementById('lo-veh-ops');
+     (opsRow || loEls.back.parentNode).appendChild(btn);
     loEls.paintBtn = btn;
     btn.addEventListener('click', () => {
       const { types, sel } = loadoutTypes();
@@ -7692,14 +9803,22 @@ function renderLoadout() {
       renderLoadout();
     });
   }
-  const pcur = (meta.paints || {})[t.id];
-  loEls.paintBtn.textContent = `🎨 涂装：${pcur != null ? ['沙黄', '雪白', '丛林绿', '城市灰'][[0xa89660, 0xe8e8e0, 0x44583a, 0x5a5f66].indexOf(pcur | 0)] || '自定义' : '默认'}`;
+   const pcur = (meta.paints || {})[t.id];
+   loEls.paintBtn.innerHTML = `🎨 涂装：${pcur != null ? `<b>${['沙黄', '雪白', '丛林绿', '城市灰'][[0xa89660, 0xe8e8e0, 0x44583a, 0x5a5f66].indexOf(pcur | 0)] || '自定义'}</b>` : '默认'}`;
   const cycling = owned.length > 1;
   loEls.prev.disabled = !cycling;
   loEls.next.disabled = !cycling;
 }
 function showLoadout(mode) {
   pendingMode = mode;
+  const moreEl = document.getElementById('lo-more');
+  if (moreEl) moreEl.classList.add('hidden');   // 收起可能残留的「更多选项」弹层
+  // 国家锁定默认=当前选用载具的国家（进出战页立即缩小范围；想看全部点国家按钮切回"全部"）
+  {
+    const types = mode === 'tank' ? TANK_TYPES : PLANE_TYPES;
+    const sel = mode === 'tank' ? meta.selected : meta.selectedPlane;
+    loadoutNation = (types.find((t) => t.id === sel) || {}).icon || null;
+  }
   renderLoadout();
   menu.classList.add('hidden');
   loadoutEl.classList.remove('hidden');
@@ -7707,7 +9826,7 @@ function showLoadout(mode) {
 function hideLoadout() {
   loadoutEl.classList.add('hidden');
   menu.classList.remove('hidden');
-  renderMoney(); renderGarage(); renderGaragePlane();
+  renderMoney(); renderBest(); renderQuests(); renderDailyBtn();
 }
 function cycleLoadout(dir) {
   const { types, owned, sel, set } = loadoutTypes();
@@ -7717,17 +9836,24 @@ function cycleLoadout(dir) {
   set(order[(idx + dir + order.length) % order.length]); saveMeta(); renderLoadout();
 }
 
+let dailyRun = false;   // 每日挑战单次标记（startGame 透传给 Game 后即复位）
+let tutorialRun = false;   // 新手教学单次标记
 function startGame(mode) {
   menu.classList.add('hidden');
   hudContainer.classList.remove('hidden');
-  if (game) game.dispose();
+  const isDaily = dailyRun; dailyRun = false;
+  const isTut = tutorialRun; tutorialRun = false;
+  if (game) { try { game.dispose(); } catch (e) { console.error('上一局清理失败（已忽略，不挡新局）', e); } game = null; }   // 清理失败不拦着开局（曾经会让"开始"点了没反应）
   try { game = new Game({
     canvas, mode, difficulty,
+    daily: isDaily,
+    tutorial: isTut,
+    sim: loadSettings().simMode === true,   // 拟真节奏（战雷式）：车沉炮慢装填长、命中致命
     tankType: meta.selected,
     planeType: meta.selectedPlane,
     endless,
     objective,
-    mapId: MAPS[mapIndex].id,
+    mapId: mapCycle()[mapIndexSafe()].id,
     worldwar,
     solo,
     limitedAmmo,
@@ -7735,21 +9861,22 @@ function startGame(mode) {
     ownedPlanes: meta.ownedPlanes,
     hudContainer,
     onExit: backToMenu,
-    onResult: ({ win, kills, endless: isEndless }) => {
+    onResult: ({ win, kills, endless: isEndless, goldMul = 1, rpMul = 1 }) => {
       let reward, rp;
       const sub = hudContainer.querySelector('#result-sub');
+      const bonusTag = (goldMul !== 1 || rpMul !== 1) ? ` · 🃏 强化 ×${goldMul}` : '';
       if (isEndless) {
         const key = mode === 'tank' ? 'bestTankEndless' : 'bestPlaneEndless';
         const prev = meta[key] || 0;
         const isBest = kills > prev;
         if (isBest) meta[key] = kills;
-        reward = kills * 150; rp = kills * 50;
+        reward = Math.round(kills * 150 * goldMul); rp = Math.round(kills * 50 * rpMul);
         meta.money += reward; meta.rp += rp; saveMeta();
-        if (sub) sub.textContent = `击毁 ${kills} · +${reward}💰 +${rp}🔬${isBest ? ' · 🏆 新纪录！' : ''} · 最佳 ${meta[key]}`;
+        if (sub) sub.textContent = `击毁 ${kills} · +${reward}💰 +${rp}🔬${isBest ? ' · 🏆 新纪录！' : ''} · 最佳 ${meta[key]}${bonusTag}`;
       } else {
-        reward = (win ? 600 : 0) + kills * 120; rp = (win ? 300 : 80) + kills * 40;
+        reward = Math.round(((win ? 600 : 0) + kills * 120) * goldMul); rp = Math.round(((win ? 300 : 80) + kills * 40) * rpMul);
         meta.money += reward; meta.rp += rp; saveMeta();
-        if (sub) sub.textContent = `击毁 ${kills} · +${reward}💰 +${rp}🔬 · 余额 ${meta.money} · 研发 ${meta.rp}`;
+        if (sub) sub.textContent = `击毁 ${kills} · +${reward}💰 +${rp}🔬 · 余额 ${meta.money} · 研发 ${meta.rp}${bonusTag}`;
       }
     },
   }); } catch (err) {
@@ -7762,16 +9889,62 @@ function startGame(mode) {
 function backToMenu() {
   if (game) { game.dispose(); game = null; }
   hudContainer.classList.add('hidden');
+  // 联机会话还在（F2/暂停菜单退出战局）：回联机大厅而不是单机菜单
+  if (window.__mp && window.__mp.active) { menu.classList.add('hidden'); window.__mp.showLobby(); return; }
   menu.classList.remove('hidden');
-  renderMoney(); renderBest(); renderEndlessBtn(); renderObjectiveBtn(); renderWorldwarBtn();
+  renderMoney(); renderBest(); renderEndlessBtn(); renderObjectiveBtn(); renderWorldwarBtn(); renderDailyBtn(); renderQuests();
+  if (dailySaved) {   // 每日挑战用完：还原菜单开关，不让临时配置污染下一局
+    endless = dailySaved.endless; objective = dailySaved.objective; mapIndex = dailySaved.mapIndex;
+    pendingMode = dailySaved.pendingMode; solo = dailySaved.solo; dailySaved = null;
+    renderEndlessBtn(); renderObjectiveBtn();
+  }
 }
 
 document.getElementById('btn-tank').addEventListener('click', () => { worldwar = false; showLoadout('tank'); });
+// 新手教学：干净配置直接开课（5 步引导，可 N 跳过）
+{
+  const tb = document.getElementById('btn-tut');
+  if (tb) tb.addEventListener('click', () => {
+    tutorialRun = true;
+    worldwar = false; endless = false; solo = false;
+    startGame('tank');
+  });
+}
+// 每日挑战：日期种子定死 模式/地图/词条，波次生存；菜单按钮预览当日配置与最佳波次
+// （btn-daily 判空防混合缓存：Electron 若缓存了旧 index.html 而新 main.js 在跑，缺按钮不该炸掉整个菜单）
+function renderDailyBtn() {
+  const btn = document.getElementById('btn-daily');
+  if (!btn) return;
+  const d = dailyInfo();
+  const mapName = (MAPS.find((m) => m.id === d.mapId) || {}).name || d.mapId;
+  const mods = d.mods.map((id) => (DAILY_MODS.find((x) => x.id === id) || {}).name || '').filter(Boolean);
+  btn.innerHTML = `📅 每日挑战 · ${d.mode === 'tank' ? '陆战' : '空战'}波次 · ${mapName}<span class="mode-desc">${mods.join('；')} · 最佳第 ${d.bestWave || 0} 波 · 撑到第 5 波 +800💰</span>`;
+}
+let dailySaved = null;   // 每日挑战临时改写的菜单开关（退出时还原）
+const _dailyBtn = document.getElementById('btn-daily');
+if (_dailyBtn) _dailyBtn.addEventListener('click', () => {
+  const d = dailyInfo();
+  dailyRun = true;
+  dailySaved = { endless, objective, mapIndex, pendingMode, solo };
+  pendingMode = d.mode;   // 地图池按模式取
+  const cycle = d.mode === 'plane' ? PLANE_MAPS : MAPS;
+  let idx = cycle.findIndex((m) => m.id === d.mapId);
+  if (idx < 0) idx = 0;
+  mapIndex = idx;
+  endless = true; objective = 'waves'; worldwar = false;
+  solo = d.mods.includes('solo');
+  menu.classList.add('hidden');
+  startGame(d.mode);
+});
 document.getElementById('btn-plane').addEventListener('click', () => { worldwar = false; showLoadout('plane'); });
 document.getElementById('btn-worldwar-mode').addEventListener('click', () => { worldwar = true; endless = true; renderEndlessBtn(); showLoadout('tank'); });   // 世界大战默认开启无尽模式（玩家可手动关）
 
 loEls.back.addEventListener('click', hideLoadout);
-loEls.start.addEventListener('click', () => { loadoutEl.classList.add('hidden'); startGame(pendingMode); });
+loEls.start.addEventListener('click', () => {
+  loadoutEl.classList.add('hidden');
+  if (window.__mp && window.__mp.active) return;   // 联机：出战配置只做选择确认，开局由主机在顶部栏发起
+  startGame(pendingMode);
+});
 loEls.prev.addEventListener('click', () => cycleLoadout(-1));
 loEls.next.addEventListener('click', () => cycleLoadout(1));
 
@@ -7784,15 +9957,48 @@ document.querySelectorAll('.diff-btn').forEach((btn) => {
 });
 
 if (endlessBtn) endlessBtn.addEventListener('click', () => { endless = !endless; renderEndlessBtn(); });
-if (objectiveBtn) objectiveBtn.addEventListener('click', () => { objective = objective === 'battle' ? 'capture' : (objective === 'capture' ? 'waves' : 'battle'); renderObjectiveBtn(); renderLoadout(); });
-if (mapBtn) mapBtn.addEventListener('click', () => { mapIndex = (mapIndex + 1) % MAPS.length; renderMapBtn(); renderLoadout(); });
+if (objectiveBtn) objectiveBtn.addEventListener('click', () => { const CYC = ['battle', 'capture', 'waves', 'bossrush', 'flag']; objective = CYC[(CYC.indexOf(objective) + 1) % CYC.length]; renderObjectiveBtn(); renderLoadout(); });
+if (mapBtn) mapBtn.addEventListener('click', () => { mapIndex = (mapIndex + 1) % mapCycle().length; renderMapBtn(); renderLoadout(); });
+if (soloBtn) soloBtn.addEventListener('click', () => { solo = !solo; soloBtn.innerHTML = `👥 队友：${solo ? '<b>无</b>' : '有'}`; soloBtn.classList.toggle('active', solo); renderLoadout(); });
 if (worldwarBtn) worldwarBtn.addEventListener('click', () => { worldwar = !worldwar; renderWorldwarBtn(); renderLoadout(); });
-if (soloBtn) soloBtn.addEventListener('click', () => { solo = !solo; soloBtn.textContent = `👥 队友：${solo ? '无' : '有'}`; soloBtn.classList.toggle('active', solo); renderLoadout(); });
+// 国家锁定：循环 全部 → 各拥有国家 → 全部；切国家后自动选用该国第一辆已拥有载具
+{
+  const nb = document.getElementById('btn-nation');
+  if (nb) nb.addEventListener('click', () => {
+    const flags = renderLoadout._nflags || [];
+    const opts = [null, ...flags];
+    loadoutNation = opts[(opts.indexOf(loadoutNation) + 1) % opts.length];
+    const { types, owned, set } = loadoutTypes();
+    if (loadoutNation) {
+      const first = types.find((t) => owned.includes(t.id));
+      if (first) set(first.id);
+    }
+    saveMeta();
+    renderLoadout();
+  });
+}
 {
   const ab = document.getElementById('btn-ammo');
-  if (ab) ab.addEventListener('click', () => { limitedAmmo = !limitedAmmo; ab.textContent = `📦 弹药：${limitedAmmo ? '有限' : '无限'}`; ab.classList.toggle('active', limitedAmmo); renderLoadout(); });
+  if (ab) ab.addEventListener('click', () => { limitedAmmo = !limitedAmmo; ab.innerHTML = `📦 弹药：${limitedAmmo ? '<b>有限</b>' : '无限'}`; ab.classList.toggle('active', limitedAmmo); renderLoadout(); });
+}
+// 「更多选项」弹层：世界大战 + AI 实验开关（低频/尝鲜项收进二级，主面板只留 6 个常用开关）
+{
+  const moreBtn = document.getElementById('btn-more');
+  const moreEl = document.getElementById('lo-more');
+  const closeBtn = document.getElementById('lo-more-close');
+  if (moreBtn && moreEl) {
+    moreBtn.addEventListener('click', () => { renderWorldwarBtn(); moreEl.classList.remove('hidden'); });
+    if (closeBtn) closeBtn.addEventListener('click', () => moreEl.classList.add('hidden'));
+    moreEl.addEventListener('click', (e) => { if (e.target === moreEl) moreEl.classList.add('hidden'); });   // 点遮罩关闭
+  }
 }
 if (techtreeBtn) techtreeBtn.addEventListener('click', openTechTree);
+// 出战页 ←/→ 键切换载具（与 ◀▶ 按钮等价；出战页打开时不会有对局在跑，无按键冲突）
+window.addEventListener('keydown', (e) => {
+  if (loadoutEl.classList.contains('hidden')) return;
+  if (e.key === 'ArrowLeft') { cycleLoadout(-1); }
+  else if (e.key === 'ArrowRight') { cycleLoadout(1); }
+});
 {
   const sb = document.getElementById('btn-settings');
   if (sb) {
@@ -7801,9 +10007,24 @@ if (techtreeBtn) techtreeBtn.addEventListener('click', openTechTree);
     ab.textContent = '🏆 成就';
     sb.parentNode.insertBefore(ab, sb);   // 与科技树/设置同排（设置前面），整齐不换行错位
     ab.addEventListener('click', toggleAchievements);
+    const stb = document.createElement('button');
+    stb.className = 'mode-btn';
+    stb.textContent = '📊 战绩';
+    sb.parentNode.insertBefore(stb, sb);
+    stb.addEventListener('click', toggleStatsPanel);
   }
 }
 if (techtreeEl) techtreeEl.addEventListener('click', (e) => {
+  if (e.target.closest('#tt-confirm-ok')) { const s = _ttSel; if (s) techTreeClick(s.isTank, s.id); return; }   // 确认=对选中卡再点一次
+  if (e.target.closest('#tt-confirm-no')) { _ttSel = null; renderTechTree(); return; }
+  const fbtn = e.target.closest('[data-ttf]');
+  if (fbtn) { _ttFilter = fbtn.dataset.ttf; _ttSel = null; renderTechTree(); return; }   // 过滤切换
+  const abtn = e.target.closest('[data-tta]');
+  if (abtn) {
+    const k = document.getElementById(abtn.dataset.tta === 'tank' ? 'tt-kind-tank' : 'tt-kind-plane');
+    if (k) k.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
   const card = e.target.closest('.tt-card');
   if (!card) return;
   techTreeClick(card.dataset.tank === '1', card.dataset.id);
@@ -7811,9 +10032,17 @@ if (techtreeEl) techtreeEl.addEventListener('click', (e) => {
 
 renderMoney();
 renderBest();
+renderQuests();
+renderDailyBtn();
+{   // 版本角标：一眼确认跑的是不是最新代码（缓存旧文件时版本号会不同/消失）
+  const tip = document.querySelector('#menu .tip');
+  if (tip) tip.textContent = `版本 ${GAME_VERSION} · ` + tip.textContent;
+}
 renderEndlessBtn();
 
 // —— 设置面板 ——
+// 支持两处打开：主菜单按钮（平铺）与战斗内（暂停面板/右上角 ⚙，raised 盖在暂停遮罩上）。
+// 二值项为 checkbox 开关（.switch 组件），连续量为 range 滑杆；灵敏度类改动同步进本局内存即时生效。
 (() => {
   const el = document.getElementById('settings');
   const openBtn = document.getElementById('btn-settings');
@@ -7821,33 +10050,148 @@ renderEndlessBtn();
   const sEv = document.getElementById('set-engvol'), sEvV = document.getElementById('set-engvol-v');
   const sSh = document.getElementById('set-shadows'), sShV = document.getElementById('set-shadows-v');
   const sIv = document.getElementById('set-inverty'), sIvV = document.getElementById('set-inverty-v');
+  const sGr = document.getElementById('set-grain'), sGrV = document.getElementById('set-grain-v');
+  const sPc = document.getElementById('set-pace'), sPcV = document.getElementById('set-pace-v');
+  const sMu = document.getElementById('set-music'), sMuV = document.getElementById('set-music-v');
+  const sFa = document.getElementById('set-fassist'), sFaV = document.getElementById('set-fassist-v');
+  const sFps = document.getElementById('set-fps'), sFpsV = document.getElementById('set-fps-v');
+  const sSim = document.getElementById('set-sim'), sSimV = document.getElementById('set-sim-v');
+  const sTg = document.getElementById('set-tankgain'), sTgV = document.getElementById('set-tankgain-v');
+  const PACE_NAMES = ['正常', '慢速 0.5×', '超慢 0.25×'];
   const sPg = document.getElementById('set-planegain'), sPgV = document.getElementById('set-planegain-v');
   const sQ = document.getElementById('set-quality'), sQV = document.getElementById('set-quality-v');
   const Q_NAMES = ['流畅', '均衡', '高清', '自动'];
   let cur = loadSettings();
+  // 灵敏度类设置写进本局内存（settings 是开局快照，改 localStorage 不会热更新——顺手动这一份）
+  const syncLive = () => {
+    if (!window.__game) return;
+    window.__game.settings.planeGain = cur.planeGain;
+    window.__game.settings.tankGain = cur.tankGain != null ? cur.tankGain : 1;
+    if (window.__game.player && window.__game.player.mouseAim && cur.flightAssist != null)
+      window.__game.player.manualCtrl = cur.flightAssist === false;
+  };
+  const applyImmediate = () => {   // 恢复默认后把可热更的副作用补一遍（等价于逐项拨动一遍滑杆）
+    if (window.__game) {
+      if (window.__game.sfx) { window.__game.sfx.setVolume(cur.volume); window.__game.sfx.setEngineVolume(cur.engineVolume ?? 0.8); }
+      if (window.__game.music) window.__game.music.setVolume(cur.music != null ? cur.music : 0.5);
+      if (window.__game.postfx) window.__game.postfx.setGrain(cur.grain !== false);
+      if (!window.__game.mp) window.__game.timeScale = [1, 0.5, 0.25][cur.pace | 0] || 1;
+      syncLive();
+    }
+  };
   const refresh = () => {
     sVol.value = cur.volume; sVolV.textContent = Math.round(cur.volume * 100) + '%';
     if (sEv) { sEv.value = cur.engineVolume ?? 0.8; sEvV.textContent = Math.round((cur.engineVolume ?? 0.8) * 100) + '%'; }
-    sSh.value = cur.shadows ? 1 : 0; sShV.textContent = cur.shadows ? '开' : '关';
-    sIv.value = cur.invertY ? 1 : 0; sIvV.textContent = cur.invertY ? '开' : '关';
+    sSh.checked = cur.shadows === true; sShV.textContent = cur.shadows ? '开' : '关';
+    sIv.checked = cur.invertY === true; sIvV.textContent = cur.invertY ? '开' : '关';
+    if (sGr) { sGr.checked = cur.grain !== false; sGrV.textContent = cur.grain !== false ? '开' : '关'; }
+    if (sPc) { sPc.value = cur.pace | 0; sPcV.textContent = PACE_NAMES[cur.pace | 0] || '正常'; }
+    if (sMu) { sMu.value = cur.music != null ? cur.music : 0.5; sMuV.textContent = Math.round((cur.music != null ? cur.music : 0.5) * 100) + '%'; }
+    if (sFa) { sFa.checked = cur.flightAssist !== false; sFaV.textContent = cur.flightAssist !== false ? '开' : '关（纯手动）'; }
+    if (sFps) { sFps.checked = cur.fpsShow !== false; sFpsV.textContent = cur.fpsShow !== false ? '开' : '关'; }
+    if (sSim) { sSim.checked = cur.simMode === true; sSimV.textContent = cur.simMode === true ? '开' : '关'; }
     sPg.value = cur.planeGain; sPgV.textContent = cur.planeGain.toFixed(2);
+    if (sTg) { sTg.value = cur.tankGain != null ? cur.tankGain : 1; sTgV.textContent = (cur.tankGain != null ? cur.tankGain : 1).toFixed(2); }
     if (sQ) { sQ.value = cur.quality != null ? cur.quality : 3; sQV.textContent = Q_NAMES[cur.quality != null ? cur.quality : 3]; }
   };
   refresh();
-  if (openBtn) openBtn.addEventListener('click', () => { refresh(); el.classList.remove('hidden'); });
-  document.getElementById('set-close').addEventListener('click', () => el.classList.add('hidden'));
+  const openSettings = () => { refresh(); el.classList.add('raised'); el.classList.remove('hidden'); };
+  const closeSettings = () => el.classList.add('hidden');
+  if (openBtn) openBtn.addEventListener('click', openSettings);
+  document.getElementById('set-close').addEventListener('click', closeSettings);
+  window.__wtSettings = { open: openSettings, close: closeSettings };   // 供战斗内（暂停面板/右上角按钮）打开
   sVol.addEventListener('input', () => { cur.volume = parseFloat(sVol.value); saveSettings(cur); if (window.__game) window.__game.sfx.setVolume(cur.volume); sVolV.textContent = Math.round(cur.volume * 100) + '%'; });
   if (sEv) sEv.addEventListener('input', () => { cur.engineVolume = parseFloat(sEv.value); saveSettings(cur); if (window.__game) window.__game.sfx.setEngineVolume(cur.engineVolume); sEvV.textContent = Math.round(cur.engineVolume * 100) + '%'; });
-  sSh.addEventListener('input', () => { cur.shadows = sSh.value === '1'; saveSettings(cur); sShV.textContent = cur.shadows ? '开' : '关'; });
-  sIv.addEventListener('input', () => { cur.invertY = sIv.value === '1'; saveSettings(cur); sIvV.textContent = cur.invertY ? '开' : '关'; });
-  sPg.addEventListener('input', () => { cur.planeGain = parseFloat(sPg.value); saveSettings(cur); sPgV.textContent = cur.planeGain.toFixed(2); });
+  sSh.addEventListener('change', () => { cur.shadows = sSh.checked; saveSettings(cur); sShV.textContent = cur.shadows ? '开' : '关'; });
+  sIv.addEventListener('change', () => { cur.invertY = sIv.checked; saveSettings(cur); sIvV.textContent = cur.invertY ? '开' : '关'; });
+  if (sGr) sGr.addEventListener('change', () => { cur.grain = sGr.checked; saveSettings(cur); if (window.__game && window.__game.postfx) window.__game.postfx.setGrain(cur.grain); sGrV.textContent = cur.grain ? '开' : '关'; });
+  if (sPc) sPc.addEventListener('input', () => { cur.pace = parseInt(sPc.value, 10) || 0; saveSettings(cur); if (window.__game && !window.__game.mp) window.__game.timeScale = [1, 0.5, 0.25][cur.pace] || 1; sPcV.textContent = PACE_NAMES[cur.pace] || '正常'; });   // 战斗中即时生效（联机局锁 1×）
+  if (sMu) sMu.addEventListener('input', () => { cur.music = parseFloat(sMu.value); saveSettings(cur); if (window.__game && window.__game.music) window.__game.music.setVolume(cur.music); sMuV.textContent = Math.round(cur.music * 100) + '%'; });
+  if (sFa) sFa.addEventListener('change', () => { cur.flightAssist = sFa.checked; saveSettings(cur); syncLive(); sFaV.textContent = cur.flightAssist ? '开' : '关（纯手动）'; });   // 战斗中即时切换
+  if (sFps) sFps.addEventListener('change', () => { cur.fpsShow = sFps.checked; saveSettings(cur); sFpsV.textContent = cur.fpsShow ? '开' : '关'; });
+  if (sSim) sSim.addEventListener('change', () => { cur.simMode = sSim.checked; saveSettings(cur); sSimV.textContent = cur.simMode ? '开' : '关'; });   // 拟真节奏：下一局开局读取（startGame 透传）
+  sPg.addEventListener('input', () => { cur.planeGain = parseFloat(sPg.value); saveSettings(cur); syncLive(); sPgV.textContent = cur.planeGain.toFixed(2); });
+  if (sTg) sTg.addEventListener('input', () => { cur.tankGain = parseFloat(sTg.value); saveSettings(cur); syncLive(); sTgV.textContent = cur.tankGain.toFixed(2); });
   if (sQ) sQ.addEventListener('input', () => { cur.quality = parseInt(sQ.value, 10); saveSettings(cur); sQV.textContent = Q_NAMES[cur.quality]; });
+  {   // 恢复默认：写回 DEFAULT_SETTINGS 并把可热更项立即应用（画质/阴影下一局生效，与手动改一致）
+    const rb = document.getElementById('set-reset');
+    if (rb) rb.addEventListener('click', () => {
+      cur = { ...DEFAULT_SETTINGS };
+      saveSettings(cur); refresh(); applyImmediate();
+      rb.textContent = '✓ 已恢复';
+      setTimeout(() => { rb.textContent = '↺ 恢复默认'; }, 1200);
+    });
+  }
 })();
 
 // 冒烟测试入口：URL 带 ?auto=tank / ?auto=plane 时跳过菜单直接开局（便于回归测试）
 (() => {
   const m = new URLSearchParams(location.search).get('auto');
-  if (m === 'tank' || m === 'plane') startGame(m);
+  if (m === 'tank' || m === 'plane') { pendingMode = m; startGame(m); }   // pendingMode 先落位：地图池/按钮文案按模式取
+})();
+
+// —— 联机对战入口：从启动器"联机游戏"进来（URL 带 ?pvp=1&team=red|blue）——
+// 流程：恢复联机会话 → 联机大厅（主机选图开局/成员等待）→ wt-start → startGameMp 同图开局。
+// 伤害架构：主机权威（射击端上报 wt-hit，主机跑完整装甲判定后广播 wt-dmg/wt-kill），详见 js/mp.js 头注释。
+function startGameMp(mapId) {
+  const mp = window.__mp;
+  if (!mp) return;
+  const mode = (mp.myVk === 'plane' || pendingMode === 'plane') ? 'plane' : 'tank';   // 载具类别以出战面板最后浏览为准
+  mp.myVk = mode;
+  let idx = MAPS.findIndex((mm) => mm.id === mapId);
+  if (idx < 0) idx = 0;
+  if (game) { try { game.dispose(); } catch (e) { console.error('上一局清理失败（已忽略）', e); } game = null; }
+  menu.classList.add('hidden');
+  if (typeof loadoutEl !== 'undefined' && loadoutEl) loadoutEl.classList.add('hidden');   // 收起出战配置（战局中重开=回大厅）
+  hudContainer.classList.remove('hidden');
+  try { game = new Game({
+    canvas, mode,
+    difficulty: 'normal',
+    tankType: meta.selected,
+    planeType: meta.selectedPlane,
+    endless: false, objective: 'battle',
+    mapId: MAPS[idx].id,
+    worldwar: false, solo: true,
+    ownedTanks: meta.owned,
+    ownedPlanes: meta.ownedPlanes,
+    mp,   // ★ 联机局标记：_initMatch/_makePlayer/_checkEnd 等走联机分支
+    hudContainer,
+    onExit: () => { if (game) { game.dispose(); game = null; } hudContainer.classList.add('hidden'); mp.showLobby(); },
+  }); } catch (err) {
+    document.body.innerHTML = '<pre style="color:#f66;padding:20px;font:14px monospace;white-space:pre-wrap">❌ 联机开局失败: ' + err.message + '\n\n' + err.stack + '</pre>';
+    console.error(err);
+    return;
+  }
+  window.__game = game;
+}
+(async () => {
+  const q = new URLSearchParams(location.search);
+  if (q.get('pvp') !== '1') return;
+  menu.classList.add('hidden');   // 先收单机菜单（联机恢复期间不闪菜单）
+  const mp = await MPNet.create({
+    Tank, Plane, Heli, tankTypeById, planeTypeById, MAPS, CONFIG, terrainHeight, randRange,
+    shellById,
+    _Projectile: Projectile, _Explosion: Explosion, _SplashRing: SplashRing, _Smoke: Smoke, _lerpAngle: lerpAngle,
+  });
+  if (!mp) {
+    // 无联机环境（独立浏览器直开）：提示后照常单机
+    menu.classList.remove('hidden');
+    const tip = document.createElement('div');
+    tip.style.cssText = 'position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:9999;background:rgba(140,90,20,.92);color:#ffd9a0;padding:8px 18px;border-radius:10px;font:13px sans-serif';
+    tip.textContent = '⚠ 当前不在联机房间内（请从游戏中心的「联机游戏」进入），已切换为单机模式';
+    document.body.appendChild(tip);
+    setTimeout(() => tip.remove(), 5000);
+    return;
+  }
+  window.__mp = mp;
+  // 出战配置面板：联机的载具选择界面（车库/3D预览/涂装全复用单机）
+  mp._openVehPicker = (vk) => {
+    if (game) return;   // 战斗中不开
+    showLoadout(vk === 'plane' ? 'plane' : 'tank');
+  };
+  mp._onStartBattle = (mapId) => startGameMp(mapId);
+  // 单机菜单已收起：顶部房间状态栏 + 出战配置面板
+  mp.showLobby();
 })();
 
 

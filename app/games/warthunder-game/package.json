@@ -6,6 +6,6 @@
   "type": "module",
   "scripts": {
     "start": "python3 -m http.server 8000",
-    "check": "node --check js/main.js && node --check js/lib.js"
+    "check": "node --check js/main.js && node --check js/lib.js && node --check js/mp.js"
   }
 }

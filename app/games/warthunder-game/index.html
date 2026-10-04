@@ -29,6 +29,9 @@ html, body {
 
 .hidden { display: none !important; }
 
+/* 设置面板从暂停面板/战斗中打开时，抬高到模态之上（暂停遮罩 z-200） */
+#settings.raised { z-index: 300; }
+
 /* —— 起始菜单 —— */
 .overlay {
   position: fixed;
@@ -43,33 +46,39 @@ html, body {
 
 .menu-card {
   text-align: center;
-  padding: 40px 48px;
+  padding: 14px 22px 18px;
+  max-height: 96vh;
+  overflow-y: auto;
 }
 
 .menu-card h1 {
-  font-size: 52px;
-  letter-spacing: 6px;
+  font-size: 30px;
+  letter-spacing: 4px;
   color: #cfe8c0;
   text-shadow: 0 2px 18px rgba(120, 200, 120, 0.4);
+  display: inline;
 }
 
 .subtitle {
-  margin-top: 6px;
-  font-size: 16px;
+  font-size: 13px;
   color: #9fb0a0;
   letter-spacing: 2px;
+  display: inline;
+  margin-left: 10px;
 }
 
 .modes {
-  margin: 38px 0 18px;
+  margin: 14px 0 10px;
   display: flex;
-  gap: 22px;
+  gap: 10px;
   justify-content: center;
+  flex-wrap: wrap;   /* 窄窗口：三卡放不下自动换行，不再横向溢出 */
 }
 
 .mode-btn {
-  width: 230px;
-  padding: 22px 18px;
+  width: 200px;
+  max-width: 100%;
+  padding: 12px 12px;
   border-radius: 14px;
   border: 1px solid rgba(150, 180, 150, 0.3);
   background: linear-gradient(160deg, rgba(60,80,60,0.7), rgba(30,40,35,0.7));
@@ -97,7 +106,9 @@ html, body {
 /* —— 金币 / 研发点 —— */
 .wallet { display:flex; gap:22px; justify-content:center; margin-top:10px; }
 .rp { font-size:18px; font-weight:700; color:#9fe0ff; }
-.tech-btn { width:auto; margin:14px auto 0; padding:10px 26px; flex-direction:row; gap:8px; }
+.tech-btn { width:auto; margin:0; padding:9px 10px; flex-direction:row; gap:6px; font-size:14px; }
+/* 主菜单功能按钮（教学/每日/科技/成就/战绩/设置）：自适应列数，任何数量都对称 */
+#menu-actions { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:8px; margin:10px 0 4px; }
 
 /* —— 出战选择页 —— */
 .loadout-card { background:rgba(25,32,28,0.95); border:1px solid rgba(150,180,150,0.35); border-radius:16px; padding:28px 40px; text-align:center; max-width:560px; }
@@ -139,14 +150,85 @@ html, body {
 .tt-card.selected { box-shadow:0 0 0 2px #7CFC00 inset; }
 .tt-card.locked { opacity:0.45; cursor:default; }
 
+/* —— 出战页：对局设置两列网格（标签+值高亮） —— */
+.lo-group-label { font-size:12px; color:#8da08d; letter-spacing:3px; margin:14px 0 8px; }
+#lo-toggles { display:grid; grid-template-columns:repeat(2, 1fr); gap:8px; margin:0 0 4px; }
+#lo-toggles .diff-btn { padding:9px 10px; font-size:13px; text-align:center; }
+#lo-veh-ops { display:flex; justify-content:center; flex-wrap:wrap; gap:8px; margin:12px 0 0; }
+.diff-btn b { color:#ffe9a0; font-weight:600; }   /* 开关/循环按钮的"当前值"高亮，一眼扫出哪些开着 */
+
+/* —— 设置页：开关组件（二值项不用滑杆） —— */
+.switch { position:relative; display:inline-block; width:44px; height:24px; flex:0 0 44px; }
+.switch input { opacity:0; width:0; height:0; position:absolute; }
+.sw-track { position:absolute; inset:0; background:rgba(255,255,255,.15); border-radius:12px; cursor:pointer; transition:background .15s; }
+.sw-track::before { content:''; position:absolute; left:3px; top:3px; width:18px; height:18px; border-radius:50%; background:#cddccd; transition:transform .15s; }
+.switch input:checked + .sw-track { background:#5a9a5a; }
+.switch input:checked + .sw-track::before { transform:translateX(20px); background:#fff; }
+
+/* —— HUD：键位提示自动收起 —— */
+#hint { cursor:pointer; pointer-events:auto; transition:opacity .4s; }
+#hint.minimized { opacity:.5; font-size:12px; padding:4px 10px; }
+
+/* —— HUD：右上角 ⏸/⚙ 常驻按钮（鼠标/触屏保底入口） —— */
+#btn-corner { position:absolute; top:14px; right:18px; width:38px; height:38px; border-radius:10px;
+  background:rgba(20,28,22,.55); border:1px solid rgba(150,180,150,.35); color:#cfe8c0;
+  font-size:17px; line-height:36px; text-align:center; cursor:pointer; pointer-events:auto; user-select:none; }
+#btn-corner:hover { background:rgba(60,80,60,.85); }
+
+/* —— 通用模态（暂停面板/世界大战选载具，样式收敛出 JS 内联） —— */
+.modal-mask { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; z-index:200; }
+.modal-card { background:rgba(20,28,20,.95); border:2px solid rgba(100,180,100,.4); border-radius:14px; padding:26px 36px; text-align:center; color:#eee; min-width:250px; }
+.modal-title { font-size:24px; margin-bottom:6px; }
+.modal-sub { font-size:13px; color:#aab; margin-bottom:18px; }
+.modal-btn { display:block; width:100%; margin:6px 0; padding:10px; font-size:15px; color:#fff; border:none; border-radius:8px; cursor:pointer; }
+.modal-btn.green { background:rgba(80,140,80,.9); }
+.modal-btn.neutral { background:rgba(70,90,70,.85); }
+.modal-btn.red { background:rgba(120,60,60,.9); }
+.modal-btn:hover { filter:brightness(1.15); }
+.ww-panel { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,0,0,.9);
+  border:2px solid rgba(100,180,100,.4); border-radius:12px; padding:20px 24px; z-index:100; max-width:80vw; max-height:80vh; overflow-y:auto; color:#eee; }
+.ww-cols { display:flex; gap:20px; }
+.ww-kind { font-size:14px; margin-bottom:8px; }
+.ww-row { margin:4px 0; padding:8px 14px; background:rgba(40,60,40,.6); border:1px solid #555; border-radius:6px; cursor:pointer; }
+.ww-row.plane { background:rgba(40,50,70,.6); }
+.ww-row.cant { opacity:.45; cursor:not-allowed; }
+.ww-row:hover { filter:brightness(1.3); }
+.ww-cost { color:#ffd86b; float:right; }
+
+/* —— 科技树：顶栏钱包 / 工具行 / 二次确认条 / 卡片 tooltip —— */
+.tt-wallet { font-size:15px; font-weight:700; letter-spacing:1px; white-space:nowrap; }
+.tt-tools { display:flex; gap:8px; align-items:center; flex-wrap:wrap; width:100%; max-width:920px; margin:-4px 0 12px; }
+.tt-tools .diff-btn { padding:4px 12px; font-size:12px; }
+.tt-tools .sep2 { flex:1; }
+#tt-confirm { width:100%; max-width:920px; margin:0 0 12px; padding:8px 14px; border-radius:10px;
+  border:1px solid rgba(255,216,107,.5); background:rgba(60,50,20,.55); display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:13px; }
+#tt-confirm .cbtn { padding:4px 14px; font-size:12px; border-radius:7px; border:1px solid rgba(150,180,150,.4); background:rgba(60,80,60,.8); color:#fff; cursor:pointer; }
+#tt-confirm .cbtn.ok { background:rgba(120,90,30,.9); border-color:rgba(255,216,107,.6); }
+.tt-card.confirm { box-shadow:0 0 0 2px #ffd86b inset; }
+.tt-card:hover::after { content:attr(data-tip); position:absolute; left:50%; bottom:calc(100% + 6px); transform:translateX(-50%);
+  background:rgba(10,14,12,.95); border:1px solid rgba(150,180,150,.4); border-radius:8px; padding:8px 10px;
+  font-size:11px; line-height:1.7; color:#cfe8c0; white-space:pre; pointer-events:none; z-index:5; text-align:left; }
+
 /* —— 金币（旧，保留） —— */
 .toggle-row {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 14px;
-  margin: 12px 0 4px;
+  margin: 10px 0 2px;
 }
+.quests { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 2px; width: 100%; }
+.quest { display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 8px;
+  background: rgba(38, 50, 42, 0.55); border: 1px solid rgba(150, 180, 150, 0.22); font-size: 12px; }
+.quest .q-ico { font-size: 15px; }
+.quest .q-body { flex: 1; text-align: left; min-width: 0; }
+.quest .q-name { color: #dfe8d8; font-weight: 600; }
+.quest .q-desc { color: #9fb0a0; font-size: 11px; margin-top: 1px; }
+.quest .q-prog { height: 4px; border-radius: 3px; background: rgba(0, 0, 0, 0.4); margin-top: 3px; overflow: hidden; }
+.quest .q-bar { height: 100%; background: linear-gradient(90deg, #7CFC00, #c8e878); border-radius: 3px; }
+.quest .q-rw { color: #ffd870; font-size: 12px; white-space: nowrap; }
+.quest.done { opacity: 0.62; }
+.quest.done .q-name::after { content: ' ✓'; color: #7CFC00; }
 .best { font-size: 13px; color: #ffd86b; letter-spacing: 0.5px; }
 .money {
   margin-top: 10px;
@@ -461,7 +543,7 @@ html, body {
 /* —— 击杀提示 / 中央信息 —— */
 #feed {
   position: absolute;
-  top: 50px;
+  top: 60px;   /* 避开右上角 ⏸/⚙ 常驻按钮（14~52px） */
   right: 18px;
   display: flex;
   flex-direction: column;
@@ -606,8 +688,13 @@ html, body {
       <div class="toggle-row">
         <span id="best" class="best"></span>
       </div>
-      <button id="btn-tech" class="mode-btn tech-btn">🔬 科技树（研发 / 购买载具）</button>
-      <button id="btn-settings" class="mode-btn tech-btn">⚙️ 设置（音量 / 画质 / 操控）</button>
+      <div id="quests" class="quests"></div>
+      <div id="menu-actions">
+        <button id="btn-tut" class="mode-btn tech-btn">🎓 新手教学</button>
+        <button id="btn-daily" class="mode-btn tech-btn">📅 每日挑战</button>
+        <button id="btn-tech" class="mode-btn tech-btn">🔬 科技树</button>
+        <button id="btn-settings" class="mode-btn tech-btn">⚙️ 设置</button>
+      </div>
       <p class="tip">点坦克/飞机 → 出战选择页 → 开始战斗。打仗赚 🔬研发点 与 💰金币，到科技树解锁更多载具。</p>
       <div id="toast" class="toast"></div>
     </div>
@@ -620,12 +707,19 @@ html, body {
       <h2 style="text-align:center;letter-spacing:3px;margin-bottom:18px">⚙️ 设置</h2>
       <div class="set-row"><label>音量</label><input id="set-volume" type="range" min="0" max="1" step="0.05" value="0.8"><span id="set-volume-v" class="set-val">80%</span></div>
       <div class="set-row"><label>引擎音量</label><input id="set-engvol" type="range" min="0" max="1" step="0.05" value="0.8"><span id="set-engvol-v" class="set-val">80%</span></div>
-      <div class="set-row"><label>阴影（画质）</label><input id="set-shadows" type="range" min="0" max="1" step="1" value="1"><span id="set-shadows-v" class="set-val">开</span></div>
+      <div class="set-row"><label>音乐</label><input id="set-music" type="range" min="0" max="1" step="0.05" value="0.5"><span id="set-music-v" class="set-val">50%</span></div>
+      <div class="set-row"><label>阴影（画质）</label><label class="switch"><input id="set-shadows" type="checkbox"><span class="sw-track"></span></label><span id="set-shadows-v" class="set-val">开</span></div>
+      <div class="set-row"><label>胶片颗粒</label><label class="switch"><input id="set-grain" type="checkbox"><span class="sw-track"></span></label><span id="set-grain-v" class="set-val">开</span></div>
+      <div class="set-row"><label>帧率显示</label><label class="switch"><input id="set-fps" type="checkbox"><span class="sw-track"></span></label><span id="set-fps-v" class="set-val">开</span></div>
       <div class="set-row"><label>画质等级</label><input id="set-quality" type="range" min="0" max="3" step="1" value="3"><span id="set-quality-v" class="set-val">自动</span></div>
-      <div class="set-row"><label>飞机 Y 轴反转</label><input id="set-inverty" type="range" min="0" max="1" step="1" value="0"><span id="set-inverty-v" class="set-val">关</span></div>
+      <div class="set-row"><label>游戏节奏</label><input id="set-pace" type="range" min="0" max="2" step="1" value="0"><span id="set-pace-v" class="set-val">正常</span></div>
+      <div class="set-row"><label>飞行辅助（自动改平）</label><label class="switch"><input id="set-fassist" type="checkbox"><span class="sw-track"></span></label><span id="set-fassist-v" class="set-val">开</span></div>
+      <div class="set-row"><label>拟真节奏（战雷式）</label><label class="switch"><input id="set-sim" type="checkbox"><span class="sw-track"></span></label><span id="set-sim-v" class="set-val">关</span></div>
+      <div class="set-row"><label>飞机 Y 轴反转</label><label class="switch"><input id="set-inverty" type="checkbox"><span class="sw-track"></span></label><span id="set-inverty-v" class="set-val">关</span></div>
       <div class="set-row"><label>飞机瞄准灵敏度</label><input id="set-planegain" type="range" min="0.4" max="2" step="0.05" value="1"><span id="set-planegain-v" class="set-val">1.00</span></div>
-      <div style="text-align:center;margin-top:22px"><button id="set-close" class="diff-btn active" style="padding:10px 28px">返回</button></div>
-      <p class="tip" style="margin-top:14px">音量立即生效；画质（阴影）下一局生效。</p>
+      <div class="set-row"><label>坦克炮塔灵敏度</label><input id="set-tankgain" type="range" min="0.4" max="2" step="0.05" value="1"><span id="set-tankgain-v" class="set-val">1.00</span></div>
+      <div style="text-align:center;margin-top:22px"><button id="set-reset" class="diff-btn" style="padding:10px 20px">↺ 恢复默认</button><button id="set-close" class="diff-btn active" style="padding:10px 28px;margin-left:10px">返回</button></div>
+      <p class="tip" style="margin-top:14px">音量/灵敏度立即生效；画质（阴影）下一局生效。战斗中可从暂停面板打开本页。</p>
     </div>
   </div>
 
@@ -644,15 +738,19 @@ html, body {
         <button id="lo-next" class="lo-nav">▶</button>
       </div>
       <div id="lo-summary" class="lo-summary"></div>
-      <div id="lo-toggles" style="display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin:12px 0 4px">
+      <div id="lo-veh-ops">
+        <button id="btn-nation" class="diff-btn">🏳 国家：全部</button>
+      </div>
+      <div class="lo-group-label">对 局 设 置</div>
+      <div id="lo-toggles">
+        <button id="btn-objective" class="diff-btn">🎯 目标：歼灭</button>
+        <button id="btn-map" class="diff-btn">🗺 地图</button>
         <button id="btn-endless" class="diff-btn">♾ 无尽模式：关闭</button>
         <button id="btn-solo" class="diff-btn">👥 队友：有</button>
         <button id="btn-ammo" class="diff-btn">📦 弹药：无限</button>
-        <button id="btn-objective" class="diff-btn">🎯 占领模式：关闭</button>
-        <button id="btn-map" class="diff-btn">🗺 地图：城镇巷战</button>
-        <button id="btn-worldwar" class="diff-btn">🌍 世界大战：关闭</button>
+        <button id="btn-more" class="diff-btn">⚙ 更多选项 ▸</button>
       </div>
-      <p id="lo-hint" class="tip">点击 ◀ ▶ 切换已拥有的载具</p>
+      <p id="lo-hint" class="tip">点击 ◀ ▶ 切换已拥有的载具 · ←/→ 键也可以</p>
       <div class="lo-actions">
         <button id="lo-back" class="lo-btn">返回</button>
         <button id="lo-start" class="lo-btn primary">开始战斗 ▶</button>
@@ -660,10 +758,63 @@ html, body {
     </div>
   </div>
 
+  <div id="lo-more" class="overlay hidden">
+    <div class="loadout-card" style="max-width:420px">
+      <h2 style="letter-spacing:3px">⚙ 更多选项</h2>
+      <div style="display:flex;flex-direction:column;gap:10px;margin:18px 0 8px">
+        <button id="btn-worldwar" class="diff-btn">🌍 世界大战：关闭</button>
+        <button id="btn-bcai" class="diff-btn">🤖 学习型人机：关闭</button>
+        <button id="btn-rlai" class="diff-btn">🧪 第六代实验体：关闭</button>
+      </div>
+      <p class="tip" style="margin:6px 0 14px">世界大战=坦克+飞机混战；两个 🤖/🧪 为 AI 实验开关（尝鲜功能，可能影响平衡）</p>
+      <div class="lo-actions"><button id="lo-more-close" class="lo-btn primary">完 成</button></div>
+    </div>
+  </div>
+
   <div id="hud" class="hidden"></div>
 
   <script type="importmap">
   { "imports": { "three": "./three.module.js" } }
+  </script>
+  <script src="./js/net-stub.js"></script><!-- 联机 E2E 测试钩子：?stub=1 才激活，平时空转 -->
+  <script src="./js/agent-core.js"></script><!-- 智能体共享核心：obs 构造（录制/推理共用，始终加载、纯工具无副作用） -->
+  <script src="./js/agent-recorder.js"></script><!-- BC 录制钩子：?record=1 才激活，平时空转 -->
+  <script src="./js/agent-bc.js"></script><!-- BC 人机：?bc=1 或出战页开关(localStorage.wt_bc) 才激活，平时空转 -->
+  <script src="./js/agent-dagger.js"></script><!-- DAgger 影子老师录制：?dagger=1 才激活，平时空转 -->
+  <script src="./js/agent-rl.js"></script><!-- PPO 强化学习人机：?rl=1 / ?rl=ally 才激活，平时空转 -->
+  <script>
+    // 🤖 学习型人机开关（三态：关闭→敌方→队友）：只写 localStorage 供 agent-bc.js 读取，与 main.js 零耦合
+    (function () {
+      var b = document.getElementById('btn-bcai');
+      if (!b) return;
+      var v = '0'; try { v = localStorage.getItem('wt_bc') || '0'; } catch (e) { }
+      if (v === '1') v = 'enemy';   // 旧值兼容
+      var LABELS = { '0': '关闭', 'enemy': '敌方', 'ally': '队友' };
+      var ORDER = ['0', 'enemy', 'ally'];
+      var sync = function () { b.textContent = '🤖 学习型人机：' + LABELS[v]; };
+      b.addEventListener('click', function () {
+        v = ORDER[(ORDER.indexOf(v) + 1) % ORDER.length];
+        try { localStorage.setItem('wt_bc', v); } catch (e) { }
+        sync();
+      });
+      sync();
+    })();
+    // 🧪 第六代实验体开关（三态：关闭→敌方→队友）：写 localStorage.wt_rl 供 agent-rl.js 读取。
+    // 实验体=第六代 PPO（确定性推理，静态权重）；与学习型人机同开时同一辆车先到先得、互不干扰。
+    (function () {
+      var b = document.getElementById('btn-rlai');
+      if (!b) return;
+      var v = '0'; try { v = localStorage.getItem('wt_rl') || '0'; } catch (e) { }
+      var LABELS = { '0': '关闭', 'enemy': '敌方', 'ally': '队友' };
+      var ORDER = ['0', 'enemy', 'ally'];
+      var sync = function () { b.textContent = '🧪 第六代实验体：' + LABELS[v]; };
+      b.addEventListener('click', function () {
+        v = ORDER[(ORDER.indexOf(v) + 1) % ORDER.length];
+        try { localStorage.setItem('wt_rl', v); } catch (e) { }
+        sync();
+      });
+      sync();
+    })();
   </script>
   <script type="module" src="./js/main.js"></script>
 </body>

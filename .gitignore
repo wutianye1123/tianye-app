@@ -11,3 +11,9 @@ _app_probe_ws.js
 .claude/
 .hmcl/
 *.log
+
+# warthunder 训练数据集（42MB，可用 training/farm-*.cjs 再生，见 AI-AGENT.md）
+app/games/warthunder-game/training/data/
+app/games/warthunder-game/training/data-dagger/
+__pycache__/
+*.pyc

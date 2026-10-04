@@ -795,6 +795,29 @@ const mimeTypes = {
 };
 
 const server = http.createServer((req, res) => {
+  // —— 陆空对战存档保险：文件级读写（localStorage 按端口分档，端口被占换随机端口就"丢档"；
+  // 文件放 userData，dev 版/正式版共用同一份，跨端口永不丢） ——
+  const wtMetaFile = path.join(app.getPath('userData'), 'wt-meta.json');
+  if (req.url.split('?')[0] === '/wt-meta/get') {
+    fs.readFile(wtMetaFile, 'utf8', (err, data) => {
+      if (err) { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end('{}'); return; }
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(data);
+    });
+    return;
+  }
+  if (req.url.split('?')[0] === '/wt-meta/set' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 200000) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const m = JSON.parse(body);
+        if (m && Array.isArray(m.owned)) fs.writeFile(wtMetaFile, JSON.stringify(m), () => {});
+        res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}');
+      } catch (e) { res.writeHead(400); res.end(); }
+    });
+    return;
+  }
   // LAN发现：返回本机主机信息
   if (req.url.split('?')[0] === '/mp-host-info') {
     res.writeHead(200, {
