@@ -109,8 +109,11 @@ button:hover{background:#333d49;border-color:#4a5563}
 <div id="bottombar">
   <div id="cards"></div>
   <div id="actionrow">
-    <button id="btnRandomB">部署蓝军</button>
-    <button id="btnRandomR">部署红军</button>
+    <button id="btnRandomB">随机蓝军</button>
+    <button id="btnRandomR">随机红军</button>
+    <span class="sep"></span>
+    <button id="btnPresetB">蓝军方案</button>
+    <button id="btnPresetR">红军方案</button>
     <span class="sep"></span>
     <button id="btnClearB">清空蓝军</button>
     <button id="btnClearR">清空红军</button>
@@ -1855,8 +1858,10 @@ btnMoney.addEventListener('click', function () {
   btnMoney.style.borderColor = infiniteMoney ? '#e8b64c' : '';
   toast(infiniteMoney ? '无限预算已开启：随意放置，随机部署也会拉满' : '已恢复正常预算模式');
 });
-$('btnRandomB').addEventListener('click', function () { openPresetPanel(0); });
-$('btnRandomR').addEventListener('click', function () { openPresetPanel(1); });
+$('btnRandomB').addEventListener('click', function () { randomDeploy(0); });
+$('btnRandomR').addEventListener('click', function () { randomDeploy(1); });
+$('btnPresetB').addEventListener('click', function () { openPresetPanel(0); });
+$('btnPresetR').addEventListener('click', function () { openPresetPanel(1); });
 /* 预设方案选择面板 */
 var presetPanel, presetTitle, presetGrid, presetTeam = 0;
 function closePresetPanel() { presetPanel.classList.add('hidden'); }
