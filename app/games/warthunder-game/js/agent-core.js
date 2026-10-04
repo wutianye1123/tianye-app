@@ -288,10 +288,47 @@
     return best;
   }
 
+  // —— 前方障碍几何避让 v2（2026-10-04：用户实测 v1 抖+避让差，重写为连续转向场）——
+  // v1 毛病：阶跃式加转向（进锥猛加/出锥撒手）与基础转向打架→来回纠偏=画面抖；
+  //          多障碍同侧重复叠加→过度转向。v2：避让强度随重叠度连续渐变（无阶跃），
+  //          避让时按强度压制基础转向（不再对拉），减速温和（最多 35%）。
+  function avoidCmd(tank, obstacles, turnIn, thrIn) {
+    var thr = (thrIn === undefined ? 0 : thrIn);
+    var turn = turnIn || 0;
+    if (!obstacles || !obstacles.length) return { turn: Math.max(-1, Math.min(1, turn)), thr: thr };
+    var fwdX = Math.sin(tank.heading), fwdZ = Math.cos(tank.heading);
+    var rightX = fwdZ, rightZ = -fwdX;
+    var push = 0, wSum = 0;
+    for (var i = 0; i < obstacles.length; i++) {
+      var ob = obstacles[i];
+      if (!ob || !ob.position) continue;
+      var dx = ob.position.x - tank.position.x, dz = ob.position.z - tank.position.z;
+      var dd = Math.hypot(dx, dz);
+      if (dd > 30 || dd < 0.1) continue;
+      if (dx * fwdX + dz * fwdZ <= 0) continue;   // 只算正前方的
+      var r = (ob.radius || 3) + 3.5;
+      var sideDist = dx * rightX + dz * rightZ;
+      if (Math.abs(sideDist) >= r) continue;
+      var overlap = 1 - Math.abs(sideDist) / r;              // 0~1：挡得越死值越大（连续）
+      var urgency = 0.4 + 0.6 * (30 - dd) / 30;              // 越近权重越大
+      var w = overlap * urgency;
+      push += (sideDist >= 0 ? -1 : 1) * (0.25 + 0.75 * overlap) * w;
+      wSum += w;
+    }
+    if (!wSum) return { turn: Math.max(-1, Math.min(1, turn)), thr: thr };
+    push = Math.max(-0.85, Math.min(0.85, push));            // 总量封顶（防多障碍叠加过度转向）
+    var damp = 1 - Math.min(0.7, Math.abs(push));            // 避让强度越高，基础转向让位越多（防对拉抖动）
+    return {
+      turn: Math.max(-1, Math.min(1, turn * damp + push)),
+      thr: Math.max(-1, Math.min(1, thr * (1 - 0.35 * Math.min(1, Math.abs(push)))))
+    };
+  }
+
   window.__WTA = { OBS_DIM: OBS_DIM, wrap2pi: wrap2pi, clamp01: clamp01,
                    enemiesOf: enemiesOf, blockedCount: blockedCount, buildObs: buildObs,
                    makeMLP: makeMLP, gunAimPoint: gunAimPoint, terrainLos: terrainLos,
                    barrelAligned: barrelAligned, fireTol: fireTol,
                    makeStuck: makeStuck, retreatCmd: retreatCmd, smokeBlind: smokeBlind,
-                   pickTarget: pickTarget, claimTarget: claimTarget, releaseTarget: releaseTarget };
+                   pickTarget: pickTarget, claimTarget: claimTarget, releaseTarget: releaseTarget,
+                   avoidCmd: avoidCmd };
 })();

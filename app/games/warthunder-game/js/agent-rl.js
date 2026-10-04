@@ -21,9 +21,9 @@
   var qs = new URLSearchParams(location.search);
   var _lrl = '0'; try { _lrl = localStorage.getItem('wt_rl') || '0'; } catch (e) { }
   var VIAURL = qs.get('rl') !== null;
-  if (!VIAURL && _lrl !== 'enemy' && _lrl !== 'ally') return;   // 默认短路：正常游玩零执行
-  if (qs.get('rl') === '0') return;                             // 强制关
+  if (qs.get('rl') === '0') return;   // URL 硬关：短路；localStorage 状态交给模块级热切换守望器
   var SIDE = (qs.get('rl') === 'ally' || qs.get('rlSide') === 'ally') ? 'ally'
+           : (qs.get('rl') === 'both' || qs.get('rlSide') === 'both' || _lrl === 'both') ? 'both'
            : (qs.get('rl') === 'enemy' || qs.get('rlSide') === 'enemy') ? 'enemy'
            : (_lrl === 'ally' ? 'ally' : 'enemy');
   var TRAIN = VIAURL ? qs.get('rlNoise') !== '0' : false;   // URL 训练默认开；玩家按钮=确定性
@@ -226,19 +226,25 @@
     var origUpdate = tank.ai.update.bind(tank.ai);
     var lastThink = 0;
     var rec = newRec(tank);
+    rec.origUpdate = origUpdate;   // 热切换关闭时还原
     stats.bots++;
     tank.ai.update = function rlPilotUpdate(dt, ctx) {
       try {
-        // —— 维护层（与第五代同款）：起火即灭 + 边走边修 ——
+        // —— 维护层：起火即灭 + 修车 ——
+        // 修车仅蓝方；训练模式（TRAIN）红方保留修车——训练环境不能中途变（污染实验）
+        // rlFair=0：观察镜用——忠实还原训练环境（红方修车开着），只去掉噪声
+        var noRepair = !TRAIN && SIDE !== 'both' && tank.team === 'red' && qs.get('rlFair') !== '0';
         if (tank.burning) { try { tank.tryExtinguish(); } catch (e) { } }
-        var mm = tank.modules;
-        var modsBroken = mm && (mm.track > 0 || mm.barrel > 0 || mm.engine > 0);
-        if (tank.health < tank.maxHealth || modsBroken) {
-          if (tank.health < tank.maxHealth) tank.health = Math.min(tank.maxHealth, tank.health + 15 * dt);
-          if (mm) {
-            if (mm.track > 0) mm.track = Math.max(0, mm.track - dt * 6);
-            if (mm.barrel > 0) mm.barrel = Math.max(0, mm.barrel - dt * 6);
-            if (mm.engine > 0) mm.engine = Math.max(0, mm.engine - dt * 6);
+        if (!noRepair) {
+          var mm = tank.modules;
+          var modsBroken = mm && (mm.track > 0 || mm.barrel > 0 || mm.engine > 0);
+          if (tank.health < tank.maxHealth || modsBroken) {
+            if (tank.health < tank.maxHealth) tank.health = Math.min(tank.maxHealth, tank.health + 15 * dt);
+            if (mm) {
+              if (mm.track > 0) mm.track = Math.max(0, mm.track - dt * 6);
+              if (mm.barrel > 0) mm.barrel = Math.max(0, mm.barrel - dt * 6);
+              if (mm.engine > 0) mm.engine = Math.max(0, mm.engine - dt * 6);
+            }
           }
         }
 
@@ -288,7 +294,7 @@
               - tank.heading - (tank.turretYaw || 0));
             if (Math.abs(aimOffQ) < 0.35) { turnCmd *= 0.3; stats.steady = (stats.steady || 0) + 1; }
           }
-          tank.drive(rec.applied[0], turnCmd, dt);
+          tank.drive(rec.applied[0], turnCmd, dt);   // 避让层撤除（gen226 训练时无此层，部署打架致 422/526s 拖延）
         }
         tank.aimTurretAt(ap0, dt);
         // —— 开火三重门：地形 LOS + 烟幕纪律 + 收敛（240m 内 + 障碍 LOS + 装填好）——
@@ -379,15 +385,15 @@
     if (!el) {
       el = document.createElement('div');
       el.id = '__rlBadge';
-      el.style.cssText = 'position:fixed;top:8px;right:8px;z-index:99999;pointer-events:none;' +
+      el.style.cssText = 'position:fixed;left:12px;top:114px;z-index:99999;pointer-events:none;' +
         'background:rgba(0,0,0,.55);color:#d8f;padding:4px 10px;border-radius:6px;' +
-        'font:12px/1.4 monospace;border:1px solid #84a;';
+        'font:12px/1.4 monospace;border:1px solid #84a;';   // 左上（FPS 下方），避让右侧击杀播报/回放小窗
       (document.body || document.documentElement).appendChild(el);
     }
     el.textContent = txt;
   }
   function badgeText() {
-    return (W ? '🧠 RL[' + (SIDE === 'ally' ? '队友' : '敌方') + '] gen' + stats.gen +
+    return (W ? '🧠 RL[' + (SIDE === 'ally' ? '队友' : SIDE === 'both' ? '双方' : '敌方') + '] gen' + stats.gen +
       (TRAIN ? ' σ' + Math.exp(W.logStd[0]).toFixed(2) : ' 确定性') :
       '🧠 RL 等权重…') +
       ' · ' + stats.bots + ' bots · ' + stats.steps + ' steps · 🎯' + stats.kills + '/' + stats.hits +
@@ -398,8 +404,13 @@
   window.__RLAPI = { stats: stats, postNow: function () { postNow(false); } };
 
   // ---------- 主流程 ----------
-  startWeightSync().then(function () {
-    if (!W) return;
+  var liveSide = VIAURL ? SIDE : null;   // URL 模式冻结；localStorage 模式由守望器热切
+  var booted = false;                    // 玩家模式权重已就位
+  function boot() {                       // 权重就位后启动 mount 循环（幂等）
+    if (booted) return;
+    booted = true;
+    startWeightSync().then(function () {
+    if (!W) { booted = false; return; }
     var lastPost = 0;
     var mount = setInterval(function () {
       try {
@@ -407,15 +418,17 @@
         if (!g || !g.em) return;
         gameRef = g;
         if (g.state === 'playing') {
+          if (!liveSide) { restoreAll(g); return; }
           hookEmClass(g.em.constructor);
           var pool = g.em.tanks || [];
           for (var i = 0; i < pool.length; i++) {
             var t = pool[i];
             if (!t || !t.alive || !t.ai || t.netGhost || pilots.has(t)) continue;
             if (t.__pilotedBy && t.__pilotedBy !== 'rl') continue;   // BC 先到先得（跨脚本互斥）
-            var want = (SIDE === 'enemy' && t.team === 'red') ||
-                       (SIDE === 'ally' && t.side === 'ally');
-            if (want) pilotate(t, g);
+            var want = (liveSide === 'enemy' && t.team === 'red') ||
+                       (liveSide === 'ally' && t.side === 'ally') ||
+                       (liveSide === 'both' && (t.team === 'red' || t.side === 'ally'));
+            if (want) { SIDE = liveSide; pilotate(t, g); }
           }
         } else if (g.state === 'over') {
           closeAll(true);                    // 局终：封所有段（死亡的含 -10）
@@ -427,7 +440,35 @@
         badge(badgeText());
       } catch (e) { /* 轮询永不炸 */ }
     }, 500);
-    setInterval(function () { console.log('[RL] stats:', JSON.stringify(stats)); }, 20000);
-  });
+    setInterval(function () { if (liveSide || TRAIN) console.log('[RL] stats:', JSON.stringify(stats)); }, 20000);
+    });
+  }
+  // —— 热切换守望（模块级）：出战页「🧪 第六代实验体」写 localStorage，0.5s 生效免刷新 ——
+  setInterval(function () {
+    try {
+      var v = '0'; try { v = localStorage.getItem('wt_rl') || '0'; } catch (e) { }
+      var want = (v === 'enemy' || v === 'ally' || v === 'both') ? v : null;
+      if (VIAURL) return;   // URL 模式：加载时冻结，不热切
+      if (want !== liveSide) {
+        liveSide = want;
+        console.log('[RL] 热切换 →', want || '关闭');
+        if (want) { SIDE = want; boot(); }
+      }
+    } catch (e) { }
+  }, 500);
+  function restoreAll(g) {
+    try {
+      var pool = (g && g.em && g.em.tanks) || [];
+      for (var i = 0; i < pool.length; i++) {
+        var t = pool[i];
+        if (!t) continue;
+        var rec = pilots.get(t);
+        if (rec && rec.origUpdate) { try { t.ai.update = rec.origUpdate; } catch (e) { } }
+        pilots.delete(t);
+        if (t.__pilotedBy === 'rl') t.__pilotedBy = null;
+      }
+    } catch (e) { }
+  }
+  if (VIAURL) boot();
   window.addEventListener('beforeunload', function () { closeAll(true); postNow(true); });
 })();

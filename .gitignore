@@ -17,3 +17,4 @@ app/games/warthunder-game/training/data/
 app/games/warthunder-game/training/data-dagger/
 __pycache__/
 *.pyc
+app/games/warthunder-game/training/ppo-weights-g*.json

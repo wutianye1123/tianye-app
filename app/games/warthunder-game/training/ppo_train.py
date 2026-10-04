@@ -18,10 +18,12 @@ OBS_DIM, H1, H2, HEAD = 70, 256, 256, 3          # head: [mean_thr, mean_turn, v
 ACT_DIM = 2                                       # 第六代只训驾驶两维
 BATCH = 2048                                      # 攒够多少步做一次 PPO 更新
 EPOCHS, MINIB = 4, 64
-CLIP, LR = 0.2, 1e-4      # LR 1e-4：共 trunk 下 value 大梯度会把 BC 热启动策略拖飞（实测首更 KL 1.29）
+CLIP, LR = 0.2, 5e-5      # 第二轮：1e-4→5e-5（首训末期 KL 冲 0.27，步子太大）
 ENT_W, VF_W = 0.01, 0.25
 GAMMA, LAM = 0.99, 0.95
 KL_STOP = 0.05            # 每 epoch 估计 KL，超阈值早停（防策略一步迈太大）
+LOGSTD_MAX = 0.1          # 第二轮：σ 上限收紧（e^0.1≈1.11，防探索噪声漂大稀释策略）
+CKPT_EVERY = 10           # 每 10 个 update 存一版滚动备份（ppo-weights-g{N}.json，可回滚）
 
 rng = np.random.default_rng(7)
 
@@ -165,7 +167,7 @@ def gae_and_update(obs, act, logp_old, rew, done, tid, last_obs_by_tid):
                 LOGSTD_ADAM['m'] = 0.9 * LOGSTD_ADAM['m'] + 0.1 * dlogstd
                 LOGSTD_ADAM['v'] = 0.999 * LOGSTD_ADAM['v'] + 0.001 * dlogstd ** 2
                 mh = LOGSTD_ADAM['m'] / (1 - 0.9 ** t_step); vh = LOGSTD_ADAM['v'] / (1 - 0.999 ** t_step)
-                logStd = np.clip(logStd - LR * mh / (np.sqrt(vh) + 1e-8), -2.5, 0.5)
+                logStd = np.clip(logStd - LR * mh / (np.sqrt(vh) + 1e-8), -2.5, LOGSTD_MAX)
         # —— KL 早停：本 epoch 后新旧策略差超阈值就不再过下一遍数据 ——
         sub = idx_all[:512]
         with lock:
@@ -199,6 +201,9 @@ def save_checkpoint():
     with open(tmp, 'w') as f:
         json.dump(payload, f)
     os.replace(tmp, os.path.join(BASE, 'ppo-weights-latest.json'))
+    if updates > 0 and updates % CKPT_EVERY == 0:   # 滚动备份（本地保留，不进库）
+        with open(os.path.join(BASE, f'ppo-weights-g{gen}.json'), 'w') as f:
+            json.dump(payload, f)
 
 def weights_payload():
     return {'W1': W1.tolist(), 'b1': b1.tolist(), 'W2': W2.tolist(), 'b2': b2.tolist(),

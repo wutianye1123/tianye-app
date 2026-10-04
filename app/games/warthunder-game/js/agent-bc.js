@@ -16,12 +16,12 @@
            : (qs.get('bc') === 'both' || qs.get('bcSide') === 'both') ? 'both' : 'enemy';
   var _ls = '0'; try { _ls = localStorage.getItem('wt_bc') || '0'; } catch (e) { }
   if (_ls === 'ally') SIDE = 'ally';
-  var BCON = qs.get('bc') !== null || _ls === '1' || _ls === 'enemy' || _ls === 'ally';
+  var BCON = qs.get('bc') !== null || _ls === '1' || _ls === 'enemy' || _ls === 'ally' || _ls === 'both';
   if (qs.get('bc') === '0') BCON = false;
   // Q 代打接管：默认开（用户 2026-10-04 要求）
   var QON = qs.get('bcQ') !== '0';
   try { if (localStorage.getItem('wt_bcq') === '0') QON = false; } catch (e) { }
-  if (!BCON && !QON) return;   // 两个特性都关：短路，零执行
+  if (qs.get('bc') === '0' && !QON) return;   // URL 硬关且 Q 也关：短路；否则留给热切换守望器
 
   var CORE = window.__WTA;
   var ASSIST = qs.get('bcAssist') !== '0';   // 开火纪律兜底（默认开）：BC 犹豫但条件齐也开
@@ -61,8 +61,10 @@
   var stats = { bots: 0, fires: 0, thinking: 0, fallbacks: 0, exting: 0, repairs: 0 };
   var NAV_DIST = 0.6;        // 最近敌距离 >0.6(≈270m)：经典 P 控制器进场，交战区才交给 BC
 
+  var piloted = new WeakMap();   // tank -> 原 update（热切换关闭时还原）
   function pilotate(tank, game) {
     var origUpdate = tank.ai.update.bind(tank.ai);   // 保留原规则 AI 作兜底
+    piloted.set(tank, origUpdate);
     var lastThink = 0, act = null, lastEnemies = [], lastObstacles = [];
     var stuck = CORE.makeStuck();   // 卡墙脱困跟踪器
     var tgt = null;                // 集火分散：本机认领的目标
@@ -71,11 +73,12 @@
     stats.bots++;
     tank.ai.update = function bcPilotUpdate(dt, ctx) {
       try {
-        // —— 维护：起火立即灭（8s 冷却自带）+ 边走边修（照 AI 代打副驾驶同款：15/s 回血 + 模块 6/s） ——
+        // —— 维护层：起火即灭（8s 冷却自带）+ 修车 ——
+        // 修车仅蓝方：红方=玩家对手，15hp/s 回血会让弱坦克玩家根本打不死（2026-10-04 用户反馈）
         if (tank.burning) { if (tank.tryExtinguish()) stats.exting++; }
         var mm = tank.modules;
         var modsBroken = mm && (mm.track > 0 || mm.barrel > 0 || mm.engine > 0);
-        if (tank.health < tank.maxHealth || modsBroken) {
+        if ((tank.team !== 'red' || SIDE === 'both') && (tank.health < tank.maxHealth || modsBroken)) {
           if (tank.health < tank.maxHealth) tank.health = Math.min(tank.maxHealth, tank.health + 15 * dt);
           if (mm) {
             if (mm.track > 0) mm.track = Math.max(0, mm.track - dt * 6);
@@ -126,7 +129,8 @@
         if (dE > NAV_DIST * 450) {
           var dx = e0.position.x - tank.position.x, dz = e0.position.z - tank.position.z;
           var hd = CORE.wrap2pi(Math.atan2(dx, dz) - tank.heading);
-          tank.drive(1, Math.max(-1, Math.min(1, hd * 2.2)), dt);
+          var avN = CORE.avoidCmd(tank, lastObstacles, Math.max(-1, Math.min(1, hd * 2.2)), 1);
+          tank.drive(avN.thr, avN.turn, dt);
           tank.aimTurretAt(CORE.gunAimPoint(tank, e0), dt);   // 精确炮手（提前量+下坠补偿）
           stats.nav++;
           return;
@@ -148,7 +152,8 @@
               - tank.heading - (tank.turretYaw || 0));
             if (Math.abs(aimOffQ) < 0.35) { turnCmd *= 0.3; stats.steady = (stats.steady || 0) + 1; }
           }
-          tank.drive(act[0], turnCmd, dt);
+          var av = CORE.avoidCmd(tank, lastObstacles, turnCmd, act[0]);   // 前方障碍几何避让（底线）
+          tank.drive(av.thr, av.turn, dt);
         }
         tank.aimTurretAt(ap, dt);
 
@@ -190,9 +195,9 @@
     if (!el) {
       el = document.createElement('div');
       el.id = '__bcBadge';
-      el.style.cssText = 'position:fixed;top:8px;right:8px;z-index:99999;pointer-events:none;' +
+      el.style.cssText = 'position:fixed;left:12px;top:88px;z-index:99999;pointer-events:none;' +
         'background:rgba(0,0,0,.55);color:#7cf;padding:4px 10px;border-radius:6px;' +
-        'font:12px/1.4 monospace;border:1px solid #46a;';
+        'font:12px/1.4 monospace;border:1px solid #46a;';   // 左上（FPS 下方），避让右侧击杀播报/回放小窗
       (document.body || document.documentElement).appendChild(el);
     }
     el.textContent = '🤖 BC[' + (SIDE === 'ally' ? '队友' : SIDE === 'both' ? '双方' : '敌方') + '] ' +
@@ -201,6 +206,8 @@
       (stats.repairs ? ' · 🔧' + (stats.repairs / 60).toFixed(0) + 's' : '') +
       (stats.fallbacks ? ' · ⚠' + stats.fallbacks + ' fallback' : '');
   }
+
+  var liveSide = BCON ? SIDE : null;   // 当前生效边（热切换守望器维护；URL 模式冻结为加载值）
 
   // ---------- 主流程：加载权重 → 等游戏 → 轮询替换 ----------
   // activate()：供外部（agent-dagger.js 等）程序化激活；URL 方式自动激活
@@ -212,31 +219,56 @@
     }).then(function (w) {
       W = w;
       console.log('[BC] weights loaded: arch 70→' + w.meta.arch.join('→') + '→5, fireTh=' + w.meta.fireTh);
-      if (BCON) {
-        var wait = setInterval(function () {
-          try {
-            var g = window.__game;
-            if (!g || !g.em) return;
-            if (g.state !== 'playing') return;
-            var pool = g.em.tanks || [];
-            for (var i = 0; i < pool.length; i++) {
-              var t = pool[i];
-              if (!t || !t.alive || !t.ai || t.netGhost || done.has(t)) continue;
-              if (t.__pilotedBy && t.__pilotedBy !== 'bc') continue;   // rl 实验体先到先得
-              var want = (SIDE === 'enemy' && t.team === 'red') ||
-                         (SIDE === 'ally' && t.side === 'ally') ||
-                         (SIDE === 'both' && (t.team === 'red' || t.side === 'ally'));
-              if (want) pilotate(t, g);
-            }
-            badge();
-          } catch (e) { /* 轮询永不炸 */ }
-        }, 1000);
-        setInterval(function () {
-          console.log('[BC] stats:', JSON.stringify(stats));
-        }, 20000);
-      }
+      var wait = setInterval(function () {
+        try {
+          var g = window.__game;
+          if (!g || !g.em) return;
+          if (g.state !== 'playing') return;
+          if (!liveSide) { restoreAll(g); return; }   // 热切换已关：还原所有 bot
+          var pool = g.em.tanks || [];
+          for (var i = 0; i < pool.length; i++) {
+            var t = pool[i];
+            if (!t || !t.alive || !t.ai || t.netGhost || done.has(t)) continue;
+            if (t.__pilotedBy && t.__pilotedBy !== 'bc') continue;   // rl 实验体先到先得
+            var want = (liveSide === 'enemy' && t.team === 'red') ||
+                       (liveSide === 'ally' && t.side === 'ally') ||
+                       (liveSide === 'both' && (t.team === 'red' || t.side === 'ally'));
+            if (want) pilotate(t, g);
+          }
+          SIDE = liveSide;   // 修车门/角标跟随热切换后的边
+          badge();
+        } catch (e) { /* 轮询永不炸 */ }
+      }, 1000);
+      setInterval(function () {
+        if (liveSide) console.log('[BC] stats:', JSON.stringify(stats));
+      }, 20000);
       if (QON) startQCopilot();
     });
+  }
+  // —— 热切换守望（模块级）：出战页按钮写 localStorage，0.5s 生效（无需刷新页面）——
+  setInterval(function () {
+    try {
+      var v = '0'; try { v = localStorage.getItem('wt_bc') || '0'; } catch (e) { }
+      if (v === '1') v = 'enemy';
+      var want = (v === 'enemy' || v === 'ally' || v === 'both') ? v : null;
+      if (qs.get('bc') !== null) return;   // URL 模式：加载时冻结，不热切
+      if (want !== liveSide) {
+        liveSide = want;
+        console.log('[BC] 热切换 →', want || '关闭');
+        if (want && !W) activate().catch(function (e) { console.warn('[BC] 激活失败:', e); });
+      }
+    } catch (e) { }
+  }, 500);
+  function restoreAll(g) {
+    try {
+      var pool = (g && g.em && g.em.tanks) || [];
+      for (var i = 0; i < pool.length; i++) {
+        var t = pool[i];
+        if (!t || !piloted.has(t)) continue;
+        try { t.ai.update = piloted.get(t); } catch (e) { }
+        piloted.delete(t); done.delete(t); t.__pilotedBy = null;
+      }
+    } catch (e) { }
   }
 
   // ---------- Q 代打接管（2026-10-04）：游戏自带「AI 代打」的大脑换成第五代 BC ----------
@@ -304,7 +336,8 @@
                 // 远距进场：P 控制器（AI 代打 buff 过的 maxSpeed 生效）
                 var dx = e0.position.x - t.position.x, dz = e0.position.z - t.position.z;
                 var hd = CORE.wrap2pi(Math.atan2(dx, dz) - t.heading);
-                t.drive(1, Math.max(-1, Math.min(1, hd * 2.2)), dt);
+                var avN = CORE.avoidCmd(t, lastObstacles, Math.max(-1, Math.min(1, hd * 2.2)), 1);
+                t.drive(avN.thr, avN.turn, dt);
                 t.aimTurretAt(CORE.gunAimPoint(t, e0), dt);
                 ai.phase = 'BC 进场';
                 return;
@@ -324,7 +357,8 @@
                     - t.heading - (t.turretYaw || 0));
                   if (Math.abs(aimOffQ) < 0.35) turnCmd *= 0.3;
                 }
-                t.drive(act[0], turnCmd, dt);
+                var avQ = CORE.avoidCmd(t, lastObstacles, turnCmd, act[0]);
+                t.drive(avQ.thr, avQ.turn, dt);
               }
               t.aimTurretAt(ap, dt);
               // 开火三重门：地形 LOS + 烟幕纪律 + 收敛
@@ -362,7 +396,7 @@
   }
   window.__BCAPI = { activate: activate };
 
-  activate().catch(function (e) {
+  if (BCON || QON) activate().catch(function (e) {
     console.warn('[BC] weights load failed, BC disabled:', e);
   });
 })();

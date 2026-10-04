@@ -390,7 +390,7 @@ html, body {
 /* AI 代打仪表：屏幕左下小状态行（模式/目标/阶段） */
 #ai-status {
   position: absolute;
-  left: 14px; bottom: 120px;
+  left: 14px; bottom: 200px;   /* 2026-10-04: 120→200，避让下方血量/装填/得分面板（Q 代打四行文本会撑高） */
   font: 12px/1.5 "Microsoft YaHei", sans-serif;
   color: #9fe0b0;
   text-shadow: 0 1px 3px rgba(0,0,0,0.8);
@@ -765,6 +765,7 @@ html, body {
         <button id="btn-worldwar" class="diff-btn">🌍 世界大战：关闭</button>
         <button id="btn-bcai" class="diff-btn">🤖 学习型人机：关闭</button>
         <button id="btn-rlai" class="diff-btn">🧪 第六代实验体：关闭</button>
+        <button id="btn-fair" class="diff-btn">⚔ 公平模式：关</button>
       </div>
       <p class="tip" style="margin:6px 0 14px">世界大战=坦克+飞机混战；两个 🤖/🧪 为 AI 实验开关（尝鲜功能，可能影响平衡）</p>
       <div class="lo-actions"><button id="lo-more-close" class="lo-btn primary">完 成</button></div>
@@ -782,15 +783,17 @@ html, body {
   <script src="./js/agent-bc.js"></script><!-- BC 人机：?bc=1 或出战页开关(localStorage.wt_bc) 才激活，平时空转 -->
   <script src="./js/agent-dagger.js"></script><!-- DAgger 影子老师录制：?dagger=1 才激活，平时空转 -->
   <script src="./js/agent-rl.js"></script><!-- PPO 强化学习人机：?rl=1 / ?rl=ally 才激活，平时空转 -->
+  <script src="./js/fair-mode.js"></script><!-- ⚔ 公平模式：?fair=1 / wt_fair 才激活，平时空转 -->
   <script>
-    // 🤖 学习型人机开关（三态：关闭→敌方→队友）：只写 localStorage 供 agent-bc.js 读取，与 main.js 零耦合
+    // 🤖 学习型人机开关（四态：关闭→敌方→队友→双方）：只写 localStorage，
+    // agent-bc.js 每 0.5s 轮询热切换——点完立即生效，无需刷新页面
     (function () {
       var b = document.getElementById('btn-bcai');
       if (!b) return;
       var v = '0'; try { v = localStorage.getItem('wt_bc') || '0'; } catch (e) { }
       if (v === '1') v = 'enemy';   // 旧值兼容
-      var LABELS = { '0': '关闭', 'enemy': '敌方', 'ally': '队友' };
-      var ORDER = ['0', 'enemy', 'ally'];
+      var LABELS = { '0': '关闭', 'enemy': '敌方', 'ally': '队友', 'both': '双方' };
+      var ORDER = ['0', 'enemy', 'ally', 'both'];
       var sync = function () { b.textContent = '🤖 学习型人机：' + LABELS[v]; };
       b.addEventListener('click', function () {
         v = ORDER[(ORDER.indexOf(v) + 1) % ORDER.length];
@@ -799,18 +802,30 @@ html, body {
       });
       sync();
     })();
-    // 🧪 第六代实验体开关（三态：关闭→敌方→队友）：写 localStorage.wt_rl 供 agent-rl.js 读取。
-    // 实验体=第六代 PPO（确定性推理，静态权重）；与学习型人机同开时同一辆车先到先得、互不干扰。
+    // 🧪 第六代实验体开关（四态：关闭→敌方→队友→双方）：写 localStorage.wt_rl，agent-rl.js 热切换
     (function () {
       var b = document.getElementById('btn-rlai');
       if (!b) return;
       var v = '0'; try { v = localStorage.getItem('wt_rl') || '0'; } catch (e) { }
-      var LABELS = { '0': '关闭', 'enemy': '敌方', 'ally': '队友' };
-      var ORDER = ['0', 'enemy', 'ally'];
+      var LABELS = { '0': '关闭', 'enemy': '敌方', 'ally': '队友', 'both': '双方' };
+      var ORDER = ['0', 'enemy', 'ally', 'both'];
       var sync = function () { b.textContent = '🧪 第六代实验体：' + LABELS[v]; };
       b.addEventListener('click', function () {
         v = ORDER[(ORDER.indexOf(v) + 1) % ORDER.length];
         try { localStorage.setItem('wt_rl', v); } catch (e) { }
+        sync();
+      });
+      sync();
+    })();
+    // ⚔ 公平模式开关（开/关）：红蓝双方坦克数值一致（血/速/装填/伤害/散布）——斗兽场观战用
+    (function () {
+      var b = document.getElementById('btn-fair');
+      if (!b) return;
+      var v = '0'; try { v = localStorage.getItem('wt_fair') || '0'; } catch (e) { }
+      var sync = function () { b.textContent = '⚔ 公平模式：' + (v === '1' ? '开' : '关'); };
+      b.addEventListener('click', function () {
+        v = v === '1' ? '0' : '1';
+        try { localStorage.setItem('wt_fair', v); } catch (e) { }
         sync();
       });
       sync();
