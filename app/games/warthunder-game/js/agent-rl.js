@@ -379,6 +379,134 @@
     }
   }
 
+  // ---------- Q 代打·第六代（2026-10-04 用户要求：Q 换第六代大脑）----------
+  // 默认第六代；localStorage.wt_qgen='5' 或 URL ?qGen=5 切回第五代（agent-bc 那套让位/接管互补）
+  function qGenIs6() {
+    var q = null;
+    try { q = qs.get('qGen'); } catch (e) { }
+    if (q === '5') return false;
+    if (q === '6') return true;
+    try { return localStorage.getItem('wt_qgen') !== '5'; } catch (e) { return true; }
+  }
+  function startQCopilot6() {
+    setInterval(function () {
+      try {
+        var g = window.__game;
+        if (!g || !g._pilotAI) return;
+        var ai = g._pilotAI;
+        if (ai.__rlq !== undefined) return;
+        if (!ai.tank) { ai.__rlq = 'skip'; return; }          // 飞机/直升机：仍用原版
+        if (!qGenIs6()) { ai.__rlq = 'gen5'; return; }        // 五代模式：agent-bc 接管
+        ai.__rlq = true;
+        var t = ai.tank;
+        var origUpdate = ai.update.bind(ai);
+        var lastThink = 0, applied = null, lastEnemies = [], lastObstacles = [];
+        var qStuck = CORE.makeStuck(), qTgt = null;
+        var q = { fires: 0, thinks: 0, fallbacks: 0 };
+        if (!W) {   // 懒加载静态权重（与玩家版同源）
+          fetch(new URL('training/rl-weights.json', location.href).href).then(function (r) { return r.json(); })
+            .then(function (w) { W = w; console.log('[RL] Q 代打权重就位: gen', w.gen); })
+            .catch(function (e) { console.warn('[RL] Q 代打权重加载失败，暂用原版:', e); });
+        }
+        ai.update = function rlQUpdate(dt, ctx) {
+          try {
+            if (!W) return origUpdate(dt, ctx);
+            // 维护（玩家坦克=蓝方，修车开）
+            if (t.burning) { try { t.tryExtinguish(); } catch (e) { } }
+            var mm = t.modules;
+            var mb = mm && (mm.track > 0 || mm.barrel > 0 || mm.engine > 0);
+            if (t.health < t.maxHealth || mb) {
+              if (t.health < t.maxHealth) t.health = Math.min(t.maxHealth, t.health + 15 * dt);
+              if (mm) {
+                if (mm.track > 0) mm.track = Math.max(0, mm.track - dt * 6);
+                if (mm.barrel > 0) mm.barrel = Math.max(0, mm.barrel - dt * 6);
+                if (mm.engine > 0) mm.engine = Math.max(0, mm.engine - dt * 6);
+              }
+            }
+            var now = performance.now();
+            if (now - lastThink >= THINK_MS) {
+              lastThink = now;
+              var em = (ctx && ctx.entityManager) || g.em;
+              lastObstacles = (ctx && ctx.obstacles) || (em && em.obstacles) || [];
+              lastEnemies = CORE.enemiesOf(t, g);
+              var obs = CORE.buildObs(t, g, lastEnemies, lastObstacles);
+              var out = forward(obs);                       // 第六代头：mean 确定性（不采样）
+              applied = [Math.max(-1, Math.min(1, out.m[0])), Math.max(-1, Math.min(1, out.m[1]))];
+              q.thinks++;
+              var newTgt = CORE.pickTarget(t, lastEnemies, qTgt);
+              if (newTgt !== qTgt) { CORE.releaseTarget(t, qTgt); CORE.claimTarget(t, newTgt); qTgt = newTgt; }
+            }
+            if (!applied) return origUpdate(dt, ctx);
+            if (!t.alive) return;
+            var e0 = (qTgt && qTgt.alive) ? qTgt : lastEnemies[0];
+            ai.phase = '六代交战中';
+            if (e0) {
+              var d = Math.hypot(e0.position.x - t.position.x, e0.position.z - t.position.z);
+              var thrIntent = d > NAV_DIST * 450 ? 1 : applied[0];
+              if (qStuck.update(t, thrIntent, dt)) {
+                q.unstick = (q.unstick || 0) + 1;
+                ai.phase = '六代脱困';
+                t.drive(-1, qStuck.dir * 0.9, dt);
+                t.aimTurretAt(CORE.gunAimPoint(t, e0), dt);
+                return;
+              }
+              if (d > NAV_DIST * 450) {
+                var dx = e0.position.x - t.position.x, dz = e0.position.z - t.position.z;
+                var hd = CORE.wrap2pi(Math.atan2(dx, dz) - t.heading);
+                t.drive(1, Math.max(-1, Math.min(1, hd * 2.2)), dt);
+                t.aimTurretAt(CORE.gunAimPoint(t, e0), dt);
+                ai.phase = '六代进场';
+                return;
+              }
+              var ap = CORE.gunAimPoint(t, e0);
+              var converged = CORE.barrelAligned(t, ap, CORE.fireTol(d));
+              var ret = CORE.retreatCmd(t, e0);
+              if (ret) {
+                ai.phase = '六代撤退';
+                q.retreat = (q.retreat || 0) + 1;
+                t.drive(ret.thr, ret.turn, dt);
+              } else {
+                var turnCmd = applied[1];
+                if (!converged && d < 120 && t.canFire()) {
+                  var aimOffQ = CORE.wrap2pi(Math.atan2(ap.x - t.position.x, ap.z - t.position.z)
+                    - t.heading - (t.turretYaw || 0));
+                  if (Math.abs(aimOffQ) < 0.35) turnCmd *= 0.3;
+                }
+                t.drive(applied[0], turnCmd, dt);
+              }
+              t.aimTurretAt(ap, dt);
+              // 开火三重门（纪律兜底，无网络火头）
+              var terrainHold = CORE.terrainLos(t.position.x, t.position.y + 1.8, t.position.z,
+                                                ap.x, ap.y, ap.z);
+              if (terrainHold) q.terrainHold = (q.terrainHold || 0) + 1;
+              var smokeB = CORE.smokeBlind((ctx && ctx.smokes) || [], t.position, e0.position);
+              if (smokeB) q.smokeHold = (q.smokeHold || 0) + 1;
+              if (!terrainHold && !smokeB && converged && t.canFire()) {
+                var dx0 = e0.position.x - t.position.x, dz0 = e0.position.z - t.position.z;
+                if (Math.hypot(dx0, dz0) < 240) {
+                  var aimOff = CORE.wrap2pi(Math.atan2(ap.x - t.position.x, ap.z - t.position.z)
+                    - t.heading - (t.turretYaw || 0));
+                  var losN = CORE.blockedCount(lastObstacles, t.position.x, t.position.z,
+                                               e0.position.x, e0.position.z, 9);
+                  if (Math.abs(aimOff) < 0.06 && losN === 0) {
+                    if (t.tryFire((ctx && ctx.entityManager) || g.em)) q.fires++;
+                  }
+                }
+              }
+            } else {
+              t.drive(applied[0], applied[1], dt);
+            }
+          } catch (e) {
+            q.fallbacks++;
+            if (!q.errLogged) { q.errLogged = 1; console.error('[RL] Q-copilot error:', e); }
+            try { origUpdate(dt, ctx); } catch (e2) { }
+          }
+        };
+        console.log('[RL] Q 代打已换装第六代大脑（确定性；wt_qgen=5 可切回五代）');
+      } catch (e) { /* 轮询永不炸 */ }
+    }, 200);
+  }
+
   // ---------- 徽标 / API ----------
   function badge(txt) {
     var el = document.getElementById('__rlBadge');
@@ -470,5 +598,6 @@
     } catch (e) { }
   }
   if (VIAURL) boot();
+  startQCopilot6();   // Q 代打·第六代（与 agent-bc 的五代版互补让位）
   window.addEventListener('beforeunload', function () { closeAll(true); postNow(true); });
 })();

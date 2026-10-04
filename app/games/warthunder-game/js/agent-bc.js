@@ -200,7 +200,7 @@
         'font:12px/1.4 monospace;border:1px solid #46a;';   // 左上（FPS 下方），避让右侧击杀播报/回放小窗
       (document.body || document.documentElement).appendChild(el);
     }
-    el.textContent = '🤖 BC[' + (SIDE === 'ally' ? '队友' : SIDE === 'both' ? '双方' : '敌方') + '] ' +
+    el.textContent = '🤖 五代[' + (SIDE === 'ally' ? '队友' : SIDE === 'both' ? '双方' : '敌方') + '] ' +
       stats.bots + ' bots · ' + stats.fires + ' fires' +
       (stats.exting ? ' · 🧯' + stats.exting : '') +
       (stats.repairs ? ' · 🔧' + (stats.repairs / 60).toFixed(0) + 's' : '') +
@@ -284,6 +284,10 @@
         var ai = g._pilotAI;
         if (ai.__bcq !== undefined) return;        // 已处理（接管或跳过）；Q 关→对象丢弃，天然还原
         if (!ai.tank) { ai.__bcq = 'skip'; return; }   // PlaneAI/HeliAI：仍用原版
+        // 第六代接管模式（2026-10-04 默认）：让位给 agent-rl 的 Q 代打
+        var _qg = null; try { _qg = localStorage.getItem('wt_qgen'); } catch (e) { }
+        var gen6 = qs.get('qGen') === '6' || (qs.get('qGen') !== '5' && _qg !== '5');
+        if (gen6) { ai.__bcq = 'gen6'; return; }
         ai.__bcq = true;
         var t = ai.tank;
         var origUpdate = ai.update.bind(ai);

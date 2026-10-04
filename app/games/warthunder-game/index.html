@@ -763,9 +763,10 @@ html, body {
       <h2 style="letter-spacing:3px">⚙ 更多选项</h2>
       <div style="display:flex;flex-direction:column;gap:10px;margin:18px 0 8px">
         <button id="btn-worldwar" class="diff-btn">🌍 世界大战：关闭</button>
-        <button id="btn-bcai" class="diff-btn">🤖 学习型人机：关闭</button>
-        <button id="btn-rlai" class="diff-btn">🧪 第六代实验体：关闭</button>
+        <button id="btn-bcai" class="diff-btn">🤖 第五代人机：关闭</button>
+        <button id="btn-rlai" class="diff-btn">🧪 第六代人机：关闭</button>
         <button id="btn-fair" class="diff-btn">⚔ 公平模式：关</button>
+        <button id="btn-qgen" class="diff-btn">🎮 Q 代打：第六代</button>
       </div>
       <p class="tip" style="margin:6px 0 14px">世界大战=坦克+飞机混战；两个 🤖/🧪 为 AI 实验开关（尝鲜功能，可能影响平衡）</p>
       <div class="lo-actions"><button id="lo-more-close" class="lo-btn primary">完 成</button></div>
@@ -785,7 +786,7 @@ html, body {
   <script src="./js/agent-rl.js"></script><!-- PPO 强化学习人机：?rl=1 / ?rl=ally 才激活，平时空转 -->
   <script src="./js/fair-mode.js"></script><!-- ⚔ 公平模式：?fair=1 / wt_fair 才激活，平时空转 -->
   <script>
-    // 🤖 学习型人机开关（四态：关闭→敌方→队友→双方）：只写 localStorage，
+    // 🤖 第五代人机开关（原「学习型人机」，四态：关闭→敌方→队友→双方）：只写 localStorage，
     // agent-bc.js 每 0.5s 轮询热切换——点完立即生效，无需刷新页面
     (function () {
       var b = document.getElementById('btn-bcai');
@@ -794,7 +795,7 @@ html, body {
       if (v === '1') v = 'enemy';   // 旧值兼容
       var LABELS = { '0': '关闭', 'enemy': '敌方', 'ally': '队友', 'both': '双方' };
       var ORDER = ['0', 'enemy', 'ally', 'both'];
-      var sync = function () { b.textContent = '🤖 学习型人机：' + LABELS[v]; };
+      var sync = function () { b.textContent = '🤖 第五代人机：' + LABELS[v]; };
       b.addEventListener('click', function () {
         v = ORDER[(ORDER.indexOf(v) + 1) % ORDER.length];
         try { localStorage.setItem('wt_bc', v); } catch (e) { }
@@ -802,17 +803,30 @@ html, body {
       });
       sync();
     })();
-    // 🧪 第六代实验体开关（四态：关闭→敌方→队友→双方）：写 localStorage.wt_rl，agent-rl.js 热切换
+    // 🧪 第六代人机开关（原「实验体」，四态：关闭→敌方→队友→双方）：写 localStorage.wt_rl，agent-rl.js 热切换
     (function () {
       var b = document.getElementById('btn-rlai');
       if (!b) return;
       var v = '0'; try { v = localStorage.getItem('wt_rl') || '0'; } catch (e) { }
       var LABELS = { '0': '关闭', 'enemy': '敌方', 'ally': '队友', 'both': '双方' };
       var ORDER = ['0', 'enemy', 'ally', 'both'];
-      var sync = function () { b.textContent = '🧪 第六代实验体：' + LABELS[v]; };
+      var sync = function () { b.textContent = '🧪 第六代人机：' + LABELS[v]; };
       b.addEventListener('click', function () {
         v = ORDER[(ORDER.indexOf(v) + 1) % ORDER.length];
         try { localStorage.setItem('wt_rl', v); } catch (e) { }
+        sync();
+      });
+      sync();
+    })();
+    // 🎮 Q 代打选代（第六代⇄第五代）：写 localStorage.wt_qgen；下次按 Q 生效（Q 关→开即换脑）
+    (function () {
+      var b = document.getElementById('btn-qgen');
+      if (!b) return;
+      var v = '6'; try { v = localStorage.getItem('wt_qgen') || '6'; } catch (e) { }
+      var sync = function () { b.textContent = '🎮 Q 代打：' + (v === '5' ? '第五代' : '第六代'); };
+      b.addEventListener('click', function () {
+        v = v === '5' ? '6' : '5';
+        try { localStorage.setItem('wt_qgen', v); } catch (e) { }
         sync();
       });
       sync();
