@@ -112,7 +112,7 @@ button:hover{background:#333d49;border-color:#4a5563}
 
 <div id="battlebar" class="hidden">
   <button id="btnBack">返回部署</button>
-  <span id="btip">战斗进行中 · 拖动旋转 / 滚轮缩放 · 可暂停观察战局</span>
+  <span id="btip">战斗进行中 · 点击士兵操控（WASD 移动 · 点击敌人锁定目标 · F 取消）· 拖动旋转 · 滚轮缩放 · 空格暂停</span>
 </div>
 
 <div id="overlay" class="hidden">
@@ -240,6 +240,8 @@ var projectiles = [], floaters = [], lightnings = [];
 var budget = [2000, 2000];
 var infiniteMoney = false;
 var curType = 'swordsman';
+var controlled = null;         // 玩家操控的士兵
+var keys = {};                 // 键盘状态（WASD/方向键）
 var SPEEDS = [0.5, 1, 2], speedIdx = 1, paused = false;
 var battleTime = 0, kills = [0, 0], startCounts = [0, 0], unitTotals = [0, 0];
 var winner = -1, endT = 0, seq = 1;
@@ -927,17 +929,20 @@ function startBattle() {
   }
   clearBattleVisuals();
   units = placed.map(spawnUnit);
+  controlled = null;
   kills = [0, 0]; battleTime = 0; winner = -1; endT = 0; paused = false;
   startCounts = [teamCount(0), teamCount(1)];
   unitTotals = [startCounts[0], startCounts[1]];
   state = 'battle';
   overlay.classList.add('hidden');
   cam.tx = W3 / 2; cam.tz = D3 / 2;
+  toast('战斗中点击任意士兵即可亲自操控（WASD 移动 · 点击敌人锁定目标）');
 }
 function backToPlace() {
   state = 'place';
   overlay.classList.add('hidden');
   paused = false;
+  controlled = null;
   clearBattleVisuals();
   battleTime = 0; winner = -1;
 }
@@ -1001,6 +1006,7 @@ function kill(t, src) {
   if (!t.alive) return;
   t.alive = false;
   t.deadT = 0;
+  if (t === controlled) { controlled = null; toast('你操控的士兵阵亡了，点击其他士兵可继续操控'); }
   if (src && src.team !== undefined && kills[src.team] !== undefined) kills[src.team]++;
   burst(t.x, t.z, 8, 0x7d2a2a, 4, 1.4);
   if (t.bar) t.bar.pivot.visible = false;
@@ -1185,7 +1191,45 @@ function simUnits(dt) {
     var edge = d - u.r - t.r;
     var def = u.def, mvx = 0, mvz = 0;
     var spdMult = u.slowT > 0 ? (u.slowFactor || 0.55) : 1;
-    if (def.kind === 'kamikaze') {
+    if (u === controlled) {
+      /* 玩家操控：自动攻击 + 键盘移动（方向随相机朝向） */
+      if (def.kind === 'kamikaze') {
+        if (edge < 2.4) { kill(u, null); continue; }
+      } else if (def.kind === 'heal') {
+        if (u.cd <= 0) {
+          var pHealed = false;
+          for (var phi = 0; phi < units.length; phi++) {
+            var pha = units[phi];
+            if (!pha.alive || pha.team !== u.team || pha === u) continue;
+            if (pha.hp < pha.maxHp - 4 && hyp(pha.x - u.x, pha.z - u.z) <= def.heal.r * S) {
+              var pAmt = Math.min(def.heal.amt, pha.maxHp - pha.hp);
+              pha.hp += pAmt; pHealed = true;
+              floaterAdd(pha.x, pha.z, '+' + Math.round(pAmt), '#7de37d', 12);
+            }
+          }
+          u.cd = pHealed ? def.cd : 0.4;
+        }
+      } else if (edge <= def.range * S) {
+        u.face = Math.atan2(dz, dx);
+        if (u.cd <= 0) {
+          if (def.kind === 'ranged') rangedAttack(u, t);
+          else meleeAttack(u, t);
+        }
+      }
+      /* 键盘输入 -> 相机相对方向（W 永远朝屏幕里） */
+      var fw = 0, rt = 0;
+      if (keys.w || keys.arrowup) fw += 1;
+      if (keys.s || keys.arrowdown) fw -= 1;
+      if (keys.d || keys.arrowright) rt += 1;
+      if (keys.a || keys.arrowleft) rt -= 1;
+      if (fw !== 0 || rt !== 0) {
+        var cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
+        var mvx2 = -cy * fw + sy * rt;
+        var mvz2 = -sy * fw - cy * rt;
+        var ml = Math.max(0.001, hyp(mvx2, mvz2));
+        mvx = mvx2 / ml; mvz = mvz2 / ml;
+      }
+    } else if (def.kind === 'kamikaze') {
       if (edge < 2.4) { kill(u, null); continue; }
       mvx = dx / d; mvz = dz / d;
     } else if (def.kind === 'heal') {
@@ -1499,6 +1543,49 @@ var ghost, ghostRing, ghostPillar;
   ghost.visible = false;
   scene.add(ghost);
 })();
+/* ---------- 操控/锁定 3D 标识 ---------- */
+var ctrlMark = null, ctrlRing = null, ctrlCone = null;
+var lockMark = null, lockRing = null;
+(function initCtrlMarks() {
+  ctrlMark = new THREE.Group();
+  ctrlRing = new THREE.Mesh(new THREE.RingGeometry(0.82, 1, 28), new THREE.MeshBasicMaterial({ color: 0xffd76a, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
+  ctrlRing.rotation.x = -Math.PI / 2;
+  ctrlRing.position.y = 0.09;
+  ctrlMark.add(ctrlRing);
+  ctrlCone = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.3, 8), new THREE.MeshBasicMaterial({ color: 0xffd76a, transparent: true, opacity: 0.95 }));
+  ctrlCone.rotation.x = Math.PI;           // 尖朝下
+  ctrlMark.add(ctrlCone);
+  ctrlMark.visible = false;
+  scene.add(ctrlMark);
+  lockMark = new THREE.Group();
+  lockRing = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 4), new THREE.MeshBasicMaterial({ color: 0xff5040, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
+  lockRing.rotation.x = -Math.PI / 2;
+  lockRing.position.y = 0.09;
+  lockMark.add(lockRing);
+  lockMark.visible = false;
+  scene.add(lockMark);
+})();
+function updateCtrlMarks(now) {
+  var show = controlled && controlled.alive && state !== 'place';
+  ctrlMark.visible = !!show;
+  if (show) {
+    var u = controlled;
+    ctrlMark.position.set(u.x, u.flyH || 0, u.z);
+    var rs = Math.max(1, u.r * 1.3);
+    ctrlRing.scale.setScalar(rs);
+    ctrlRing.rotation.z = now / 600;       // 缓慢旋转
+    ctrlCone.position.y = u.r * 3.4 + 1.6 + Math.sin(now / 200) * 0.35;
+  }
+  var lk = show && controlled.target && controlled.target.alive && state !== 'place';
+  lockMark.visible = !!lk;
+  if (lk) {
+    var e2 = controlled.target;
+    lockMark.position.set(e2.x, 0, e2.z);
+    var ls = Math.max(1.2, e2.r * 1.35) * (1 + Math.sin(now / 160) * 0.1);   // 脉动
+    lockRing.scale.setScalar(ls);
+    lockRing.rotation.z = now / 400;
+  }
+}
 function groundPoint(sx, sy) {
   var nx = (sx / innerWidth) * 2 - 1, ny = -(sy / innerHeight) * 2 + 1;
   v3.set(nx, ny, 0.5).unproject(camera);
@@ -1548,9 +1635,20 @@ cvs.addEventListener('pointerdown', function (e) {
     drag = { mode: 'rmb', sx: e.clientX, sy: e.clientY, moved: false };
     return;
   }
-  if (e.button === 0) drag = { mode: 'rotate', sx: e.clientX, sy: e.clientY };
+  if (e.button === 0) drag = { mode: 'rotate', sx: e.clientX, sy: e.clientY, ox: e.clientX, oy: e.clientY };
   else if (e.button === 2) drag = { mode: 'pan', sx: e.clientX, sy: e.clientY };
 });
+/* 战斗中点击（非拖动）选择操控单位 / 锁定目标 */
+function pickUnitAt(wx, wz) {
+  var pick = null, pd = 1e9;
+  for (var i = 0; i < units.length; i++) {
+    var u = units[i];
+    if (!u.alive) continue;
+    var d = hyp(u.x - wx, u.z - wz);
+    if (d < u.r + 1.2 && d < pd) { pd = d; pick = u; }
+  }
+  return pick;
+}
 window.addEventListener('pointermove', function (e) {
   var w = groundPoint(e.clientX, e.clientY);
   if (w) { mouse.x = w.x; mouse.z = w.z; }
@@ -1591,8 +1689,27 @@ window.addEventListener('pointermove', function (e) {
     }
   }
 });
-window.addEventListener('pointerup', function () {
+window.addEventListener('pointerup', function (e) {
   if (drag && drag.mode === 'rmb' && !drag.moved && state === 'place') removeNear(mouse.x, mouse.z);
+  if (drag && drag.mode === 'rotate' && (state === 'battle' || state === 'ending')) {
+    /* 位移极小 = 点击：选择操控单位 / 锁定目标 */
+    if (Math.abs(e.clientX - drag.ox) + Math.abs(e.clientY - drag.oy) < 6 && mouse.in) {
+      var pick = pickUnitAt(mouse.x, mouse.z);
+      if (pick) {
+        if (controlled && pick !== controlled && pick.team !== controlled.team) {
+          controlled.target = pick;
+          controlled.retarget = 9999;
+          toast('已锁定目标：' + pick.def.name);
+        } else if (pick !== controlled) {
+          controlled = pick;
+          toast('操控中：' + pick.def.name + ' · WASD/方向键移动 · 点击敌人锁定目标 · F 取消');
+        } else {
+          controlled = null;
+          toast('已取消操控');
+        }
+      }
+    }
+  }
   drag = null;
 });
 cvs.addEventListener('contextmenu', function (e) { e.preventDefault(); });
@@ -1608,6 +1725,9 @@ window.addEventListener('resize', function () {
   renderer.setSize(innerWidth, innerHeight);
 });
 window.addEventListener('keydown', function (e) {
+  var k = e.key.toLowerCase();
+  keys[k] = true;
+  if (k === 'f' && controlled) { controlled = null; toast('已取消操控'); }
   if (e.key >= '1' && e.key <= '9') {
     var i = +e.key - 1;
     if (i < DEF_ORDER.length) { curType = DEF_ORDER[i]; refreshCards(); }
@@ -1617,6 +1737,10 @@ window.addEventListener('keydown', function (e) {
     if (state !== 'place') backToPlace();
   }
 });
+window.addEventListener('keyup', function (e) {
+  keys[e.key.toLowerCase()] = false;
+});
+window.addEventListener('blur', function () { keys = {}; });
 
 /* ---------- 卡片 / 按钮 ---------- */
 (function buildCards() {
@@ -1762,6 +1886,7 @@ function frame(now) {
   renderProjectiles();
   renderFloaters();
   updateGhost();
+  updateCtrlMarks(now);
   updateHUD();
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
