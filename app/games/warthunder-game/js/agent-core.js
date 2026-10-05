@@ -164,12 +164,25 @@
   // 做法：炮口→瞄准点线段采样 8 点，任一点地形高度（+0.4m 余量）高过弹道线 → 挡。
   // terrainHeight 来自 lib.js（动态 import 同一模块实例，terrainMode/Scale 状态与 main.js 同步）；
   // lib 未就绪或地图平坦时按"不挡"处理（与旧版行为一致，绝不因它停火卡死）。
-  var _libTH = null;
-  try {
-    import(new URL('js/lib.js', location.href).href).then(function (m) {
-      _libTH = m.terrainHeight;
-    }).catch(function (e) { console.warn('[WTA] lib.js import 失败，地形 LOS 不可用:', e); });
-  } catch (e) { /* 老环境不支持动态 import：静默降级 */ }
+  var _libTH = null, _libTries = 0;
+  function tryLib() {   // 偶发 import 失败（加载期连接被掐）→ 重试最多 5 次。
+    // ⚠️ 必须【同 URL】重试，绝不能加 cache-buster 之类改 URL 的参数——
+    // lib.js 的 terrainMode/terrainScale 是模块级状态，URL 不同=另一个实例=没被 main.js 设置过，
+    // terrainHeight 会用默认地形参数算高度 → 地形 LOS 大量误拦开火（2026-10-05 五/六代集体
+    // 变慢 2.6 倍事故：202s→520s，教训同踩坑#12「同一模块实例」）。
+    // 失败的动态 import 不会被 memoize，同 URL 重试会重新 fetch。
+    if (_libTH || _libTries >= 5) return;
+    _libTries++;
+    try {
+      import(new URL('js/lib.js', location.href).href).then(function (m) {
+        _libTH = m.terrainHeight;
+      }).catch(function (e) {
+        console.warn('[WTA] lib.js import 失败(第' + _libTries + '次)，稍后重试:', e && e.message);
+        setTimeout(tryLib, 2000);
+      });
+    } catch (e) { /* 老环境不支持动态 import：静默降级 */ }
+  }
+  tryLib();
   function terrainLos(x0, y0, z0, x1, y1, z1) {
     if (!_libTH) return false;
     for (var i = 1; i <= 8; i++) {

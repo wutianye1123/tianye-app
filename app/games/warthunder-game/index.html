@@ -765,6 +765,7 @@ html, body {
         <button id="btn-worldwar" class="diff-btn">🌍 世界大战：关闭</button>
         <button id="btn-bcai" class="diff-btn">🤖 第五代人机：关闭</button>
         <button id="btn-rlai" class="diff-btn">🧪 第六代人机：关闭</button>
+        <button id="btn-rl7ai" class="diff-btn">🚀 第七代人机：关闭</button>
         <button id="btn-fair" class="diff-btn">⚔ 公平模式：关</button>
         <button id="btn-qgen" class="diff-btn">🎮 Q 代打：第六代</button>
       </div>
@@ -784,6 +785,7 @@ html, body {
   <script src="./js/agent-bc.js"></script><!-- BC 人机：?bc=1 或出战页开关(localStorage.wt_bc) 才激活，平时空转 -->
   <script src="./js/agent-dagger.js"></script><!-- DAgger 影子老师录制：?dagger=1 才激活，平时空转 -->
   <script src="./js/agent-rl.js"></script><!-- PPO 强化学习人机：?rl=1 / ?rl=ally 才激活，平时空转 -->
+  <script src="./js/agent-rl7.js"></script><!-- 第七代人机（端到端瞄准开火）：?rl7=1 / wt_rl7 才激活，平时空转 -->
   <script src="./js/fair-mode.js"></script><!-- ⚔ 公平模式：?fair=1 / wt_fair 才激活，平时空转 -->
   <script>
     // 🤖 第五代人机开关（原「学习型人机」，四态：关闭→敌方→队友→双方）：只写 localStorage，
@@ -814,6 +816,21 @@ html, body {
       b.addEventListener('click', function () {
         v = ORDER[(ORDER.indexOf(v) + 1) % ORDER.length];
         try { localStorage.setItem('wt_rl', v); } catch (e) { }
+        sync();
+      });
+      sync();
+    })();
+    // 🚀 第七代人机开关（四态：关闭→敌方→队友→双方）：写 localStorage.wt_rl7，agent-rl7.js 热切换
+    (function () {
+      var b = document.getElementById('btn-rl7ai');
+      if (!b) return;
+      var v = '0'; try { v = localStorage.getItem('wt_rl7') || '0'; } catch (e) { }
+      var LABELS = { '0': '关闭', 'enemy': '敌方', 'ally': '队友', 'both': '双方' };
+      var ORDER = ['0', 'enemy', 'ally', 'both'];
+      var sync = function () { b.textContent = '🚀 第七代人机：' + LABELS[v]; };
+      b.addEventListener('click', function () {
+        v = ORDER[(ORDER.indexOf(v) + 1) % ORDER.length];
+        try { localStorage.setItem('wt_rl7', v); } catch (e) { }
         sync();
       });
       sync();

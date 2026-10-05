@@ -1,0 +1,583 @@
+// agent-rl7.js — 第七代 PPO 人机：端到端瞄准开火（第一课）+ 避让层入壳同训 + 新奖励体系
+// 激活方式（满足其一）：
+//   URL ?rl7=1 / ?rl7=enemy（敌方）/ ?rl7=ally（队友）/ ?rl7=both（双方）——训练用，默认采样+上报
+//   localStorage.wt_rl7 = 'enemy'|'ally'|'both'（出战页「🚀 第七代人机」按钮写入）——玩家用，
+//     默认确定性推理（不采样不上报）+ 静态权重 training/rl7-weights.json
+//   ?rl7=0 强制关。平时（全未激活）第一行就 return，零影响。
+// 参数：rlNoise=0 确定性 / rl7Srv=<url> 训练服务器（默认 :8771）/ rl7W=<path> 静态权重 /
+//       rl7Assist=0 关开火纪律兜底 / rl7Dump=1 调试
+// 架构（第七代，与训练壳严格一致——改壳=改环境，改完必须重训）：
+//   维护层   🧯灭火 + 🔧修车（每帧，与五/六代同款）
+//   远距(>270m)  P 控制器进场 + avoidCmd 避让 + 精确炮手（脚本段，不采样）
+//   脱困/撤退    驾驶脚本接管；瞄准/开火仍走网络（交战区内统一，训练=部署）
+//   交战区   PPO 全控：drive(thr,turn)+avoidCmd 避让（部署同款入壳）/ aimTurretAt(网络瞄准点) /
+//            开火 = 网络火头 ∪ 纪律兜底，物理门（地形LOS/烟幕/障碍LOS/炮口收敛/240m/装填）硬拦
+//   动作 5 维 [thr, turn, aimYaw, aimPitch, fire]：前 4 高斯（σ 逐维上限：驾驶 1.11/瞄准 0.15），
+//            fire 伯努利；执行时 thr/turn/aim clamp，aim 反算世界点喂 aimTurretAt（与录制标签互逆）
+//   奖励    击杀+10 / 命中+2 / 被命中-2 / 阵亡-10 / 开火-0.05 / 出环带[60,260]m -0.01/步
+//          + 撞障罚（脱困触发 -0.5）+ 干净接近奖(+0.01×Δdist/10) + 朝敌奖(+0.003×cos)
+//          + 绕圈罚(-0.03/步：4s 窗里程>15m 且 净位移比<0.3 且 窗口内未开火——治绕圈，不误伤缠斗)
+//   归因/上报 同六代：旁听 checkCollisions 逐弹归因；每 256 步或 15s POST /rollout
+(function () {
+  'use strict';
+  var qs = new URLSearchParams(location.search);
+  var _l7 = '0'; try { _l7 = localStorage.getItem('wt_rl7') || '0'; } catch (e) { }
+  var VIAURL = qs.get('rl7') !== null;
+  if (qs.get('rl7') === '0') return;   // URL 硬关：短路；localStorage 状态交给模块级热切换守望器
+  var SIDE = (qs.get('rl7') === 'ally' || qs.get('rl7Side') === 'ally') ? 'ally'
+           : (qs.get('rl7') === 'both' || qs.get('rl7Side') === 'both' || _l7 === 'both') ? 'both'
+           : (qs.get('rl7') === 'enemy' || qs.get('rl7Side') === 'enemy') ? 'enemy'
+           : (_l7 === 'ally' ? 'ally' : 'enemy');
+  var TRAIN = VIAURL ? qs.get('rl7Noise') !== '0' : false;   // URL 训练默认开；玩家按钮=确定性
+  var SRV = qs.get('rl7Srv') || (location.protocol + '//' + location.hostname + ':8771');
+  var WFILE = qs.get('rl7W') || (VIAURL ? null : 'training/rl7-weights.json');
+  var ASSIST = qs.get('rl7Assist') !== '0';
+  var DUMP = qs.get('rl7Dump') === '1';
+
+  var CORE = window.__WTA;
+  var THINK_MS = 100;                 // 10Hz（与 BC/录制/六代同款）
+  var NAV_DIST = 0.6;                 // >0.6(270m) 走 P 控制器（脚本段）
+  var BAND_LO = 60, BAND_HI = 260;    // 交战环带（米）
+  var POST_EVERY = 256, POST_MS = 15000;
+  var HALF_LOG_2PI = 0.5 * Math.log(2 * Math.PI);
+  // —— 新奖励常数（第七代） ——
+  var STUCK_PEN = 0.5;                // 撞障罚：脱困触发一次性 -0.5
+  var APPROACH_K = 0.01 / 10;         // 干净接近奖：+0.01×Δdist/10（每米 0.001）
+  var APPROACH_CAP = 20;              // 单步 Δdist 封顶（防换目标/传送虚增）
+  var FACE_K = 0.003;                 // 朝敌奖：+0.003×max(0,cos 朝敌角)（治绕圈·正向）
+  var TRAIL_N = 40;                   // 绕圈检测窗：40 步 = 4s
+  var TRAIL_PATH_MIN = 15;            // 窗口里程阈值（m）：低于它=没在跑，不判绕圈
+  var TRAIL_RATIO = 0.3;              // 净位移/里程 < 0.3 = 绕圈/空转（直线冲敌≈0.9）
+  var CIRCLE_PEN = 0.03;              // 绕圈罚：-0.03/步（连续绕 10s=-3.0；窗口内开过火不罚=合法缠斗）
+  var FIRE_TA = 0.12, FIRE_TB = 0.6;  // fire 对数尺度温度（与 ppo7_train.py 同值）：BC 火头 logit mean=-27，
+                                      // 固定偏置无法校准；训练采样/logp 同用 sigmoid(a·f+b)；
+                                      // 评测不带温度（保守）+纪律兜底
+
+  var winId = qs.get('farmSeed') || ('w' + Math.floor(Math.random() * 1e6));
+  var tidSeq = 0;
+
+  // ---------- PPO 网络前向（trunk 与 BC 同构；头 6 输出 [mean×4, fireLogit, value]） ----------
+  var W = null;   // {W1,b1,W2,b2,W3,b3, logStd[4], norm{mu,sd}, gen}
+  function matvec(x, M, b) {
+    var out = new Float32Array(b.length);
+    for (var j = 0; j < b.length; j++) {
+      var s = 0;
+      for (var i = 0; i < x.length; i++) s += x[i] * M[i][j];
+      out[j] = s + b[j];
+    }
+    return out;
+  }
+  function forward(obs) {   // → {m:[thr,turn,yaw,pitch], f:fireLogit, v:value}
+    var x = new Float32Array(obs.length), i;
+    for (i = 0; i < obs.length; i++) x[i] = (obs[i] - W.norm.mu[i]) / W.norm.sd[i];
+    var h1 = matvec(x, W.W1, W.b1);
+    for (i = 0; i < h1.length; i++) if (h1[i] < 0) h1[i] = 0;
+    var h2 = matvec(h1, W.W2, W.b2);
+    for (i = 0; i < h2.length; i++) if (h2[i] < 0) h2[i] = 0;
+    var out = matvec(h2, W.W3, W.b3);   // 6 维
+    return { m: [out[0], out[1], out[2], out[3]], f: out[4], v: out[5] };
+  }
+  function gauss() {
+    var u = 0, v = 0;
+    while (!u) u = Math.random();
+    while (!v) v = Math.random();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+  function clamp1(v) { return v < -1 ? -1 : (v > 1 ? 1 : v); }
+
+  // 网络瞄准点：aimYaw(±1→±π 相对车体) × aimPitch(±1→±0.3rad) 反算世界点。
+  // 与录制端互逆：录制标签 = aimTurretAt(点) 的方向/俯仰归一；执行端用同一公式还原点。
+  function netAimPoint(tank, a2, a3, dist) {
+    var horiz = Math.max(30, dist || 200);
+    var wh = tank.heading + clamp1(a2) * Math.PI;
+    var pitch = clamp1(a3) * 0.3;
+    return { x: tank.position.x + Math.sin(wh) * horiz,
+             y: tank.position.y + 2.0 + Math.tan(pitch) * horiz,
+             z: tank.position.z + Math.cos(wh) * horiz };
+  }
+
+  // ---------- 权重加载：静态文件（评测/玩家）或 PPO 服务器拉模式（训练） ----------
+  var stats = { bots: 0, thinking: 0, steps: 0, posts: 0, postErr: 0, kills: 0, hits: 0,
+                taken: 0, deaths: 0, fires: 0, nav: 0, fallbacks: 0, gen: -1,
+                stuckPen: 0, circlePen: 0, circleTrig: 0, assistFire: 0, netFire: 0,
+                terrainHold: 0, smokeHold: 0, alignHold: 0, blockedHold: 0 };
+
+  function loadStatic() {
+    return fetch(new URL(WFILE, location.href).href).then(function (r) {
+      if (!r.ok) throw new Error('rl7W http ' + r.status);
+      return r.json();
+    }).then(function (w) {
+      W = w; stats.gen = w.gen;
+      console.log('[RL7] static weights loaded: gen=' + w.gen);
+    });
+  }
+  function pullWeights() {
+    return fetch(SRV + '/weights').then(function (r) { return r.json(); }).then(function (w) {
+      W = w; stats.gen = w.gen;
+      console.log('[RL7] weights pulled: gen=' + w.gen + ' logStd=[' +
+        w.logStd.map(function (x) { return x.toFixed(2); }).join(',') + ']');
+    });
+  }
+  function startWeightSync() {
+    if (WFILE) return loadStatic().catch(function (e) { console.warn('[RL7] static load failed:', e); });
+    var boot = pullWeights().catch(function (e) {
+      console.warn('[RL7] PPO server not ready, retry:', e);
+      return new Promise(function (res) { setTimeout(res, 3000); }).then(pullWeights);
+    });
+    boot.then(function loop() {
+      setTimeout(function () {
+        fetch(SRV + '/gen').then(function (r) { return r.json(); }).then(function (g) {
+          if (g.gen !== stats.gen) return pullWeights();
+        }).then(loop).catch(function () { setTimeout(loop, 3000); });
+      }, 5000);
+    });
+    return boot;
+  }
+
+  // ---------- 命中事件旁听（奖励归因）：同六代 ----------
+  function hookEmClass(Cls) {
+    if (!Cls || !Cls.prototype || Cls.prototype.__rl7Hooked) return;
+    Cls.prototype.__rl7Hooked = true;
+    var orig = Cls.prototype.checkCollisions;
+    if (!orig) return;
+    Cls.prototype.checkCollisions = function () {
+      var hits = orig.apply(this, arguments);
+      try { if (hits && hits.length) onHits(hits); } catch (e) { }
+      return hits;
+    };
+    console.log('[RL7] EntityManager.checkCollisions hooked');
+  }
+
+  function onHits(hits) {
+    for (var h, i = 0; i < hits.length; i++) {
+      h = hits[i];
+      pilots.forEach(function (rec, tank) {
+        if (rec.dead) return;
+        if (h.owner === tank && h.target && h.target.team !== tank.team) {
+          if (h.killed) { rec.pend += 10; stats.kills++; }
+          else { rec.pend += 2; stats.hits++; }
+        }
+        if (h.target === tank) {
+          if (h.killed) closeEpisode(tank, true);
+          else { rec.pend -= 2; stats.taken++; }
+        }
+      });
+    }
+  }
+
+  // ---------- 采样记录 ----------
+  var pilots = new Map();
+  var allRecs = [];
+  var pendingSteps = 0;
+
+  function newRec(tank) {
+    tank.__pilotedBy = 'rl7';   // 跨脚本互斥：agent-bc / agent-rl 见此标记不重复接管
+    var rec = {
+      tank: tank, tid: winId + '-' + (++tidSeq), dead: false, pend: 0,
+      applied: null, appliedAim: null, appliedFire: 0, firedSinceThink: false,
+      nextObs: null, lastEnemies: [], lastObstacles: [],
+      stuck: CORE.makeStuck(), tgt: null, prevD: null, prevTgt: null,
+      trail: [],   // 绕圈检测窗：[{x,z,fired}]
+      steps: { obs: [], act: [], logp: [], val: [], rew: [], done: [] }
+    };
+    pilots.set(tank, rec);
+    allRecs.push(rec);
+    return rec;
+  }
+
+  function closeEpisode(tank, died) {
+    var rec = pilots.get(tank);
+    if (!rec || rec.dead) return;
+    rec.dead = true;
+    if (died) { rec.pend -= 10; stats.deaths++; }
+    var n = rec.steps.obs.length;
+    if (n > 0) {
+      rec.steps.rew[n - 1] += rec.pend;
+      rec.steps.done[n - 1] = 1;
+    }
+    rec.pend = 0;
+    pilots.delete(tank);
+  }
+
+  function closeAll(matchOver) {
+    pilots.forEach(function (rec, tank) { closeEpisode(tank, matchOver && !tank.alive); });
+  }
+
+  // ---------- rollout 上报 ----------
+  var gameRef = null;
+  function collectPayload() {
+    var pl = { win: winId, obs: [], act: [], logp: [], val: [], rew: [], done: [], tid: [], lastObsByTid: {} };
+    for (var i = allRecs.length - 1; i >= 0; i--) {
+      var rec = allRecs[i];
+      var n = rec.steps.obs.length;
+      if (!n) { if (rec.dead) allRecs.splice(i, 1); continue; }
+      pl.obs = pl.obs.concat(rec.steps.obs);
+      pl.act = pl.act.concat(rec.steps.act);
+      pl.logp = pl.logp.concat(rec.steps.logp);
+      pl.val = pl.val.concat(rec.steps.val);
+      pl.rew = pl.rew.concat(rec.steps.rew);
+      pl.done = pl.done.concat(rec.steps.done);
+      for (var k = 0; k < n; k++) pl.tid.push(rec.tid);
+      if (!rec.dead) {
+        var boot = rec.nextObs;
+        try {
+          if (gameRef && rec.tank && rec.tank.alive) {
+            boot = CORE.buildObs(rec.tank, gameRef,
+              CORE.enemiesOf(rec.tank, gameRef), rec.lastObstacles || []);
+          }
+        } catch (e) { }
+        if (boot) pl.lastObsByTid[rec.tid] = boot;
+      }
+      rec.steps = { obs: [], act: [], logp: [], val: [], rew: [], done: [] };
+    }
+    pendingSteps = 0;
+    return pl;
+  }
+  function postNow(beacon) {
+    if (!TRAIN) return;
+    var pl = collectPayload();
+    if (!pl.obs.length) return;
+    stats.posts++;
+    if (beacon) {
+      try { navigator.sendBeacon(SRV + '/rollout', JSON.stringify(pl)); } catch (e) { }
+      return;
+    }
+    fetch(SRV + '/rollout', { method: 'POST', body: JSON.stringify(pl) })
+      .catch(function (e) { stats.postErr++; console.warn('[RL7] post failed:', e); });
+  }
+
+  // ---------- 接管坦克（第七代外壳：避让入壳 + 端到端瞄准开火） ----------
+  function tankDist(a, b) { return Math.hypot(b.position.x - a.position.x, b.position.z - a.position.z); }
+
+  function pilotate(tank, game) {
+    var origUpdate = tank.ai.update.bind(tank.ai);
+    var lastThink = 0;
+    var rec = newRec(tank);
+    rec.origUpdate = origUpdate;
+    stats.bots++;
+    tank.ai.update = function rl7PilotUpdate(dt, ctx) {
+      try {
+        // —— 维护层：起火即灭 + 修车（与六代同款：修车仅蓝方；训练模式红方保留=实验环境不变） ——
+        var noRepair = !TRAIN && SIDE !== 'both' && tank.team === 'red' && qs.get('rl7Fair') !== '0';
+        if (tank.burning) { try { tank.tryExtinguish(); } catch (e) { } }
+        if (!noRepair) {
+          var mm = tank.modules;
+          var modsBroken = mm && (mm.track > 0 || mm.barrel > 0 || mm.engine > 0);
+          if (tank.health < tank.maxHealth || modsBroken) {
+            if (tank.health < tank.maxHealth) tank.health = Math.min(tank.maxHealth, tank.health + 15 * dt);
+            if (mm) {
+              if (mm.track > 0) mm.track = Math.max(0, mm.track - dt * 6);
+              if (mm.barrel > 0) mm.barrel = Math.max(0, mm.barrel - dt * 6);
+              if (mm.engine > 0) mm.engine = Math.max(0, mm.engine - dt * 6);
+            }
+          }
+        }
+
+        var now = performance.now();
+        if (now - lastThink >= THINK_MS) {
+          lastThink = now;
+          think(tank, game, rec, ctx);
+        }
+        if (!rec.applied) return origUpdate(dt, ctx);   // 首帧未推理：先用规则 AI
+        if (!tank.alive) return;
+
+        var e0 = (rec.tgt && rec.tgt.alive) ? rec.tgt : rec.lastEnemies[0];
+        if (!e0) {
+          // 无敌可打：按网络心意兜底走 + 网络瞄准（200m 虚拟点）
+          var avE = CORE.avoidCmd(tank, rec.lastObstacles, rec.applied[1], rec.applied[0]);
+          tank.drive(avE.thr, avE.turn, dt);
+          tank.aimTurretAt(netAimPoint(tank, rec.appliedAim[0], rec.appliedAim[1], 200), dt);
+          return;
+        }
+        var dE = tankDist(tank, e0);
+
+        // —— 卡墙脱困（最高优先级，驾驶脚本；触发瞬间撞障罚 -0.5；瞄准/开火仍网络） ——
+        var thrIntent = dE > NAV_DIST * 450 ? 1 : rec.applied[0];
+        var wasU = rec.stuck.unstickT <= 0.01;
+        var unsticking = rec.stuck.update(tank, thrIntent, dt);
+        if (unsticking) {
+          if (wasU) { rec.pend -= STUCK_PEN; stats.stuckPen++; }
+          stats.unstick = (stats.unstick || 0) + 1;
+          tank.drive(-1, rec.stuck.dir * 0.9, dt);
+          engageAimFire(tank, rec, e0, dE, dt, ctx);
+          return;
+        }
+
+        // —— 远距进场：P 控制器 + 避让 + 精确炮手（脚本段，不采样） ——
+        if (dE > NAV_DIST * 450) {
+          var dx = e0.position.x - tank.position.x, dz = e0.position.z - tank.position.z;
+          var hd = CORE.wrap2pi(Math.atan2(dx, dz) - tank.heading);
+          var avN = CORE.avoidCmd(tank, rec.lastObstacles, Math.max(-1, Math.min(1, hd * 2.2)), 1);
+          tank.drive(avN.thr, avN.turn, dt);
+          tank.aimTurretAt(CORE.gunAimPoint(tank, e0), dt);   // 精确炮手（提前量+下坠补偿）
+          stats.nav++;
+          return;
+        }
+
+        // —— 交战区 ——
+        var ret = CORE.retreatCmd(tank, e0);
+        if (ret) {
+          stats.retreat = (stats.retreat || 0) + 1;   // 残血撤退：驾驶脚本，瞄准/开火仍网络
+          tank.drive(ret.thr, ret.turn, dt);
+        } else {
+          var turnCmd = rec.applied[1];
+          // 稳炮：网络瞄准点差一点收敛 → 压一拍转向让炮塔跟上（打完这炮再继续绕）
+          var nap = netAimPoint(tank, rec.appliedAim[0], rec.appliedAim[1], dE);
+          if (!CORE.barrelAligned(tank, nap, CORE.fireTol(dE)) && dE < 120 && tank.canFire()) {
+            var aimOffQ = CORE.wrap2pi(Math.atan2(nap.x - tank.position.x, nap.z - tank.position.z)
+              - tank.heading - (tank.turretYaw || 0));
+            if (Math.abs(aimOffQ) < 0.35) { turnCmd *= 0.3; stats.steady = (stats.steady || 0) + 1; }
+          }
+          // 避让层入壳（与五代部署同款；训练壳=部署壳，六代 311s 事故的教训）
+          var av = CORE.avoidCmd(tank, rec.lastObstacles, turnCmd, rec.applied[0]);
+          tank.drive(av.thr, av.turn, dt);
+        }
+        engageAimFire(tank, rec, e0, dE, dt, ctx);
+      } catch (e) {
+        stats.fallbacks++;
+        if (!stats.errLogged) { stats.errLogged = 1; console.error('[RL7] pilot error:', e); }
+        try { origUpdate(dt, ctx); } catch (e2) { }
+      }
+    };
+  }
+
+  // 交战区瞄准+开火（脱困/撤退/正常共用——训练=部署严格一致）：
+  //   瞄准 = 网络瞄准点；开火 = 网络火头 ∪ 纪律兜底，物理门硬拦
+  function engageAimFire(tank, rec, e0, dE, dt, ctx) {
+    var nap = netAimPoint(tank, rec.appliedAim[0], rec.appliedAim[1], dE);
+    tank.aimTurretAt(nap, dt);
+    if (!tank.canFire() || dE >= 240) return;
+    // 物理门（环境约束，训练/部署同款，不是策略的一部分）：
+    // 地形门查「敌人可达性」（gunAimPoint 敌参考点，与五/六代同口径）——不查网络瞄准点：
+    // 早期网络瞄偏很正常，敌人可达时放行让 miss 自己教；只有敌人真在山后才硬拦
+    var gap = CORE.gunAimPoint(tank, e0);
+    var terrainHold = CORE.terrainLos(tank.position.x, tank.position.y + 1.8, tank.position.z,
+                                      gap.x, gap.y, gap.z);
+    if (terrainHold) stats.terrainHold++;
+    var smokeB = CORE.smokeBlind((ctx && ctx.smokes) || [], tank.position, e0.position);
+    if (smokeB) stats.smokeHold++;
+    var converged = CORE.barrelAligned(tank, nap, CORE.fireTol(dE));   // 炮口跟上网络指令了吗
+    if (!converged) stats.alignHold++;
+    var losN = CORE.blockedCount(rec.lastObstacles, tank.position.x, tank.position.z,
+                                 e0.position.x, e0.position.z, 9);
+    if (losN) stats.blockedHold++;
+    var wantFire = rec.appliedFire === 1;
+    if (wantFire && (terrainHold || smokeB || !converged || losN)) {   // 门径流向：哪道门在卡炮
+      if (terrainHold) stats.blockTerrain = (stats.blockTerrain || 0) + 1;
+      else if (!converged) stats.blockAlign = (stats.blockAlign || 0) + 1;
+      else if (losN) stats.blockLos = (stats.blockLos || 0) + 1;
+      else stats.blockSmoke = (stats.blockSmoke || 0) + 1;
+    }
+    // 纪律兜底仅评测/玩家模式开：训练时开火必须出自策略自己的选择——
+    // 否则「策略采了 fire=0、环境替它开炮命中 +2」会把正优势推给 fire=0 样本，反向教学
+    if (!TRAIN && !wantFire && ASSIST && converged) { wantFire = true; stats.assistWant = (stats.assistWant || 0) + 1; }
+    if (wantFire && !terrainHold && !smokeB && converged && losN === 0) {
+      if (tank.tryFire((ctx && ctx.entityManager) || gameRef.em)) {
+        stats.fires++;
+        if (rec.appliedFire === 1) stats.netFire++; else stats.assistFire++;
+        rec.pend -= 0.05;
+        rec.firedSinceThink = true;
+      }
+    }
+  }
+
+  // 10Hz 思考：奖励塑形（环带/接近/朝敌/绕圈）→ 结转 → 采样 5 维动作（交战区才记步）
+  function think(tank, game, rec, ctx) {
+    var em = (ctx && ctx.entityManager) || game.em;
+    var obstacles = (ctx && ctx.obstacles) || (em && em.obstacles) || [];
+    rec.lastEnemies = CORE.enemiesOf(tank, game);
+    rec.lastObstacles = obstacles;
+    // 目标认领（集火分散）
+    var newTgt = CORE.pickTarget(tank, rec.lastEnemies, rec.tgt);
+    if (newTgt !== rec.tgt) { CORE.releaseTarget(tank, rec.tgt); CORE.claimTarget(tank, newTgt); rec.tgt = newTgt; }
+    var e0 = rec.lastEnemies[0];
+    var d = e0 ? tankDist(tank, e0) : 9999;
+    var inEngage = e0 && d <= NAV_DIST * 450;   // 交战区（导航段不采样——P 控制器脚本驾驶）
+
+    if (inEngage) {
+      // ① 出环带罚（沿用六代）
+      if (d > BAND_HI || d < BAND_LO) rec.pend -= 0.01;
+
+      // ② 干净接近奖（+0.01×Δdist/10）：上一步动作造成敌距变化，归上一步
+      if (rec.tgt !== rec.prevTgt) { rec.prevD = null; rec.prevTgt = rec.tgt; }   // 换目标重置（防虚增）
+      if (rec.prevD !== null && rec.tgt && rec.tgt.alive) {
+        var dd = Math.max(-APPROACH_CAP, Math.min(APPROACH_CAP, rec.prevD - d));
+        rec.pend += APPROACH_K * dd;
+      }
+      rec.prevD = (rec.tgt && rec.tgt.alive) ? d : null;
+
+      // ③ 朝敌奖（+0.003×max(0,cos)）：车头指向最近敌（治绕圈·正向引导）
+      var dxE = e0.position.x - tank.position.x, dzE = e0.position.z - tank.position.z;
+      var distE = Math.hypot(dxE, dzE) || 1;
+      var cosB = (dxE * Math.sin(tank.heading) + dzE * Math.cos(tank.heading)) / distE;
+      if (cosB > 0) rec.pend += FACE_K * cosB;
+
+      // ④ 绕圈罚（-0.03/步）：4s 滑动窗，里程>15m 且净位移比<0.3 且窗口内未开火
+      rec.trail.push({ x: tank.position.x, z: tank.position.z, fired: rec.firedSinceThink });
+      if (rec.trail.length > TRAIL_N) rec.trail.shift();
+      rec.firedSinceThink = false;
+      if (rec.trail.length === TRAIL_N) {
+        var pathLen = 0, firedAny = false, i2;
+        for (i2 = 1; i2 < TRAIL_N; i2++) {
+          pathLen += Math.hypot(rec.trail[i2].x - rec.trail[i2 - 1].x, rec.trail[i2].z - rec.trail[i2 - 1].z);
+          if (rec.trail[i2].fired) firedAny = true;
+        }
+        if (rec.trail[0].fired) firedAny = true;
+        var netDist = Math.hypot(rec.trail[TRAIL_N - 1].x - rec.trail[0].x,
+                                 rec.trail[TRAIL_N - 1].z - rec.trail[0].z);
+        if (!firedAny && pathLen > TRAIL_PATH_MIN && netDist / pathLen < TRAIL_RATIO) {
+          rec.pend -= CIRCLE_PEN;
+          stats.circlePen++;
+          stats.circleTrig++;
+        }
+      }
+    } else {
+      rec.trail.length = 0;   // 离开交战区清窗（导航段不算账）
+    }
+
+    // 结转：上一区间事件奖励归上一动作（导航段发生的事件不归策略——那是 P 控制器在开车）
+    var n = rec.steps.obs.length;
+    if (n > 0 && inEngage) { rec.steps.rew[n - 1] += rec.pend; }
+    rec.pend = 0;
+
+    var obs = CORE.buildObs(tank, game, rec.lastEnemies, obstacles);
+    var out = forward(obs);
+    stats.thinking++;
+
+    var a0, a1, a2, a3, fire, logp = 0;
+    if (TRAIN) {
+      var s0 = Math.exp(W.logStd[0]), s1 = Math.exp(W.logStd[1]),
+          s2 = Math.exp(W.logStd[2]), s3 = Math.exp(W.logStd[3]);
+      var z0 = gauss(), z1 = gauss(), z2 = gauss(), z3 = gauss();
+      a0 = out.m[0] + s0 * z0; a1 = out.m[1] + s1 * z1;
+      a2 = out.m[2] + s2 * z2; a3 = out.m[3] + s3 * z3;
+      logp = (-0.5 * z0 * z0 - W.logStd[0] - HALF_LOG_2PI) +
+             (-0.5 * z1 * z1 - W.logStd[1] - HALF_LOG_2PI) +
+             (-0.5 * z2 * z2 - W.logStd[2] - HALF_LOG_2PI) +
+             (-0.5 * z3 * z3 - W.logStd[3] - HALF_LOG_2PI);
+      // fire 伯努利采样（对数尺度温度，与服务器 logp 同口径）
+      var p = 1 / (1 + Math.exp(-(FIRE_TA * out.f + FIRE_TB)));
+      p = Math.min(1 - 1e-6, Math.max(1e-6, p));
+      fire = Math.random() < p ? 1 : 0;
+      logp += fire ? Math.log(p) : Math.log(1 - p);
+    } else {
+      a0 = out.m[0]; a1 = out.m[1]; a2 = out.m[2]; a3 = out.m[3];   // 评测/玩家：确定均值
+      fire = out.f > 0 ? 1 : 0;                                      // sigmoid>0.5
+    }
+    rec.applied = [clamp1(a0), clamp1(a1)];
+    rec.appliedAim = [clamp1(a2), clamp1(a3)];
+    rec.appliedFire = fire;
+
+    if (TRAIN && inEngage) {
+      // 记步：obs=动作前状态（因果配对），act=未截断原始采样值+fire（与 logp 一致）
+      rec.steps.obs.push(obs);
+      rec.steps.act.push([a0, a1, a2, a3, fire]);
+      rec.steps.logp.push(logp);
+      rec.steps.val.push(out.v);
+      rec.steps.rew.push(0);
+      rec.steps.done.push(0);
+      rec.nextObs = obs;
+      stats.steps++;
+      pendingSteps++;
+      if (pendingSteps >= POST_EVERY) postNow(false);
+      if (DUMP && stats.steps <= 20)
+        console.log('[RL7DUMP] d=' + d.toFixed(0) + ' m=[' + out.m[0].toFixed(2) + ',' + out.m[1].toFixed(2) +
+          ',' + out.m[2].toFixed(2) + ',' + out.m[3].toFixed(2) + '] fireP=' +
+          (1 / (1 + Math.exp(-out.f))).toFixed(2) + ' v=' + out.v.toFixed(2));
+    }
+  }
+
+  // ---------- 徽标 / API ----------
+  function badge(txt) {
+    var el = document.getElementById('__rl7Badge');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = '__rl7Badge';
+      el.style.cssText = 'position:fixed;left:12px;top:140px;z-index:99999;pointer-events:none;' +
+        'background:rgba(0,0,0,.55);color:#fd6;padding:4px 10px;border-radius:6px;' +
+        'font:12px/1.4 monospace;border:1px solid #a84;';   // 五代蓝/六代紫/公平金之下排
+      (document.body || document.documentElement).appendChild(el);
+    }
+    el.textContent = txt;
+  }
+  function badgeText() {
+    return (W ? '🚀 七代[' + (SIDE === 'ally' ? '队友' : SIDE === 'both' ? '双方' : '敌方') + '] gen' + stats.gen +
+      (TRAIN ? ' σ' + Math.exp(W.logStd[0]).toFixed(2) : ' 确定性') :
+      '🚀 七代 等权重…') +
+      ' · ' + stats.bots + ' bots · ' + stats.steps + ' steps · 🎯' + stats.kills + '/' + stats.hits +
+      ' · ☠' + stats.deaths + ' · 🔥' + stats.fires +
+      (stats.circleTrig ? ' · 🔄' + stats.circleTrig : '') +
+      (stats.stuckPen ? ' · 🧱' + stats.stuckPen : '') +
+      (stats.fallbacks ? ' · ⚠' + stats.fallbacks : '');
+  }
+
+  window.__RL7API = { stats: stats, postNow: function () { postNow(false); } };
+
+  // ---------- 主流程 ----------
+  var liveSide = VIAURL ? SIDE : null;   // URL 模式冻结；localStorage 模式由守望器热切
+  var booted = false;
+  function boot() {
+    if (booted) return;
+    booted = true;
+    startWeightSync().then(function () {
+      if (!W) { booted = false; return; }
+      var lastPost = 0;
+      var mount = setInterval(function () {
+        try {
+          var g = window.__game;
+          if (!g || !g.em) return;
+          gameRef = g;
+          if (g.state === 'playing') {
+            if (!liveSide) { restoreAll(g); return; }
+            hookEmClass(g.em.constructor);
+            var pool = g.em.tanks || [];
+            for (var i = 0; i < pool.length; i++) {
+              var t = pool[i];
+              if (!t || !t.alive || !t.ai || t.netGhost || pilots.has(t)) continue;
+              if (t.__pilotedBy && t.__pilotedBy !== 'rl7') continue;   // bc/rl 先到先得（跨脚本互斥）
+              var want = (liveSide === 'enemy' && t.team === 'red') ||
+                         (liveSide === 'ally' && t.side === 'ally') ||
+                         (liveSide === 'both' && (t.team === 'red' || t.side === 'ally'));
+              if (want) { SIDE = liveSide; pilotate(t, g); }
+            }
+          } else if (g.state === 'over') {
+            closeAll(true);
+            if (TRAIN && Date.now() - lastPost > 3000) { lastPost = Date.now(); postNow(false); }
+          }
+          pilots.forEach(function (rec, tank) { if (!tank.alive) closeEpisode(tank, true); });
+          if (TRAIN && Date.now() - lastPost > POST_MS) { lastPost = Date.now(); postNow(false); }
+          badge(badgeText());
+        } catch (e) { /* 轮询永不炸 */ }
+      }, 500);
+      setInterval(function () { if (liveSide || TRAIN) console.log('[RL7] stats:', JSON.stringify(stats)); }, 20000);
+    });
+  }
+  // —— 热切换守望（模块级）：出战页「🚀 第七代人机」写 localStorage，0.5s 生效免刷新 ——
+  setInterval(function () {
+    try {
+      var v = '0'; try { v = localStorage.getItem('wt_rl7') || '0'; } catch (e) { }
+      var want = (v === 'enemy' || v === 'ally' || v === 'both') ? v : null;
+      if (VIAURL) return;
+      if (want !== liveSide) {
+        liveSide = want;
+        console.log('[RL7] 热切换 →', want || '关闭');
+        if (want) { SIDE = want; boot(); }
+      }
+    } catch (e) { }
+  }, 500);
+  function restoreAll(g) {
+    try {
+      var pool = (g && g.em && g.em.tanks) || [];
+      for (var i = 0; i < pool.length; i++) {
+        var t = pool[i];
+        if (!t) continue;
+        var rec = pilots.get(t);
+        if (rec && rec.origUpdate) { try { t.ai.update = rec.origUpdate; } catch (e) { } }
+        pilots.delete(t);
+        if (t.__pilotedBy === 'rl7') t.__pilotedBy = null;
+      }
+    } catch (e) { }
+  }
+  if (VIAURL) boot();
+  window.addEventListener('beforeunload', function () { closeAll(true); postNow(true); });
+})();
