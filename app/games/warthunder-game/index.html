@@ -835,14 +835,15 @@ html, body {
       });
       sync();
     })();
-    // 🎮 Q 代打选代（第六代⇄第五代）：写 localStorage.wt_qgen；下次按 Q 生效（Q 关→开即换脑）
+    // 🎮 Q 代打选代（第五代⇄第六代⇄第七代B，默认七代）：写 localStorage.wt_qgen；下次按 Q 生效
     (function () {
       var b = document.getElementById('btn-qgen');
       if (!b) return;
-      var v = '6'; try { v = localStorage.getItem('wt_qgen') || '6'; } catch (e) { }
-      var sync = function () { b.textContent = '🎮 Q 代打：' + (v === '5' ? '第五代' : '第六代'); };
+      var v = '7'; try { v = localStorage.getItem('wt_qgen') || '7'; } catch (e) { }
+      var NAME = { '5': '第五代', '6': '第六代', '7': '第七代' };
+      var sync = function () { b.textContent = '🎮 Q 代打：' + (NAME[v] || '第七代'); };
       b.addEventListener('click', function () {
-        v = v === '5' ? '6' : '5';
+        v = v === '5' ? '6' : (v === '6' ? '7' : '5');
         try { localStorage.setItem('wt_qgen', v); } catch (e) { }
         sync();
       });

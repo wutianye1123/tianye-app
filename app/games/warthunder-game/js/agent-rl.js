@@ -380,13 +380,14 @@
   }
 
   // ---------- Q 代打·第六代（2026-10-04 用户要求：Q 换第六代大脑）----------
-  // 默认第六代；localStorage.wt_qgen='5' 或 URL ?qGen=5 切回第五代（agent-bc 那套让位/接管互补）
+  // 2026-10-05 起默认让位第七代（agent-rl7.js）；wt_qgen='6' 或 URL ?qGen=6 时本文件接管
+  // （localStorage.wt_qgen='5' 或 '7' 切第五代/第七代；与 agent-bc 五代版互补让位）
   function qGenIs6() {
     var q = null;
     try { q = qs.get('qGen'); } catch (e) { }
-    if (q === '5') return false;
     if (q === '6') return true;
-    try { return localStorage.getItem('wt_qgen') !== '5'; } catch (e) { return true; }
+    if (q === '5' || q === '7') return false;
+    try { return localStorage.getItem('wt_qgen') === '6'; } catch (e) { return false; }
   }
   function startQCopilot6() {
     setInterval(function () {

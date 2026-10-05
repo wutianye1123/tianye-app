@@ -52,6 +52,10 @@
   var FIRE_TA = 0.12, FIRE_TB = 0.6;  // fire 对数尺度温度（与 ppo7_train.py 同值）：BC 火头 logit mean=-27，
                                       // 固定偏置无法校准；训练采样/logp 同用 sigmoid(a·f+b)；
                                       // 评测不带温度（保守）+纪律兜底
+  var AIM_K = 0.0;                    // 瞄准蒸馏塑形（A' 试验 2026-10-05 半小时无显著改善后关闭）：
+                                      // B 变体（同日）——执行端瞄准直接用几何炮手（五代六代同款 33-54% 命中率），
+                                      // 网络只学驾驶+开火时机（fire 头信用更干净：瞄必准，开火≠命中全归它）。
+                                      // aimErr 统计保留纯观测（看 aim 头是否自发向家教收敛）
 
   var winId = qs.get('farmSeed') || ('w' + Math.floor(Math.random() * 1e6));
   var tidSeq = 0;
@@ -321,8 +325,8 @@
           tank.drive(ret.thr, ret.turn, dt);
         } else {
           var turnCmd = rec.applied[1];
-          // 稳炮：网络瞄准点差一点收敛 → 压一拍转向让炮塔跟上（打完这炮再继续绕）
-          var nap = netAimPoint(tank, rec.appliedAim[0], rec.appliedAim[1], dE);
+          // 稳炮：瞄准点差一点收敛 → 压一拍转向让炮塔跟上（B 变体：瞄准点=家教解，同五代六代）
+          var nap = CORE.gunAimPoint(tank, e0);
           if (!CORE.barrelAligned(tank, nap, CORE.fireTol(dE)) && dE < 120 && tank.canFire()) {
             var aimOffQ = CORE.wrap2pi(Math.atan2(nap.x - tank.position.x, nap.z - tank.position.z)
               - tank.heading - (tank.turretYaw || 0));
@@ -342,9 +346,9 @@
   }
 
   // 交战区瞄准+开火（脱困/撤退/正常共用——训练=部署严格一致）：
-  //   瞄准 = 网络瞄准点；开火 = 网络火头 ∪ 纪律兜底，物理门硬拦
+  //   B 变体：瞄准 = 几何炮手（gunAimPoint，五代六代同款解析解）；开火 = 网络火头 ∪ 纪律兜底
   function engageAimFire(tank, rec, e0, dE, dt, ctx) {
-    var nap = netAimPoint(tank, rec.appliedAim[0], rec.appliedAim[1], dE);
+    var nap = CORE.gunAimPoint(tank, e0);   // 家教解（提前量+下坠）；netAimPoint 仅无敌兜底用
     tank.aimTurretAt(nap, dt);
     if (!tank.canFire() || dE >= 240) return;
     // 物理门（环境约束，训练/部署同款，不是策略的一部分）：
@@ -387,8 +391,14 @@
     var obstacles = (ctx && ctx.obstacles) || (em && em.obstacles) || [];
     rec.lastEnemies = CORE.enemiesOf(tank, game);
     rec.lastObstacles = obstacles;
-    // 目标认领（集火分散）
+    // 目标认领（集火分散 + 近距威胁优先）
     var newTgt = CORE.pickTarget(tank, rec.lastEnemies, rec.tgt);
+    // 近距威胁优先（2026-10-05 用户实战反馈：最近敌不打非打远的→被反杀）：
+    // 最近敌 <150m 强制接管——集火分散/滞回只在中远距生效，近身的必须先解决
+    if (rec.lastEnemies[0] && newTgt !== rec.lastEnemies[0] &&
+        tankDist(tank, rec.lastEnemies[0]) < 150) {
+      newTgt = rec.lastEnemies[0];
+    }
     if (newTgt !== rec.tgt) { CORE.releaseTarget(tank, rec.tgt); CORE.claimTarget(tank, newTgt); rec.tgt = newTgt; }
     var e0 = rec.lastEnemies[0];
     var d = e0 ? tankDist(tank, e0) : 9999;
@@ -411,6 +421,21 @@
       var distE = Math.hypot(dxE, dzE) || 1;
       var cosB = (dxE * Math.sin(tank.heading) + dzE * Math.cos(tank.heading)) / distE;
       if (cosB > 0) rec.pend += FACE_K * cosB;
+
+      // ⑤ 瞄准蒸馏塑形（A'）：|网络瞄准 − 几何炮手解|（归一化域，yaw 带 wrap 处理）每步小额罚。
+      //    几何炮手解=打当前认领目标的最优瞄准（含提前量+下坠补偿）——比录制标签还好的老师。
+      if (rec.tgt && rec.tgt.alive && rec.appliedAim) {
+        var apT = CORE.gunAimPoint(tank, rec.tgt);
+        var ty = CORE.wrap2pi(Math.atan2(apT.x - tank.position.x, apT.z - tank.position.z) - tank.heading) / Math.PI;
+        var tp = Math.atan2(apT.y - (tank.position.y + 1.8),
+                            Math.hypot(apT.x - tank.position.x, apT.z - tank.position.z) || 1) / 0.3;
+        var dyA = rec.appliedAim[0] - ty;
+        var eyA = Math.min(Math.abs(dyA), 2 - Math.abs(dyA));   // yaw 跨 ±π wrap
+        var epA = Math.abs(rec.appliedAim[1] - Math.max(-1, Math.min(1, tp)));
+        rec.pend -= AIM_K * (eyA + epA);
+        stats.aimErrSum = (stats.aimErrSum || 0) + eyA + epA;
+        stats.aimErrN = (stats.aimErrN || 0) + 1;
+      }
 
       // ④ 绕圈罚（-0.03/步）：4s 滑动窗，里程>15m 且净位移比<0.3 且窗口内未开火
       rec.trail.push({ x: tank.position.x, z: tank.position.z, fired: rec.firedSinceThink });
@@ -487,6 +512,143 @@
     }
   }
 
+  // ---------- Q 代打·第七代（2026-10-05 用户要求：Q 换七代 B 大脑，默认）----------
+  // wt_qgen: '5'→第五代(agent-bc) / '6'→第六代(agent-rl) / '7'→第七代B(本文件,默认)
+  // 执行壳与 bot 模式严格同款（B 变体）：维护 + P控进场(带避让) + 脱困/撤退脚本 +
+  //   家教瞄准（gunAimPoint）+ 开火 = 网络火头(确定性 f>0) ∪ 纪律兜底，物理门同款
+  function qGenIs7() {
+    var q = qs.get('qGen');
+    if (q === '7') return true;
+    if (q === '5' || q === '6') return false;
+    try { var g = localStorage.getItem('wt_qgen'); return g !== '5' && g !== '6'; } catch (e) { return true; }
+  }
+  function startQCopilot7() {
+    setInterval(function () {
+      try {
+        var g = window.__game;
+        if (!g || !g._pilotAI) return;
+        var ai = g._pilotAI;
+        if (ai.__rl7q !== undefined) return;             // 已处理（接管/让位/跳过）
+        if (!ai.tank) { ai.__rl7q = 'skip'; return; }    // 飞机/直升机：仍用原版
+        if (!qGenIs7()) { ai.__rl7q = 'other'; return; } // 五/六代模式：让位
+        ai.__rl7q = true;
+        var t = ai.tank;
+        var origUpdate = ai.update.bind(ai);
+        var lastThink = 0, applied = null, appliedFire = 0, lastEnemies = [], lastObstacles = [];
+        var qStuck = CORE.makeStuck(), qTgt = null;
+        var q = { fires: 0, thinks: 0, fallbacks: 0 };
+        if (!W) {   // 懒加载静态权重（玩家版同源 training/rl7-weights.json = B 变体最新）
+          fetch(new URL('training/rl7-weights.json', location.href).href).then(function (r) { return r.json(); })
+            .then(function (w) { W = w; console.log('[RL7] Q 代打权重就位: gen', w.gen); })
+            .catch(function (e) { console.warn('[RL7] Q 代打权重加载失败，暂用原版:', e); });
+        }
+        ai.update = function rl7QUpdate(dt, ctx) {
+          try {
+            if (!W) return origUpdate(dt, ctx);
+            // 维护（玩家坦克=蓝方，修车开）
+            if (t.burning) { try { t.tryExtinguish(); } catch (e) { } }
+            var mm = t.modules;
+            var mb = mm && (mm.track > 0 || mm.barrel > 0 || mm.engine > 0);
+            if (t.health < t.maxHealth || mb) {
+              if (t.health < t.maxHealth) t.health = Math.min(t.maxHealth, t.health + 15 * dt);
+              if (mm) {
+                if (mm.track > 0) mm.track = Math.max(0, mm.track - dt * 6);
+                if (mm.barrel > 0) mm.barrel = Math.max(0, mm.barrel - dt * 6);
+                if (mm.engine > 0) mm.engine = Math.max(0, mm.engine - dt * 6);
+              }
+            }
+            var now = performance.now();
+            if (now - lastThink >= THINK_MS) {
+              lastThink = now;
+              var em = (ctx && ctx.entityManager) || g.em;
+              lastObstacles = (ctx && ctx.obstacles) || (em && em.obstacles) || [];
+              lastEnemies = CORE.enemiesOf(t, g);
+              var obs = CORE.buildObs(t, g, lastEnemies, lastObstacles);
+              var out = forward(obs);                       // 确定性均值
+              applied = [clamp1(out.m[0]), clamp1(out.m[1])];
+              appliedFire = out.f > 0 ? 1 : 0;              // 不带温度（保守），兜底会补
+              q.thinks++;
+              var newTgt = CORE.pickTarget(t, lastEnemies, qTgt);
+              // 近距威胁优先（同 bot 模式：最近敌 <150m 强制接管，治"打远不打近被反杀"）
+              if (lastEnemies[0] && newTgt !== lastEnemies[0] &&
+                  Math.hypot(lastEnemies[0].position.x - t.position.x,
+                             lastEnemies[0].position.z - t.position.z) < 150) {
+                newTgt = lastEnemies[0];
+              }
+              if (newTgt !== qTgt) { CORE.releaseTarget(t, qTgt); CORE.claimTarget(t, newTgt); qTgt = newTgt; }
+            }
+            if (!applied) return origUpdate(dt, ctx);
+            if (!t.alive) return;
+            var e0 = (qTgt && qTgt.alive) ? qTgt : lastEnemies[0];
+            ai.phase = '七代交战中';
+            if (e0) {
+              var d = Math.hypot(e0.position.x - t.position.x, e0.position.z - t.position.z);
+              var thrIntent = d > NAV_DIST * 450 ? 1 : applied[0];
+              if (qStuck.update(t, thrIntent, dt)) {
+                q.unstick = (q.unstick || 0) + 1;
+                ai.phase = '七代脱困';
+                t.drive(-1, qStuck.dir * 0.9, dt);
+                t.aimTurretAt(CORE.gunAimPoint(t, e0), dt);
+                return;
+              }
+              if (d > NAV_DIST * 450) {
+                var dx = e0.position.x - t.position.x, dz = e0.position.z - t.position.z;
+                var hd = CORE.wrap2pi(Math.atan2(dx, dz) - t.heading);
+                var avN = CORE.avoidCmd(t, lastObstacles, Math.max(-1, Math.min(1, hd * 2.2)), 1);
+                t.drive(avN.thr, avN.turn, dt);
+                t.aimTurretAt(CORE.gunAimPoint(t, e0), dt);
+                ai.phase = '七代进场';
+                return;
+              }
+              var ap = CORE.gunAimPoint(t, e0);   // B 变体：家教瞄准
+              var converged = CORE.barrelAligned(t, ap, CORE.fireTol(d));
+              var ret = CORE.retreatCmd(t, e0);
+              if (ret) {
+                ai.phase = '七代撤退';
+                q.retreat = (q.retreat || 0) + 1;
+                t.drive(ret.thr, ret.turn, dt);
+              } else {
+                var turnCmd = applied[1];
+                if (!converged && d < 120 && t.canFire()) {
+                  var aimOffQ = CORE.wrap2pi(Math.atan2(ap.x - t.position.x, ap.z - t.position.z)
+                    - t.heading - (t.turretYaw || 0));
+                  if (Math.abs(aimOffQ) < 0.35) turnCmd *= 0.3;
+                }
+                var av = CORE.avoidCmd(t, lastObstacles, turnCmd, applied[0]);
+                t.drive(av.thr, av.turn, dt);
+              }
+              t.aimTurretAt(ap, dt);
+              // 开火：网络火头 ∪ 纪律兜底（Q 模式永远开兜底），物理门同款
+              if (t.canFire() && d < 240) {
+                var terrainHold = CORE.terrainLos(t.position.x, t.position.y + 1.8, t.position.z,
+                                                  ap.x, ap.y, ap.z);
+                var smokeB = CORE.smokeBlind((ctx && ctx.smokes) || [], t.position, e0.position);
+                var losN = CORE.blockedCount(lastObstacles, t.position.x, t.position.z,
+                                             e0.position.x, e0.position.z, 9);
+                var wantFire = appliedFire === 1 || (ASSIST && converged);
+                if (wantFire && !terrainHold && !smokeB && converged && losN === 0) {
+                  if (t.tryFire((ctx && ctx.entityManager) || g.em)) {
+                    q.fires++;
+                    if (appliedFire === 1) q.netFire = (q.netFire || 0) + 1;
+                  }
+                }
+              }
+            } else {
+              var avE = CORE.avoidCmd(t, lastObstacles, applied[1], applied[0]);
+              t.drive(avE.thr, avE.turn, dt);
+              t.aimTurretAt(netAimPoint(t, 0, 0, 200), dt);
+            }
+          } catch (e) {
+            q.fallbacks++;
+            if (!q.errLogged) { q.errLogged = 1; console.error('[RL7] Q-copilot error:', e); }
+            try { origUpdate(dt, ctx); } catch (e2) { }
+          }
+        };
+        console.log('[RL7] Q 代打已换装第七代 B 大脑（确定性；wt_qgen=5/6 可切回五/六代）');
+      } catch (e) { /* 轮询永不炸 */ }
+    }, 200);
+  }
+
   // ---------- 徽标 / API ----------
   function badge(txt) {
     var el = document.getElementById('__rl7Badge');
@@ -501,7 +663,7 @@
     el.textContent = txt;
   }
   function badgeText() {
-    return (W ? '🚀 七代[' + (SIDE === 'ally' ? '队友' : SIDE === 'both' ? '双方' : '敌方') + '] gen' + stats.gen +
+    return (W ? '🚀 第七代[' + (SIDE === 'ally' ? '队友' : SIDE === 'both' ? '双方' : '敌方') + '] gen' + stats.gen +
       (TRAIN ? ' σ' + Math.exp(W.logStd[0]).toFixed(2) : ' 确定性') :
       '🚀 七代 等权重…') +
       ' · ' + stats.bots + ' bots · ' + stats.steps + ' steps · 🎯' + stats.kills + '/' + stats.hits +
@@ -512,6 +674,7 @@
   }
 
   window.__RL7API = { stats: stats, postNow: function () { postNow(false); } };
+  startQCopilot7();   // Q 代打·第七代（默认；与 agent-bc 五代/agent-rl 六代互补让位）
 
   // ---------- 主流程 ----------
   var liveSide = VIAURL ? SIDE : null;   // URL 模式冻结；localStorage 模式由守望器热切

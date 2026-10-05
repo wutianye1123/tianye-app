@@ -284,10 +284,11 @@
         var ai = g._pilotAI;
         if (ai.__bcq !== undefined) return;        // 已处理（接管或跳过）；Q 关→对象丢弃，天然还原
         if (!ai.tank) { ai.__bcq = 'skip'; return; }   // PlaneAI/HeliAI：仍用原版
-        // 第六代接管模式（2026-10-04 默认）：让位给 agent-rl 的 Q 代打
+        // Q 代打接管模式（2026-10-05 起三态）：只在明确选第五代时本文件接管，
+        // 第六代让位 agent-rl、第七代让位 agent-rl7（wt_qgen 默认 '7'）
         var _qg = null; try { _qg = localStorage.getItem('wt_qgen'); } catch (e) { }
-        var gen6 = qs.get('qGen') === '6' || (qs.get('qGen') !== '5' && _qg !== '5');
-        if (gen6) { ai.__bcq = 'gen6'; return; }
+        var want5 = qs.get('qGen') === '5' || (qs.get('qGen') === null && _qg === '5');
+        if (!want5) { ai.__bcq = 'other'; return; }
         ai.__bcq = true;
         var t = ai.tank;
         var origUpdate = ai.update.bind(ai);
