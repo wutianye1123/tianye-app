@@ -287,11 +287,11 @@
 
         var e0 = (rec.tgt && rec.tgt.alive) ? rec.tgt : rec.lastEnemies[0];
         if (!e0) {
-          // 无敌可打：按网络心意兜底走 + 网络瞄准（200m 虚拟点）
-          var avE = CORE.avoidCmd(tank, rec.lastObstacles, rec.applied[1], rec.applied[0]);
-          tank.drive(avE.thr, avE.turn, dt);
-          tank.aimTurretAt(netAimPoint(tank, rec.appliedAim[0], rec.appliedAim[1], 200), dt);
-          return;
+          // 无敌可打：回退规则 AI（自带待机/巡逻）。修复 10-05 实战反馈「无敌原地转圈」——
+          // 训练采样只在交战区、BC 锚也无此状态，网络对敌人槽全 0 的观测是纯外推（转向饱和）。
+          // 训练=部署同款回退（训练时无敌=全灭将至局终，不采样，安全一致）
+          stats.idleFallback = (stats.idleFallback || 0) + 1;
+          return origUpdate(dt, ctx);
         }
         var dE = tankDist(tank, e0);
 
@@ -634,9 +634,8 @@
                 }
               }
             } else {
-              var avE = CORE.avoidCmd(t, lastObstacles, applied[1], applied[0]);
-              t.drive(avE.thr, avE.turn, dt);
-              t.aimTurretAt(netAimPoint(t, 0, 0, 200), dt);
+              // 无敌可打：回退规则 AI 待机（同 bot 模式，修「无敌原地转圈」）
+              return origUpdate(dt, ctx);
             }
           } catch (e) {
             q.fallbacks++;
