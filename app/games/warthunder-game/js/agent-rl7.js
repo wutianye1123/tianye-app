@@ -49,6 +49,8 @@
   var TRAIL_PATH_MIN = 15;            // 窗口里程阈值（m）：低于它=没在跑，不判绕圈
   var TRAIL_RATIO = 0.3;              // 净位移/里程 < 0.3 = 绕圈/空转（直线冲敌≈0.9）
   var CIRCLE_PEN = 0.03;              // 绕圈罚：-0.03/步（连续绕 10s=-3.0；窗口内开过火不罚=合法缠斗）
+  var PROX_K = 0.012;                 // 接近罚：-0.012×(1-d/15)²/步（正对障碍<15m，撞墙前置信号，
+                                      // 错误瞬间扣钱——脱困罚-0.5 是追认式追不上连环触发）
   var FIRE_TA = 0.12, FIRE_TB = 0.6;  // fire 对数尺度温度（与 ppo7_train.py 同值）：BC 火头 logit mean=-27，
                                       // 固定偏置无法校准；训练采样/logp 同用 sigmoid(a·f+b)；
                                       // 评测不带温度（保守）+纪律兜底
@@ -59,6 +61,41 @@
 
   var winId = qs.get('farmSeed') || ('w' + Math.floor(Math.random() * 1e6));
   var tidSeq = 0;
+
+  // —— buildObs7（2026-10-05 用户实战反馈"绕路不聪明/瞻前不顾后"→ 感知扩容）——
+  // 旧 70 维原样保留（W1 旧列语义不变，热启动无损）+ 追加 22 新维：
+  //   [障碍 7~10 号 ×3 维（d/60, sinB, cosB，格式同旧槽）] + [前 10 障碍半径 ×1 维（r/15）]
+  // = 92 维。网络从"6 个没有大小的点"升级为"10 个有半径的障碍"。
+  // 旧 BC 锚数据 pad 22 个 0（网络初始忽略新维=旧行为，PPO 在线学会利用）。
+  var OBS7_DIM = 92;
+  function buildObs7(tank, game, enemies, obstacles) {
+    var base = CORE.buildObs(tank, game, enemies, obstacles);
+    var obs = base.slice();   // 70 维
+    var pos = tank.position, h = tank.heading;
+    var list = [];
+    for (var i = 0; i < obstacles.length; i++) {
+      var ob = obstacles[i];
+      if (!ob || !ob.position) continue;
+      list.push(ob);
+    }
+    list.sort(function (a, b) {
+      var da = (a.position.x - pos.x) ** 2 + (a.position.z - pos.z) ** 2;
+      var db = (b.position.x - pos.x) ** 2 + (b.position.z - pos.z) ** 2;
+      return da - db;
+    });
+    for (i = 6; i < 10; i++) {          // 障碍 7~10 号：方位 3 维（同旧槽格式）
+      ob = list[i];
+      if (!ob) { obs.push(0, 0, 0); continue; }
+      var dx = ob.position.x - pos.x, dz = ob.position.z - pos.z;
+      var brg = CORE.wrap2pi(Math.atan2(dx, dz) - h);
+      obs.push(Math.min(1, Math.hypot(dx, dz) / 60), Math.sin(brg), Math.cos(brg));
+    }
+    for (i = 0; i < 10; i++) {          // 前 10 障碍：半径归一（15m 封顶；石头 3 vs 建筑 15 终于有区别）
+      ob = list[i];
+      obs.push(ob ? Math.min(1, (ob.radius || 3) / 15) : 0);
+    }
+    return obs;
+  }
 
   // ---------- PPO 网络前向（trunk 与 BC 同构；头 6 输出 [mean×4, fireLogit, value]） ----------
   var W = null;   // {W1,b1,W2,b2,W3,b3, logStd[4], norm{mu,sd}, gen}
@@ -72,7 +109,9 @@
     return out;
   }
   function forward(obs) {   // → {m:[thr,turn,yaw,pitch], f:fireLogit, v:value}
-    var x = new Float32Array(obs.length), i;
+    var inDim = W.W1.length;                        // 输入维（旧权重 70 / 新权重 92）
+    if (obs.length > inDim) obs = obs.slice(0, inDim);   // 旧权重吃 92 维 obs：截回（过渡兼容）
+    var x = new Float32Array(inDim), i;
     for (i = 0; i < obs.length; i++) x[i] = (obs[i] - W.norm.mu[i]) / W.norm.sd[i];
     var h1 = matvec(x, W.W1, W.b1);
     for (i = 0; i < h1.length; i++) if (h1[i] < 0) h1[i] = 0;
@@ -226,7 +265,7 @@
         var boot = rec.nextObs;
         try {
           if (gameRef && rec.tank && rec.tank.alive) {
-            boot = CORE.buildObs(rec.tank, gameRef,
+            boot = buildObs7(rec.tank, gameRef,
               CORE.enemiesOf(rec.tank, gameRef), rec.lastObstacles || []);
           }
         } catch (e) { }
@@ -296,7 +335,7 @@
         var dE = tankDist(tank, e0);
 
         // —— 卡墙脱困（最高优先级，驾驶脚本；触发瞬间撞障罚 -0.5；瞄准/开火仍网络） ——
-        var thrIntent = dE > NAV_DIST * 450 ? 1 : rec.applied[0];
+        var thrIntent = rec.applied[0];   // 导航段也是网络油门（②采样扩展后 P 控制器退役）
         var wasU = rec.stuck.unstickT <= 0.01;
         var unsticking = rec.stuck.update(tank, thrIntent, dt);
         if (unsticking) {
@@ -307,13 +346,11 @@
           return;
         }
 
-        // —— 远距进场：P 控制器 + 避让 + 精确炮手（脚本段，不采样） ——
+        // —— 远距进场：网络驾驶（避让已折叠进 applied）+ 家教炮手。
+        //    ②采样扩展：进场 60~100s 第一次成为可学习对象（接近奖/撞墙罚有地方落账）
         if (dE > NAV_DIST * 450) {
-          var dx = e0.position.x - tank.position.x, dz = e0.position.z - tank.position.z;
-          var hd = CORE.wrap2pi(Math.atan2(dx, dz) - tank.heading);
-          var avN = CORE.avoidCmd(tank, rec.lastObstacles, Math.max(-1, Math.min(1, hd * 2.2)), 1);
-          tank.drive(avN.thr, avN.turn, dt);
-          tank.aimTurretAt(CORE.gunAimPoint(tank, e0), dt);   // 精确炮手（提前量+下坠补偿）
+          tank.drive(rec.applied[0], rec.applied[1], dt);
+          tank.aimTurretAt(CORE.gunAimPoint(tank, e0), dt);
           stats.nav++;
           return;
         }
@@ -324,7 +361,7 @@
           stats.retreat = (stats.retreat || 0) + 1;   // 残血撤退：驾驶脚本，瞄准/开火仍网络
           tank.drive(ret.thr, ret.turn, dt);
         } else {
-          var turnCmd = rec.applied[1];
+          var turnCmd = rec.applied[1];   // 已含避让折叠（think 内 avoidCmd），勿再叠
           // 稳炮：瞄准点差一点收敛 → 压一拍转向让炮塔跟上（B 变体：瞄准点=家教解，同五代六代）
           var nap = CORE.gunAimPoint(tank, e0);
           if (!CORE.barrelAligned(tank, nap, CORE.fireTol(dE)) && dE < 120 && tank.canFire()) {
@@ -332,9 +369,7 @@
               - tank.heading - (tank.turretYaw || 0));
             if (Math.abs(aimOffQ) < 0.35) { turnCmd *= 0.3; stats.steady = (stats.steady || 0) + 1; }
           }
-          // 避让层入壳（与五代部署同款；训练壳=部署壳，六代 311s 事故的教训）
-          var av = CORE.avoidCmd(tank, rec.lastObstacles, turnCmd, rec.applied[0]);
-          tank.drive(av.thr, av.turn, dt);
+          tank.drive(rec.applied[0], turnCmd, dt);
         }
         engageAimFire(tank, rec, e0, dE, dt, ctx);
       } catch (e) {
@@ -402,19 +437,13 @@
     if (newTgt !== rec.tgt) { CORE.releaseTarget(tank, rec.tgt); CORE.claimTarget(tank, newTgt); rec.tgt = newTgt; }
     var e0 = rec.lastEnemies[0];
     var d = e0 ? tankDist(tank, e0) : 9999;
-    var inEngage = e0 && d <= NAV_DIST * 450;   // 交战区（导航段不采样——P 控制器脚本驾驶）
+    var inEngage = e0 && d <= NAV_DIST * 450;   // 交战区
+    var inNav = e0 && !inEngage;                // 导航段（有敌但远）：②采样扩展——进场 60~100s 变成可学习对象
+    var sampled = inEngage || inNav;            // 记步段（无敌=回退规则 AI 待机，不采）
 
     if (inEngage) {
-      // ① 出环带罚（沿用六代）
+      // ① 出环带罚（只计交战段，照旧）
       if (d > BAND_HI || d < BAND_LO) rec.pend -= 0.01;
-
-      // ② 干净接近奖（+0.01×Δdist/10）：上一步动作造成敌距变化，归上一步
-      if (rec.tgt !== rec.prevTgt) { rec.prevD = null; rec.prevTgt = rec.tgt; }   // 换目标重置（防虚增）
-      if (rec.prevD !== null && rec.tgt && rec.tgt.alive) {
-        var dd = Math.max(-APPROACH_CAP, Math.min(APPROACH_CAP, rec.prevD - d));
-        rec.pend += APPROACH_K * dd;
-      }
-      rec.prevD = (rec.tgt && rec.tgt.alive) ? d : null;
 
       // ③ 朝敌奖（+0.003×max(0,cos)）：车头指向最近敌（治绕圈·正向引导）
       var dxE = e0.position.x - tank.position.x, dzE = e0.position.z - tank.position.z;
@@ -457,29 +486,53 @@
         }
       }
     } else {
-      rec.trail.length = 0;   // 离开交战区清窗（导航段不算账）
+      rec.trail.length = 0;   // 离开交战区清窗（导航段不算绕圈账）
     }
 
-    // 结转：上一区间事件奖励归上一动作（导航段发生的事件不归策略——那是 P 控制器在开车）
+    // ② 干净接近奖（+0.01×Δdist/10）：导航段+交战段都发（导航段是它最大的用武之地）
+    if (sampled) {
+      if (rec.tgt !== rec.prevTgt) { rec.prevD = null; rec.prevTgt = rec.tgt; }   // 换目标重置（防虚增）
+      if (rec.prevD !== null && rec.tgt && rec.tgt.alive) {
+        var dd2 = Math.max(-APPROACH_CAP, Math.min(APPROACH_CAP, rec.prevD - d));
+        rec.pend += APPROACH_K * dd2;
+      }
+      rec.prevD = (rec.tgt && rec.tgt.alive) ? d : null;
+
+      // ⑥ 接近罚（−0.012×(1−d/15)²/步）：正对障碍（cos>0.7）且 <15m——撞墙的前置信号，
+      //    错误发生瞬间扣钱（脱困罚 −0.5 是追认式，追不上连环触发；此罚梯度直达）
+      var proxWorst = 0, fwdX = Math.sin(tank.heading), fwdZ = Math.cos(tank.heading);
+      for (var obi = 0; obi < obstacles.length; obi++) {
+        var obP = obstacles[obi];
+        if (!obP || !obP.position) continue;
+        var pdx = obP.position.x - tank.position.x, pdz = obP.position.z - tank.position.z;
+        if (pdx > 15 || pdx < -15 || pdz > 15 || pdz < -15) continue;   // 快筛
+        var pdd = Math.hypot(pdx, pdz);
+        if (pdd >= 15) continue;
+        if ((pdx * fwdX + pdz * fwdZ) / (pdd || 1) < 0.7) continue;     // 只算正前方锥
+        var prox = 1 - pdd / 15;
+        var pen2 = PROX_K * prox * prox;
+        if (pen2 > proxWorst) proxWorst = pen2;
+      }
+      if (proxWorst > 0) { rec.pend -= proxWorst; stats.proxPen = (stats.proxPen || 0) + 1; }
+    }
+
+    // 结转：上一区间事件奖励归上一动作（导航段也结转——撞墙罚/接近奖终于有地方落账）
     var n = rec.steps.obs.length;
-    if (n > 0 && inEngage) { rec.steps.rew[n - 1] += rec.pend; }
+    if (n > 0 && sampled) { rec.steps.rew[n - 1] += rec.pend; }
     rec.pend = 0;
 
-    var obs = CORE.buildObs(tank, game, rec.lastEnemies, obstacles);
+    var obs = buildObs7(tank, game, rec.lastEnemies, obstacles);   // 92 维感知扩容
     var out = forward(obs);
     stats.thinking++;
 
     var a0, a1, a2, a3, fire, logp = 0;
+    var s0 = Math.exp(W.logStd[0]), s1 = Math.exp(W.logStd[1]),
+        s2 = Math.exp(W.logStd[2]), s3 = Math.exp(W.logStd[3]);
+    var z2 = 0, z3 = 0;
     if (TRAIN) {
-      var s0 = Math.exp(W.logStd[0]), s1 = Math.exp(W.logStd[1]),
-          s2 = Math.exp(W.logStd[2]), s3 = Math.exp(W.logStd[3]);
-      var z0 = gauss(), z1 = gauss(), z2 = gauss(), z3 = gauss();
+      var z0 = gauss(), z1 = gauss(); z2 = gauss(); z3 = gauss();
       a0 = out.m[0] + s0 * z0; a1 = out.m[1] + s1 * z1;
       a2 = out.m[2] + s2 * z2; a3 = out.m[3] + s3 * z3;
-      logp = (-0.5 * z0 * z0 - W.logStd[0] - HALF_LOG_2PI) +
-             (-0.5 * z1 * z1 - W.logStd[1] - HALF_LOG_2PI) +
-             (-0.5 * z2 * z2 - W.logStd[2] - HALF_LOG_2PI) +
-             (-0.5 * z3 * z3 - W.logStd[3] - HALF_LOG_2PI);
       // fire 伯努利采样（对数尺度温度，与服务器 logp 同口径）
       var p = 1 / (1 + Math.exp(-(FIRE_TA * out.f + FIRE_TB)));
       p = Math.min(1 - 1e-6, Math.max(1e-6, p));
@@ -489,14 +542,25 @@
       a0 = out.m[0]; a1 = out.m[1]; a2 = out.m[2]; a3 = out.m[3];   // 评测/玩家：确定均值
       fire = out.f > 0 ? 1 : 0;                                      // sigmoid>0.5
     }
-    rec.applied = [clamp1(a0), clamp1(a1)];
+    // ① 避让折叠：执行值 = 采样值经 avoidCmd（连续转向场）——策略从此「看见」避让层，
+    //    PPO 学会与它配合直至内化（收敛后避让推力趋零）。执行值参与 logp（aim/fire 维用原采样）。
+    var avF = CORE.avoidCmd(tank, obstacles, clamp1(a1), clamp1(a0), 0.6);   // 0.6=侧向排斥（治瞻前不顾后）
+    var eThr = avF.thr, eTurn = avF.turn;
+    if (TRAIN) {
+      var z0e = (eThr - out.m[0]) / s0, z1e = (eTurn - out.m[1]) / s1;
+      logp = (-0.5 * z0e * z0e - W.logStd[0] - HALF_LOG_2PI) +
+             (-0.5 * z1e * z1e - W.logStd[1] - HALF_LOG_2PI) +
+             (-0.5 * z2 * z2 - W.logStd[2] - HALF_LOG_2PI) +
+             (-0.5 * z3 * z3 - W.logStd[3] - HALF_LOG_2PI) + logp;
+    }
+    rec.applied = [eThr, eTurn];        // update 循环直接执行（避让已折叠，勿再叠）
     rec.appliedAim = [clamp1(a2), clamp1(a3)];
     rec.appliedFire = fire;
 
-    if (TRAIN && inEngage) {
-      // 记步：obs=动作前状态（因果配对），act=未截断原始采样值+fire（与 logp 一致）
+    if (TRAIN && sampled) {
+      // 记步：obs=动作前状态（因果配对）；act=[执行值 thr/turn + 原始采样 aim/fire]（与 logp 一致）
       rec.steps.obs.push(obs);
-      rec.steps.act.push([a0, a1, a2, a3, fire]);
+      rec.steps.act.push([eThr, eTurn, a2, a3, fire]);
       rec.steps.logp.push(logp);
       rec.steps.val.push(out.v);
       rec.steps.rew.push(0);
@@ -507,8 +571,7 @@
       if (pendingSteps >= POST_EVERY) postNow(false);
       if (DUMP && stats.steps <= 20)
         console.log('[RL7DUMP] d=' + d.toFixed(0) + ' m=[' + out.m[0].toFixed(2) + ',' + out.m[1].toFixed(2) +
-          ',' + out.m[2].toFixed(2) + ',' + out.m[3].toFixed(2) + '] fireP=' +
-          (1 / (1 + Math.exp(-out.f))).toFixed(2) + ' v=' + out.v.toFixed(2));
+          '] exec=[' + eThr.toFixed(2) + ',' + eTurn.toFixed(2) + '] v=' + out.v.toFixed(2));
     }
   }
 
@@ -563,9 +626,11 @@
               var em = (ctx && ctx.entityManager) || g.em;
               lastObstacles = (ctx && ctx.obstacles) || (em && em.obstacles) || [];
               lastEnemies = CORE.enemiesOf(t, g);
-              var obs = CORE.buildObs(t, g, lastEnemies, lastObstacles);
+              var obs = buildObs7(t, g, lastEnemies, lastObstacles);   // 92 维感知扩容
               var out = forward(obs);                       // 确定性均值
-              applied = [clamp1(out.m[0]), clamp1(out.m[1])];
+              // 避让折叠（与训练壳同款：10Hz think 内算执行值，帧间直接执行）
+              var avT = CORE.avoidCmd(t, lastObstacles, clamp1(out.m[1]), clamp1(out.m[0]), 0.6);   // 侧向排斥同款
+              applied = [avT.thr, avT.turn];
               appliedFire = out.f > 0 ? 1 : 0;              // 不带温度（保守），兜底会补
               q.thinks++;
               var newTgt = CORE.pickTarget(t, lastEnemies, qTgt);
@@ -592,10 +657,8 @@
                 return;
               }
               if (d > NAV_DIST * 450) {
-                var dx = e0.position.x - t.position.x, dz = e0.position.z - t.position.z;
-                var hd = CORE.wrap2pi(Math.atan2(dx, dz) - t.heading);
-                var avN = CORE.avoidCmd(t, lastObstacles, Math.max(-1, Math.min(1, hd * 2.2)), 1);
-                t.drive(avN.thr, avN.turn, dt);
+                // 网络驾驶进场（与训练壳一致：②采样扩展后 P 控制器退役；applied 已含避让折叠）
+                t.drive(applied[0], applied[1], dt);
                 t.aimTurretAt(CORE.gunAimPoint(t, e0), dt);
                 ai.phase = '七代进场';
                 return;
@@ -608,14 +671,13 @@
                 q.retreat = (q.retreat || 0) + 1;
                 t.drive(ret.thr, ret.turn, dt);
               } else {
-                var turnCmd = applied[1];
+                var turnCmd = applied[1];   // 已含避让折叠（think 内），勿再叠
                 if (!converged && d < 120 && t.canFire()) {
                   var aimOffQ = CORE.wrap2pi(Math.atan2(ap.x - t.position.x, ap.z - t.position.z)
                     - t.heading - (t.turretYaw || 0));
                   if (Math.abs(aimOffQ) < 0.35) turnCmd *= 0.3;
                 }
-                var av = CORE.avoidCmd(t, lastObstacles, turnCmd, applied[0]);
-                t.drive(av.thr, av.turn, dt);
+                t.drive(applied[0], turnCmd, dt);
               }
               t.aimTurretAt(ap, dt);
               // 开火：网络火头 ∪ 纪律兜底（Q 模式永远开兜底），物理门同款

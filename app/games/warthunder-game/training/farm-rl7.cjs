@@ -1,20 +1,24 @@
 // farm-rl7.cjs — 第七代 PPO 训练农场（无头 Electron 多窗口：双侧采样 ally/enemy 交替）
-// 用法：electron farm-rl7.cjs [分钟数=150] [并发窗口数=4] [静态端口=8123] [PPO端口=8771] [侧序列=AEAE]
+// 用法：electron farm-rl7.cjs [目标步数=400000] [并发窗口数=4] [静态端口=8123] [PPO端口=8771] [侧序列=AEAE]
+//   ★ 收工判据 = 服务器 steps_total ≥ 目标步数（2026-10-05 改：wall 计时在系统睡眠下是幻觉——
+//     合盖必睡，caffeinate 无效；按步数收工则睡眠只是暂停，唤醒自动续跑，训练量确定）
+//   第二参数起与旧版一致；老用法传分钟数仍兼容（≤1440 视为分钟→按 ~115 步/分/窗折算）
 //   侧序列字符：A=ally（蓝方队友位，带挂机玩家打 6 红规则 AI——评测同款位）
 //               E=enemy（红方位，弱属性位；蓝方=挂机玩家+2 规则 AI 队友）
-//   默认 AEAE=2 蓝窗(4 tank) + 2 红窗(12 tank)：双视角采样，样本约 2:3 偏红
 // 原理：每窗口 load ?auto=tank&rl7=<side>&rl7Srv=… —— 游戏自动开局、对应侧坦克换第七代 bot、
 //       agent-rl7.js 每 256 步 POST /rollout；本脚本守望局末重开 + 汇报训练进度。
 //       PPO 服务器须已启动（python3 training/ppo7_train.py [port]）。
 const { app, BrowserWindow } = require('electron');
 const http = require('http');
 
-const MINS = parseFloat(process.argv[2] || '150');
+const ARG2 = parseFloat(process.argv[2] || '400000');
+const STEP_GOAL = ARG2 <= 1440 ? Math.round(ARG2 * 115) : Math.round(ARG2);   // 兼容旧分钟用法
 const NWINS = parseInt(process.argv[3] || '4', 10);
 const PORT = process.argv[4] || '8123';
 const PPO_PORT = process.argv[5] || '8771';
 const SIDES = (process.argv[6] || 'AEAE').toUpperCase();
 const PPO = `http://127.0.0.1:${PPO_PORT}`;
+const WALL_FUSE_MS = 12 * 3600 * 1000;   // wall 熔断（防真死循环）：12 小时必停
 
 function log(msg) { process.stderr.write(`[farm-rl7] ${new Date().toISOString().slice(11, 19)} ${msg}\n`); }
 
@@ -71,15 +75,34 @@ app.whenReady().then(async () => {
     win.loadURL(url).catch(() => {});
     armWatch(win, i, url);
   }
-  log(`farm started: ${MINS}min windows=${NWINS} sides=${SIDES} game=:${PORT} ppo=:${PPO_PORT}`);
+  log(`farm started: 目标 ${STEP_GOAL} 步 windows=${NWINS} sides=${SIDES} game=:${PORT} ppo=:${PPO_PORT}`);
+  const goal0 = (await ppoGet('/stats') || {}).steps_total || 0;   // 起跑线（不含历史步数）
+  log(`起跑线: 服务器已有 ${goal0} 步，本轮目标再攒 ${STEP_GOAL} 步 → 收工线 ${goal0 + STEP_GOAL}`);
 
   const mon = setInterval(async () => {
     const s = await ppoGet('/stats');
     if (s) {
       const ls = s.last_stats || {};
-      log(`ppo7: gen=${s.gen} updates=${s.updates} steps=${s.steps_total} buffered=${s.buffered}` +
+      const done = s.steps_total - goal0;
+      log(`ppo7: gen=${s.gen} updates=${s.updates} 本轮 ${done}/${STEP_GOAL} 步(${(done / STEP_GOAL * 100).toFixed(0)}%) buffered=${s.buffered}` +
         (s.updating ? ' [updating]' : '') +
-        (Number.isFinite(ls.rew) ? ` mean_rew=${ls.rew.toFixed(3)} kl=${(ls.kl || 0).toFixed(4)} bc=${(ls.bc || 0).toFixed(3)}` : ''));
+        (Number.isFinite(ls.rew) ? ` mean_rew=${ls.rew.toFixed(3)} kl=${(ls.kl || 0).toFixed(4)}` : ''));
+      // 收工判据：本轮步数达标（睡眠只暂停不计步，唤醒续跑）
+      if (done >= STEP_GOAL) {
+        log(`✅ 目标达成（${done} 步），收工（checkpoint 已在服务器侧持续落盘）`);
+        clearInterval(mon);
+        for (const w of BrowserWindow.getAllWindows()) w.destroy();
+        setTimeout(() => app.quit(), 500);
+        return;
+      }
+      // wall 熔断：12h 真死循环保护（睡眠不计——进程冻结时 interval 也不跑）
+      if (Date.now() - t0 > WALL_FUSE_MS) {
+        log('⏰ wall 熔断（12h），强制收工');
+        clearInterval(mon);
+        for (const w of BrowserWindow.getAllWindows()) w.destroy();
+        setTimeout(() => app.quit(), 500);
+        return;
+      }
     }
     // 页面侧健康（抽窗口 0）
     const wins = BrowserWindow.getAllWindows();
@@ -87,12 +110,6 @@ app.whenReady().then(async () => {
       wins[0].webContents.executeJavaScript(
         `window.__RL7API ? JSON.stringify(window.__RL7API.stats) : 'null'`, true
       ).then((r) => { if (r && r !== 'null') log(`win0 rl7: ${r}`); }).catch(() => {});
-    }
-    if (Date.now() - t0 > MINS * 60 * 1000) {
-      log('⏰ 时间到，收工（checkpoint 已在服务器侧持续落盘）');
-      clearInterval(mon);
-      for (const w of BrowserWindow.getAllWindows()) w.destroy();
-      setTimeout(() => app.quit(), 500);
     }
   }, 15000);
 });

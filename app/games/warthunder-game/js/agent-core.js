@@ -305,7 +305,10 @@
   // v1 毛病：阶跃式加转向（进锥猛加/出锥撒手）与基础转向打架→来回纠偏=画面抖；
   //          多障碍同侧重复叠加→过度转向。v2：避让强度随重叠度连续渐变（无阶跃），
   //          避让时按强度压制基础转向（不再对拉），减速温和（最多 35%）。
-  function avoidCmd(tank, obstacles, turnIn, thrIn) {
+  // sideKick（2026-10-05 七代专用）：侧向排斥——v2 只推前方锥内障碍，绕路时车体侧面
+  //          贴近的障碍不推=「瞻前不顾后」（绕开正面蹭上侧面）。七代传 sideKick>0 启用
+  //          全周排斥（侧后方按侧偏角衰减），五/六代不传=行为不变（共用函数零影响）。
+  function avoidCmd(tank, obstacles, turnIn, thrIn, sideKick) {
     var thr = (thrIn === undefined ? 0 : thrIn);
     var turn = turnIn || 0;
     if (!obstacles || !obstacles.length) return { turn: Math.max(-1, Math.min(1, turn)), thr: thr };
@@ -318,13 +321,26 @@
       var dx = ob.position.x - tank.position.x, dz = ob.position.z - tank.position.z;
       var dd = Math.hypot(dx, dz);
       if (dd > 30 || dd < 0.1) continue;
-      if (dx * fwdX + dz * fwdZ <= 0) continue;   // 只算正前方的
+      var fwdDot = dx * fwdX + dz * fwdZ;
       var r = (ob.radius || 3) + 3.5;
       var sideDist = dx * rightX + dz * rightZ;
+      var overlap, urgency, w;
+      if (fwdDot <= 0) {
+        // 侧后方：仅 sideKick 模式参与（按前向角衰减——正后方 0.1、正侧 0.5）
+        if (!sideKick) continue;
+        var backFade = 0.5 * (1 - Math.min(1, -fwdDot / 30)) * sideKick;
+        if (Math.abs(sideDist) >= r * 1.6) continue;
+        overlap = 1 - Math.abs(sideDist) / (r * 1.6);
+        urgency = 0.4 + 0.6 * (30 - dd) / 30;
+        w = overlap * urgency * backFade;
+        push += (sideDist >= 0 ? -1 : 1) * (0.25 + 0.75 * overlap) * w;
+        wSum += w;
+        continue;
+      }
       if (Math.abs(sideDist) >= r) continue;
-      var overlap = 1 - Math.abs(sideDist) / r;              // 0~1：挡得越死值越大（连续）
-      var urgency = 0.4 + 0.6 * (30 - dd) / 30;              // 越近权重越大
-      var w = overlap * urgency;
+      overlap = 1 - Math.abs(sideDist) / r;              // 0~1：挡得越死值越大（连续）
+      urgency = 0.4 + 0.6 * (30 - dd) / 30;              // 越近权重越大
+      w = overlap * urgency;
       push += (sideDist >= 0 ? -1 : 1) * (0.25 + 0.75 * overlap) * w;
       wSum += w;
     }

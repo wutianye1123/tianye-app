@@ -28,7 +28,9 @@ import torch.nn.functional as F
 torch.set_num_threads(4)   # 留核给农场窗口/用户游戏
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-OBS_DIM, H1, H2, HEAD = 70, 256, 256, 6          # head: [mean_thr, mean_turn, mean_yaw, mean_pitch, fireLogit, value]
+# obs 92 维（2026-10-05 感知扩容）：旧 70 维原样 + 障碍7~10号×3维 + 前10障碍半径×10维
+OBS_DIM, H1, H2, HEAD = 92, 256, 256, 6          # head: [mean_thr, mean_turn, mean_yaw, mean_pitch, fireLogit, value]
+OBS_DIM_OLD = 70                                 # BC 锚数据/旧 checkpoint 的输入维（pad 兼容）
 ACT_DIM = 5                                        # [thr, turn, aimYaw, aimPitch, fire]
 GAUSS_DIM = 4                                      # 前 4 维高斯，第 5 维伯努利
 BATCH = 2048
@@ -45,15 +47,20 @@ LOGSTD_INIT = np.array([-0.3, -0.3, -3.2, -3.2], dtype=np.float32) # σ 起步�
 FIRE_TEMP_A, FIRE_TEMP_B = 0.12, 0.6   # fire 伯努利对数尺度温度（试训#2 定位：BC 火头 logit mean=-27/p50=-15.7，
                                        # 固定偏置无法校准；q=sigmoid(a·f+b)：中位状态→0.22 好状态→0.58 差状态→≈0）。
                                        # 采样与 logp/熵同口径，梯度照常流经 f；部署不带温度（保守）+纪律兜底
-BC_FILTER_DIST = 0.65     # BC 锚只取交战段样本（obs[16]=最近敌距离/450）
+BC_FILTER_DIST = 1.01     # BC 锚全量（2026-10-05 ②采样扩展配套：导航段网络接管后，
+                          # 远距驾驶需要老师——规则 AI 开进数据本来就在 9.5 万条里；此前 0.65 只取交战段）
 
 ap = argparse.ArgumentParser()
 ap.add_argument('port', nargs='?', type=int, default=8771)
 ap.add_argument('--alpha', type=float, default=0.5, help='BC 锚损失权重')
 ap.add_argument('--resume', action='store_true', help='从 ppo7-weights-latest.json 恢复')
 ap.add_argument('--batch', type=int, default=BATCH)
+ap.add_argument('--lr', type=float, default=LR, help='学习率（续训建议 5e-5 治 KL 偏热）')
+ap.add_argument('--keep-gen', action='store_true', help='resume 保留 gen 继续编（同语义续练用；'
+                                                        '默认归零=语义变更基线重置）')
 args = ap.parse_args()
 BATCH = args.batch
+LR = args.lr
 
 # ---------- 网络：参数名与权重 json 逐键一致（JS 侧手写前向直接吃） ----------
 class Net(torch.nn.Module):
@@ -77,10 +84,16 @@ net = Net()
 rng = np.random.default_rng(7)
 
 def load_bc_warm_start():
-    """trunk+驾驶/瞄准/开火头 ← 第五代 BC 权重；value 头小随机；norm 沿用"""
+    """trunk+驾驶/瞄准/开火头 ← 第五代 BC 权重；value 头小随机；norm 沿用。
+    W1 为 70 行（旧 obs 维）→ 92 行网络：扩列零初始化（新感知从零学起）"""
     bc = json.load(open(os.path.join(BASE, 'bc-weights.json')))
     with torch.no_grad():
-        net.W1.copy_(torch.tensor(bc['W1'], dtype=torch.float32))
+        tW1 = torch.tensor(bc['W1'], dtype=torch.float32)
+        if tW1.shape[0] < OBS_DIM:                     # 70→92 扩列（新 22 行零初始化）
+            pad = torch.zeros(OBS_DIM, H1)
+            pad[:tW1.shape[0], :].copy_(tW1)
+            tW1 = pad
+        net.W1.copy_(tW1)
         net.b1.copy_(torch.tensor(bc['b1'], dtype=torch.float32))
         net.W2.copy_(torch.tensor(bc['W2'], dtype=torch.float32))
         net.b2.copy_(torch.tensor(bc['b2'], dtype=torch.float32))
@@ -91,7 +104,10 @@ def load_bc_warm_start():
         net.b3[0:5].copy_(torch.tensor(bc['b3'], dtype=torch.float32)[0:5])
         net.b3[5].zero_()
         net.logStd.copy_(torch.tensor(LOGSTD_INIT))
-    return bc['norm']
+    n = bc['norm']
+    n = {'mu': n['mu'] + [0.0] * (OBS_DIM - OBS_DIM_OLD),        # 新维 mu=0 sd=1（标准化后原值不变）
+         'sd': n['sd'] + [1.0] * (OBS_DIM - OBS_DIM_OLD)}
+    return n
 
 norm = load_bc_warm_start()
 MU = np.array(norm['mu'], dtype=np.float32)
@@ -108,9 +124,18 @@ if args.resume:
         w = json.load(open(p))
         with torch.no_grad():
             for k in ('W1', 'b1', 'W2', 'b2', 'W3', 'b3', 'logStd'):
-                getattr(net, k).copy_(torch.tensor(w[k], dtype=torch.float32))
-        gen = w.get('gen', 0)
-        print(f'[PPO7] resumed from gen={gen}', flush=True)
+                t = torch.tensor(w[k], dtype=torch.float32)
+                cur = getattr(net, k)          # 旧 70 维 checkpoint → 92 维网络：W1 扩列零初始化
+                if t.shape != cur.shape and k == 'W1' and t.shape[1] == cur.shape[1] and t.shape[0] < cur.shape[0]:
+                    pad = torch.zeros_like(cur); pad[:t.shape[0], :].copy_(t); t = pad
+                    print(f'[PPO7] W1 {tuple(t.shape)}→{tuple(cur.shape)} 扩列热启动（新感知零初始化）', flush=True)
+                getattr(net, k).copy_(t)
+        # 语义变更（①避让折叠 ②导航采样 ③接近罚）→ 默认基线重置（gen 归零、曲线从头看）；
+        # 同语义续练用 --keep-gen 保留 gen（且避免滚动备份 g{N} 覆盖上一轮文件）
+        gen = w.get('gen', 0) if args.keep_gen else 0
+        first_batch_done = True   # resume 时 value 头已训过，跳过首批预热
+        print(f'[PPO7] resumed 权重自 gen{w.get("gen", 0)}（{"续编" if args.keep_gen else "基线重置→gen0"}, '
+              f'lr={LR}, 预热跳过）', flush=True)
     else:
         print('[PPO7] --resume 但无 checkpoint，从 BC 热启动开始', flush=True)
 
@@ -124,11 +149,12 @@ def load_bc_anchor():
         for line in open(f):
             try:
                 d = json.loads(line)
-                if len(d['obs']) == OBS_DIM and len(d['act']) == 5 and d['obs'][16] < BC_FILTER_DIST:
+                if len(d['obs']) == OBS_DIM_OLD and len(d['act']) == 5 and d['obs'][16] < BC_FILTER_DIST:
                     obs_l.append(d['obs']); act_l.append(d['act'])
             except Exception:
                 pass
-    obs = torch.tensor(np.array(obs_l, dtype=np.float32))
+    obs = torch.tensor(np.array([o + [0.0] * (OBS_DIM - len(o)) for o in obs_l],   # 旧 70 维锚 pad 22 零
+                                 dtype=np.float32))
     act = torch.tensor(np.array(act_l, dtype=np.float32))
     return obs, act
 
