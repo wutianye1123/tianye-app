@@ -213,15 +213,34 @@ var DEFS = {
   humvee:     { name: '悍马',     ic: '悍', icColor: '#7a8a5a', cost: 300, hp: 260, dmg: 8,  range: 230, speed: 85,  cd: 0.22, r: 13, kind: 'ranged', proj: 'bullet', armor: 2, desc: '高速机动的机枪车' },
   tank:       { name: '主战坦克', ic: '坦', icColor: '#5e6a5e', cost: 550, hp: 700, dmg: 60, range: 340, speed: 35,  cd: 3.0,  r: 18, kind: 'ranged', proj: 'shell', aoe: 45, armor: 4, desc: '重甲主炮，开火带后坐' },
   mlrs:       { name: '火箭炮',   ic: '火', icColor: '#8a5a4e', cost: 650, hp: 200, dmg: 30, range: 520, speed: 18,  cd: 6.5,  r: 16, kind: 'ranged', proj: 'rock', aoe: 55, minRange: 150, multirock: { n: 5, spread: 65 }, armor: 1, desc: '多管齐射覆盖大片区域' },
-  heli:       { name: '武装直升机', ic: '升', icColor: '#4a5e6e', cost: 750, hp: 380, dmg: 7, range: 260, speed: 95,  cd: 0.18, r: 14, kind: 'ranged', proj: 'bullet', armor: 1, desc: '低空掠袭的机炮平台' }
+  heli:       { name: '武装直升机', ic: '升', icColor: '#4a5e6e', cost: 750, hp: 380, dmg: 7, range: 260, speed: 95,  cd: 0.18, r: 14, kind: 'ranged', proj: 'bullet', armor: 1, desc: '低空掠袭的机炮平台' },
+  /* ---- 王国扩展 ---- */
+  crossbowman:{ name: '弩手',     ic: '弩', icColor: '#7a6a4e', cost: 110, hp: 75,  dmg: 26, range: 230, speed: 45,  cd: 2.2,  r: 10, kind: 'ranged', proj: 'arrow', spread: 0.02, desc: '重弩点射，单发重创' },
+  templar:    { name: '圣殿骑士', ic: '殿', icColor: '#c8b078', cost: 280, hp: 300, dmg: 20, range: 26,  speed: 48,  cd: 0.9,  r: 12, kind: 'melee',  armor: 2, regen: 8, desc: '圣光自愈的精锐重步' },
+  ram:        { name: '攻城锤',   ic: '锤', icColor: '#8a7351', cost: 350, hp: 500, dmg: 30, range: 28,  speed: 55,  cd: 1.2,  r: 15, kind: 'melee',  charge: true, kb: 300, armor: 3, desc: '冲撞载具，撞飞一切' },
+  /* ---- 黑暗扩展 ---- */
+  ghost:      { name: '幽灵',     ic: '幽', icColor: '#9ab8c8', cost: 200, hp: 90,  dmg: 14, range: 24,  speed: 95,  cd: 0.7,  r: 10, kind: 'melee',  slowAura: { r: 110, factor: 0.6 }, desc: '恐惧光环减速周围敌人' },
+  ghoul:      { name: '食尸鬼',   ic: '尸', icColor: '#6a8a5a', cost: 120, hp: 110, dmg: 12, range: 24,  speed: 70,  cd: 0.5,  r: 10, kind: 'melee',  lifesteal: 0.5, poison: { dps: 3, dur: 2 }, desc: '吸血且传播瘟疫' },
+  reaper:     { name: '死神',     ic: '死', icColor: '#3a3a4a', cost: 650, hp: 700, dmg: 50, range: 50,  speed: 45,  cd: 1.5,  r: 19, kind: 'melee',  aoeMelee: true, lifesteal: 0.5, kb: 150, desc: '镰刀大范围收割生命' },
+  /* ---- 元素扩展 ---- */
+  paladin:    { name: '圣骑士',   ic: '光', icColor: '#e8d48a', cost: 320, hp: 330, dmg: 24, range: 26,  speed: 52,  cd: 0.85, r: 12, kind: 'melee',  lifesteal: 0.35, regen: 10, armor: 2, desc: '圣光护体的战场堡垒' },
+  chronomancer:{ name: '时光法师', ic: '时', icColor: '#8ac8c8', cost: 350, hp: 80,  dmg: 8,  range: 180, speed: 48,  cd: 1.8,  r: 10, kind: 'ranged', proj: 'bolt', speedAura: { r: 130, mult: 0.35 }, desc: '光环：周围友军移速+35%' },
+  lava:       { name: '熔岩元素', ic: '熔', icColor: '#c25a2a', cost: 380, hp: 450, dmg: 30, range: 36,  speed: 40,  cd: 1.3,  r: 15, kind: 'melee',  aoeMelee: true, burn: { dps: 8, dur: 2 }, armor: 1, desc: '灼热身躯点燃周围敌人' },
+  /* ---- 巨兽扩展 ---- */
+  phoenix:    { name: '凤凰',     ic: '凤', icColor: '#e8862a', cost: 600, hp: 380, dmg: 30, range: 34,  speed: 60,  cd: 1.0,  r: 13, kind: 'melee',  burn: { dps: 10, dur: 3 }, rebirth: 0.5, desc: '死亡时浴火重生一次' },
+  mammoth:    { name: '猛犸',     ic: '象', icColor: '#a8906a', cost: 520, hp: 800, dmg: 38, range: 40,  speed: 50,  cd: 1.6,  r: 19, kind: 'melee',  aoeMelee: true, charge: true, kb: 280, armor: 2, desc: '长牙践踏，冲锋开路' },
+  /* ---- 现代扩展 ---- */
+  drone:      { name: '无人机',   ic: '无', icColor: '#7a8a9a', cost: 160, hp: 45,  dmg: 6,  range: 180, speed: 120, cd: 0.3,  r: 7,  kind: 'ranged', proj: 'bullet', desc: '高速侦察打击蜂群' },
+  flamer:     { name: '火焰兵',   ic: '喷', icColor: '#c46a3a', cost: 240, hp: 110, dmg: 14, range: 120, speed: 50,  cd: 1.8,  r: 10, kind: 'ranged', proj: 'fire', aoe: 36, burn: { dps: 12, dur: 3 }, desc: '火焰喷射，持续燃烧' },
+  mecha:      { name: '武装机甲', ic: '甲', icColor: '#5a6a7a', cost: 700, hp: 750, dmg: 22, range: 300, speed: 35,  cd: 3.2,  r: 17, kind: 'ranged', proj: 'rock', aoe: 40, multirock: { n: 3, spread: 35 }, armor: 4, desc: '肩载火箭齐射的重装机甲' }
 };
 /* 兵种系列（卡片分组 + 热键 1-9 = 王国军团） */
 var SERIES = [
-  { name: '王国军团', color: '#6ea8ff', types: ['farmer', 'swordsman', 'pikeman', 'shield', 'archer', 'javelineer', 'knight', 'king', 'catapult'] },
-  { name: '黑暗军团', color: '#f08a9a', types: ['skeleton', 'assassin', 'berserker', 'bomber', 'gargoyle', 'vampire', 'darkknight', 'necromancer', 'lich'] },
-  { name: '元素魔法', color: '#6ad0d8', types: ['mage', 'icemage', 'pyromancer', 'stormmage', 'earthwarden', 'druid', 'priest', 'summoner'] },
-  { name: '远古巨兽', color: '#d8b88a', types: ['warbear', 'minotaur', 'troll', 'treant', 'cyclops', 'giant', 'dragon'] },
-  { name: '现代战争', color: '#b8d86a', types: ['rifleman', 'gunner', 'bazooka', 'sniper', 'medic', 'humvee', 'tank', 'mlrs', 'heli'] }
+  { name: '王国军团', color: '#6ea8ff', types: ['farmer', 'swordsman', 'pikeman', 'shield', 'archer', 'crossbowman', 'javelineer', 'knight', 'templar', 'king', 'ram', 'catapult'] },
+  { name: '黑暗军团', color: '#f08a9a', types: ['skeleton', 'ghoul', 'assassin', 'berserker', 'bomber', 'ghost', 'gargoyle', 'vampire', 'darkknight', 'necromancer', 'lich', 'reaper'] },
+  { name: '元素魔法', color: '#6ad0d8', types: ['mage', 'icemage', 'pyromancer', 'stormmage', 'earthwarden', 'druid', 'paladin', 'priest', 'chronomancer', 'summoner', 'lava'] },
+  { name: '远古巨兽', color: '#d8b88a', types: ['warbear', 'minotaur', 'troll', 'treant', 'cyclops', 'mammoth', 'giant', 'dragon', 'phoenix'] },
+  { name: '现代战争', color: '#b8d86a', types: ['rifleman', 'gunner', 'flamer', 'bazooka', 'sniper', 'medic', 'drone', 'humvee', 'tank', 'mlrs', 'mecha', 'heli'] }
 ];
 var DEF_ORDER = [];
 SERIES.forEach(function (s) { DEF_ORDER = DEF_ORDER.concat(s.types); });
@@ -291,7 +310,22 @@ var PRESETS = [
   { name: '不动如山', comp: { shield: 4, treant: 1, gargoyle: 2, earthwarden: 1 } },
   { name: '精英近卫', comp: { king: 1, giant: 1, tank: 1, dragon: 1, lich: 1 } },
   { name: '草叉信仰', comp: { farmer: 12, priest: 1 } },
-  { name: '爆破专家', comp: { bomber: 6, medic: 1 } }
+  { name: '爆破专家', comp: { bomber: 6, medic: 1 } },
+  /* ---- 新兵种方案 ---- */
+  { name: '弩手齐射', comp: { crossbowman: 5, shield: 2 } },
+  { name: '圣殿军团', comp: { templar: 3, priest: 1, crossbowman: 2 } },
+  { name: '攻城车队', comp: { ram: 2, knight: 2, archer: 2 } },
+  { name: '幽灵夜袭', comp: { ghost: 4, assassin: 2 } },
+  { name: '瘟疫蔓延', comp: { ghoul: 5, necromancer: 1 } },
+  { name: '死神降临', comp: { reaper: 1, skeleton: 8 } },
+  { name: '圣光骑士团', comp: { paladin: 2, templar: 2, priest: 1 } },
+  { name: '时空军团', comp: { chronomancer: 2, gunner: 2, knight: 2 } },
+  { name: '熔岩地带', comp: { lava: 3, pyromancer: 2 } },
+  { name: '凤凰涅槃', comp: { phoenix: 2, druid: 2 } },
+  { name: '猛犸冲锋', comp: { mammoth: 2, warbear: 2 } },
+  { name: '无人机蜂群', comp: { drone: 6, humvee: 1 } },
+  { name: '喷火小队', comp: { flamer: 3, rifleman: 3 } },
+  { name: '机甲风暴', comp: { mecha: 2, medic: 1, rifleman: 2 } }
 ];
 
 /* ---------- 状态 ---------- */
@@ -542,7 +576,7 @@ function spawnUnit(p) {
     kb: { x: 0, y: 0 }, fallen: 0, alive: true,
     slowT: 0, slowFactor: 0.55, poisonT: 0, poisonDps: 0, poisonTick: 0, poisonSrc: null,
     burnT: 0, burnDps: 0, burnTick: 0, burnSrc: null,
-    lastHurt: -99, regenTick: 0,
+    lastHurt: -99, regenTick: 0, rebirthed: false,
     blinkCd: rand(1, 2), summonCd: def.summon ? def.summon.interval : 0, summons: []
   };
 }
@@ -638,6 +672,22 @@ function damage(t, raw, src, nx, ny, kb, pierce) {
 }
 function kill(t, src) {
   if (!t.alive) return;
+  /* 凤凰：浴火重生一次 */
+  if (t.def.rebirth && !t.rebirthed) {
+    t.rebirthed = true;
+    t.hp = Math.round(t.maxHp * t.def.rebirth);
+    ringFx(t.x, t.y, 60, '#e8862a');
+    for (var rb = 0; rb < 12; rb++) {
+      if (particles.length > 600) break;
+      var rba = rand(0, TAU), rbs = rand(60, 200);
+      particles.push({ x: t.x, y: t.y, vx: Math.cos(rba) * rbs, vy: Math.sin(rba) * rbs, life: rand(0.3, 0.7), maxLife: 0.7, size: rand(2, 5), color: '#f2b13c' });
+    }
+    if (floaters.length < 220) {
+      floaters.push({ x: t.x, y: t.y - t.r - 14, t: 0, life: 1, text: '浴火重生', color: '#ff9a3c', size: 16 });
+    }
+    sfx('boom');
+    return;
+  }
   t.alive = false;
   if (t === controlled) { controlled = null; toast('你操控的士兵阵亡了，点击其他士兵可继续操控'); }
   if (src && src.team !== undefined && kills[src.team] !== undefined) kills[src.team]++;
@@ -693,6 +743,16 @@ function explode(p) {
   doExplosion(p, p.x, p.y, p.aoe, p.dmg, p.src);
 }
 /* 国王等光环：攻击者周围友军光环的增伤倍率 */
+/* 时光法师等加速光环：友军移速加成 */
+function auraSpeedOf(u) {
+  var bonus = 0;
+  for (var i = 0; i < units.length; i++) {
+    var a = units[i];
+    if (a === u || !a.alive || a.team !== u.team || !a.def.speedAura) continue;
+    if (hyp(a.x - u.x, a.y - u.y) <= a.def.speedAura.r && a.def.speedAura.mult > bonus) bonus = a.def.speedAura.mult;
+  }
+  return bonus;
+}
 function auraMult(u) {
   var m = 1;
   for (var i = 0; i < units.length; i++) {
@@ -991,11 +1051,12 @@ function simUnits(dt) {
       }
     }
     if (mvx !== 0 || mvy !== 0) {
-      u.x += mvx * def.speed * spdMult * dt;
-      u.y += mvy * def.speed * spdMult * dt;
+      var effSpd = def.speed * spdMult * (1 + auraSpeedOf(u));   // 时光法师加速光环
+      u.x += mvx * effSpd * dt;
+      u.y += mvy * effSpd * dt;
       u.walk += dt * def.speed * 0.05;
       u.face = Math.atan2(mvy, mvx);
-      u.spd = lerp(u.spd, def.speed * spdMult, Math.min(1, 6 * dt));
+      u.spd = lerp(u.spd, effSpd, Math.min(1, 6 * dt));
     } else {
       u.spd = lerp(u.spd, 0, Math.min(1, 6 * dt));
     }
@@ -1207,6 +1268,10 @@ function drawHuman(u, c, swing) {
   if (u.type === 'skeleton') skin = '#e8e8dc';
   if (u.type === 'necromancer') skin = '#c8e0b0';
   if (u.type === 'lich') skin = '#d8d0e8';
+  if (u.type === 'ghoul') skin = '#8aa878';
+  if (u.type === 'reaper') skin = '#2a2a35';
+  if (u.type === 'lava') skin = '#f2a13c';
+  if (u.type === 'ghost') skin = '#c8dce8';
   ctx.fillStyle = skin;
   ctx.beginPath(); ctx.arc(r * 0.2, 0, r * 0.42, 0, TAU); ctx.fill();
   /* 现代兵种：钢盔（覆盖脑后） */
@@ -1423,6 +1488,42 @@ function drawHuman(u, c, swing) {
   } else if (u.type === 'medic') {        // 医疗包
     ctx.fillStyle = '#e8e8e0'; ctx.strokeStyle = '#a8a8a0'; ctx.lineWidth = 1;
     ctx.fillRect(r * 0.5, -3, 7, 6); ctx.strokeRect(r * 0.5, -3, 7, 6);
+  } else if (u.type === 'crossbowman') {  // 重弩
+    seg(r * 0.3, -r * 0.5, r * 0.3, r * 0.5, '#8a6b4a', 3.5);   // 弓臂
+    seg(-r * 0.1, 0, r * 1.3, 0, '#5a4e3e', 3);                 // 机身
+    seg(r * 0.3, -r * 0.5, r * 0.3, r * 0.5, 'rgba(240,240,240,0.6)', 1);  // 弦
+  } else if (u.type === 'templar' || u.type === 'paladin') {    // 圣剑 + 光环
+    seg(r * 0.5, 0, r + 20, 0, u.type === 'paladin' ? '#ffe9a8' : '#e8c96a', 3.5);
+    seg(r * 0.72, -4, r * 0.72, 4, '#8a6b4a', 2.5);
+    ctx.strokeStyle = 'rgba(255,220,120,0.7)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(0, 0, r * 1.3, -2.4, -0.7); ctx.stroke();   // 圣光弧
+  } else if (u.type === 'ghoul') {        // 尸爪
+    for (var gs = -1; gs <= 1; gs += 2) {
+      seg(r * 0.5, gs * 3, r + 11, gs * 5, '#c8ced6', 2);
+    }
+  } else if (u.type === 'reaper') {       // 死神镰刀
+    seg(-r * 0.6, 0, r * 1.4, 0, '#4a4050', 4);
+    ctx.strokeStyle = '#c8ced6'; ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.moveTo(r * 1.4, 0);
+    ctx.quadraticCurveTo(r * 2.1, -r * 0.5, r * 1.5, -r * 1.0);
+    ctx.stroke();
+  } else if (u.type === 'chronomancer') { // 时之法杖 + 沙漏
+    seg(-r * 0.4, r * 0.45, r + 10, -r * 0.25, '#6a8a8a', 2.5);
+    ctx.fillStyle = 'rgba(138,200,200,0.85)';
+    ctx.beginPath();
+    ctx.moveTo(r + 10, -r * 0.25 - 5); ctx.lineTo(r + 14, -r * 0.25);
+    ctx.lineTo(r + 10, -r * 0.25 + 5); ctx.lineTo(r + 6, -r * 0.25);
+    ctx.closePath(); ctx.fill();
+  } else if (u.type === 'flamer') {       // 喷火管
+    seg(r * 0.2, 0, r + 14, 0, '#4e4438', 4.5);
+    ctx.fillStyle = '#c24a2a';
+    ctx.beginPath(); ctx.arc(r + 15, 0, 2.5, 0, TAU); ctx.fill();
+  } else if (u.type === 'lava') {         // 熔岩拳
+    for (var ls = -1; ls <= 1; ls += 2) {
+      ctx.fillStyle = '#f2a13c';
+      ctx.beginPath(); ctx.arc(r * 0.9, ls * r * 0.5, r * 0.28, 0, TAU); ctx.fill();
+    }
   }
   ctx.restore();
 }
@@ -1675,6 +1776,119 @@ function drawHeli(u, c, swing) {
   }
   ctx.restore();
 }
+function drawRam(u, c, swing) {           // 攻城锤：顶棚 + 悬挂圆木
+  var r = u.r;
+  ctx.fillStyle = '#33382e';              // 轮子
+  ctx.beginPath(); ctx.arc(-r * 0.6, -r * 0.8, r * 0.32, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(-r * 0.6, r * 0.8, r * 0.32, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(r * 0.6, -r * 0.8, r * 0.32, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(r * 0.6, r * 0.8, r * 0.32, 0, TAU); ctx.fill();
+  var rec = swing > 0 ? swing * r * 0.5 : 0;   // 冲击前后窜动
+  seg(-r * 0.2, 0, r * 1.7 + rec, 0, '#6a4e2e', r * 0.42);   // 圆木
+  ctx.fillStyle = '#8a8378';              // 锤头
+  ctx.beginPath(); ctx.arc(r * 1.7 + rec, 0, r * 0.3, 0, TAU); ctx.fill();
+  ctx.fillStyle = c.main; ctx.strokeStyle = c.dark; ctx.lineWidth = 2.5;
+  ctx.beginPath();                        // 顶棚
+  ctx.moveTo(-r * 1.05, -r * 0.85); ctx.lineTo(r * 0.85, -r * 0.55);
+  ctx.lineTo(r * 0.85, r * 0.55); ctx.lineTo(-r * 1.05, r * 0.85);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+}
+function drawPhoenix(u, c, swing) {       // 凤凰：展翼火鸟
+  var r = u.r;
+  var flap = Math.sin(u.walk * 14) * 0.5;                       // 扑翼
+  ctx.fillStyle = '#e8862a'; ctx.strokeStyle = '#b85a1a'; ctx.lineWidth = 2;
+  for (var s = -1; s <= 1; s += 2) {      // 双翼
+    ctx.save();
+    ctx.rotate(s * (0.55 + flap * 0.35));
+    ctx.beginPath();
+    ctx.moveTo(0, s * r * 0.3);
+    ctx.lineTo(-r * 1.9, s * r * 1.05);
+    ctx.lineTo(-r * 0.5, s * r * 0.5);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+  for (s = -1; s <= 1; s += 2) {          // 尾羽
+    seg(-r * 0.8, 0, -r * 1.9, s * r * 0.55, '#f2a13c', 2.5);
+  }
+  ctx.fillStyle = c.main; ctx.strokeStyle = c.dark; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.ellipse(0, 0, r * 0.95, r * 0.7, 0, 0, TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#f2c96b';              // 头 + 喙
+  ctx.beginPath(); ctx.arc(r * 0.75, 0, r * 0.34, 0, TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#e86a2a';
+  ctx.beginPath();
+  ctx.moveTo(r * 1.05, 0); ctx.lineTo(r * 1.4, -r * 0.12); ctx.lineTo(r * 1.4, r * 0.12);
+  ctx.closePath(); ctx.fill();
+  if (u.rebirthed) {                      // 已重生：体表火纹
+    ctx.strokeStyle = 'rgba(255,180,80,0.8)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.6, 0.4, 2.2); ctx.stroke();
+  }
+}
+function drawMammoth(u, c, swing) {       // 猛犸：长毛象
+  var r = u.r;
+  ctx.fillStyle = c.dark;                 // 腿
+  for (var s = -1; s <= 1; s += 2) {
+    ctx.fillRect(-r * 0.7, s * r * 0.55 - r * 0.2, r * 0.55, r * 0.4);
+    ctx.fillRect(r * 0.2, s * r * 0.55 - r * 0.2, r * 0.55, r * 0.4);
+  }
+  ctx.fillStyle = c.main; ctx.strokeStyle = c.dark; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.ellipse(0, 0, r * 1.25, r * 0.9, 0, 0, TAU); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = '#5a4632'; ctx.lineWidth = 2;   // 长鼻
+  ctx.beginPath();
+  ctx.moveTo(r * 1.0, -r * 0.1);
+  ctx.quadraticCurveTo(r * 1.75, r * 0.2, r * 1.55, r * 0.7);
+  ctx.stroke();
+  ctx.strokeStyle = '#e8e0d0'; ctx.lineWidth = 3.5; // 双牙
+  for (s = -1; s <= 1; s += 2) {
+    ctx.beginPath();
+    ctx.moveTo(r * 0.95, s * r * 0.3);
+    ctx.quadraticCurveTo(r * 1.7, s * r * 0.45, r * 1.95, s * r * 0.05);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#8a735a';              // 头
+  ctx.beginPath(); ctx.arc(r * 0.85, 0, r * 0.45, 0, TAU); ctx.fill();
+  ctx.strokeStyle = c.dark; ctx.lineWidth = 2.5;    // 背毛
+  for (s = -3; s <= 3; s++) {
+    seg(s * r * 0.3, -r * 0.85, s * r * 0.3, -r * 1.15, '#6a5a45', 2.5);
+  }
+}
+function drawMecha(u, c, swing) {         // 武装机甲
+  var r = u.r;
+  ctx.fillStyle = '#2e3540';              // 双腿
+  ctx.fillRect(-r * 0.55, -r * 0.85, r * 0.4, r * 1.7);
+  ctx.fillRect(r * 0.15, -r * 0.85, r * 0.4, r * 1.7);
+  ctx.fillStyle = c.main; ctx.strokeStyle = c.dark; ctx.lineWidth = 2.5;
+  ctx.fillRect(-r * 0.75, -r * 0.95, r * 1.5, r * 1.9);         // 躯干
+  ctx.strokeRect(-r * 0.75, -r * 0.95, r * 1.5, r * 1.9);
+  ctx.fillStyle = '#2e3540';              // 头
+  ctx.fillRect(-r * 0.3, -r * 0.4, r * 0.6, r * 0.45);
+  ctx.fillStyle = '#ffd76a';              // 眼
+  ctx.fillRect(-r * 0.2, -r * 0.28, r * 0.4, r * 0.12);
+  var rec = swing > 0 ? swing * r * 0.3 : 0;                    // 肩部火箭巢（发射后坐）
+  ctx.fillStyle = '#4e5a66'; ctx.strokeStyle = '#333d49'; ctx.lineWidth = 2;
+  ctx.fillRect(-r * 0.4 + rec, -r * 1.35, r * 1.5, r * 0.5);    // 火箭巢
+  ctx.strokeRect(-r * 0.4 + rec, -r * 1.35, r * 1.5, r * 0.5);
+  ctx.fillStyle = '#1e1a14';
+  for (var h = -1; h <= 1; h++) {
+    ctx.beginPath(); ctx.arc(r * 1.1 + rec, -r * 1.1 + h * r * 0.16, r * 0.09, 0, TAU); ctx.fill();
+  }
+}
+function drawDrone(u, c) {                // 无人机：四旋翼
+  var r = u.r;
+  ctx.translate(0, -r * 1.6);             // 悬浮
+  ctx.strokeStyle = '#3a424c'; ctx.lineWidth = 2;   // X 臂
+  seg(-r * 0.7, -r * 0.7, r * 0.7, r * 0.7, '#3a424c', 2);
+  seg(-r * 0.7, r * 0.7, r * 0.7, -r * 0.7, '#3a424c', 2);
+  ctx.fillStyle = c.main; ctx.strokeStyle = c.dark; ctx.lineWidth = 1.5;
+  ctx.fillRect(-r * 0.5, -r * 0.5, r, r);
+  ctx.strokeRect(-r * 0.5, -r * 0.5, r, r);
+  var spin = Math.floor(performance.now() / 60) % 2 === 0;      // 旋翼闪烁
+  ctx.strokeStyle = spin ? '#c8d0d8' : 'rgba(200,208,216,0.4)';
+  for (var s = -1; s <= 1; s += 2) {
+    for (var t2 = -1; t2 <= 1; t2 += 2) {
+      ctx.beginPath(); ctx.arc(s * r * 0.7, t2 * r * 0.7, r * 0.45, 0, TAU); ctx.stroke();
+    }
+  }
+}
 function previewUnit(p) {
   var def = DEFS[p.type];
   return {
@@ -1712,7 +1926,16 @@ function drawUnit(u) {
   else if (u.type === 'tank') drawTank(u, c, swing);
   else if (u.type === 'mlrs') drawMLRS(u, c, swing);
   else if (u.type === 'heli') drawHeli(u, c, swing);
-  else drawHuman(u, c, swing);
+  else if (u.type === 'ram') drawRam(u, c, swing);
+  else if (u.type === 'phoenix') drawPhoenix(u, c, swing);
+  else if (u.type === 'mammoth') drawMammoth(u, c, swing);
+  else if (u.type === 'mecha') drawMecha(u, c, swing);
+  else if (u.type === 'drone') drawDrone(u, c);
+  else {
+    if (u.type === 'ghost') ctx.globalAlpha = 0.62;
+    drawHuman(u, c, swing);
+    if (u.type === 'ghost') ctx.globalAlpha = 1;
+  }
   if (u.poisonT > 0) {                     // 中毒绿罩
     ctx.fillStyle = 'rgba(110,220,110,0.22)';
     ctx.beginPath(); ctx.arc(0, 0, r * 1.15, 0, TAU); ctx.fill();
