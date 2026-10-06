@@ -301,32 +301,32 @@
     return best;
   }
 
-  // —— 前方障碍几何避让 v2（2026-10-04：用户实测 v1 抖+避让差，重写为连续转向场）——
-  // v1 毛病：阶跃式加转向（进锥猛加/出锥撒手）与基础转向打架→来回纠偏=画面抖；
-  //          多障碍同侧重复叠加→过度转向。v2：避让强度随重叠度连续渐变（无阶跃），
-  //          避让时按强度压制基础转向（不再对拉），减速温和（最多 35%）。
-  // sideKick（2026-10-05 七代专用）：侧向排斥——v2 只推前方锥内障碍，绕路时车体侧面
-  //          贴近的障碍不推=「瞻前不顾后」（绕开正面蹭上侧面）。七代传 sideKick>0 启用
-  //          全周排斥（侧后方按侧偏角衰减），五/六代不传=行为不变（共用函数零影响）。
-  function avoidCmd(tank, obstacles, turnIn, thrIn, sideKick) {
+  // —— 前方障碍几何避让 v2/v3（v2=2026-10-04 连续转向场；v3=10-06 城市强化，七代专用）——
+  // v3（传 urban=true 启用，五/六代不传=v2 行为冻结不变）：①预警分级（大障碍 45m 提前发现）；
+  // ②建筑权重更高（半径>8m 危险×1.4）；③缝宽判断——前方两侧近障缝 <8m（车宽 3.5×2.2）
+  // 不钻缝，全力绕宽侧+狠减速；④紧急贴墙（overlap>0.7）减速 35%→70%。
+  // sideKick：侧向排斥（七代专用，绕路时防蹭侧面；五/六代不传=行为不变）。
+  function avoidCmd(tank, obstacles, turnIn, thrIn, sideKick, urban) {
     var thr = (thrIn === undefined ? 0 : thrIn);
     var turn = turnIn || 0;
     if (!obstacles || !obstacles.length) return { turn: Math.max(-1, Math.min(1, turn)), thr: thr };
     var fwdX = Math.sin(tank.heading), fwdZ = Math.cos(tank.heading);
     var rightX = fwdZ, rightZ = -fwdX;
-    var push = 0, wSum = 0;
+    var push = 0, wSum = 0, maxOv = 0;
+    var nearR = null, nearL = null;   // 前方最近锥内障碍（缝宽判断用）
     for (var i = 0; i < obstacles.length; i++) {
       var ob = obstacles[i];
       if (!ob || !ob.position) continue;
       var dx = ob.position.x - tank.position.x, dz = ob.position.z - tank.position.z;
       var dd = Math.hypot(dx, dz);
-      if (dd > 30 || dd < 0.1) continue;
+      var obR = ob.radius || 3;
+      var sense = urban ? 30 + Math.min(15, Math.max(0, obR - 3) * 1.5) : 30;   // v3 预警分级：石头 30m、建筑半径 15m→45m
+      if (dd > sense || dd < 0.1) continue;
       var fwdDot = dx * fwdX + dz * fwdZ;
-      var r = (ob.radius || 3) + 3.5;
+      var r = obR + 3.5;
       var sideDist = dx * rightX + dz * rightZ;
       var overlap, urgency, w;
       if (fwdDot <= 0) {
-        // 侧后方：仅 sideKick 模式参与（按前向角衰减——正后方 0.1、正侧 0.5）
         if (!sideKick) continue;
         var backFade = 0.5 * (1 - Math.min(1, -fwdDot / 30)) * sideKick;
         if (Math.abs(sideDist) >= r * 1.6) continue;
@@ -339,17 +339,34 @@
       }
       if (Math.abs(sideDist) >= r) continue;
       overlap = 1 - Math.abs(sideDist) / r;              // 0~1：挡得越死值越大（连续）
-      urgency = 0.4 + 0.6 * (30 - dd) / 30;              // 越近权重越大
+      if (urban && fwdDot > 0 && dd < 28 && overlap > 0.25) {    // v3：记录两侧最近锥内障碍（缝宽判断）
+        if (sideDist >= 0) { if (!nearR || dd < nearR.dd) nearR = { dd: dd, side: sideDist, r: r }; }
+        else { if (!nearL || dd < nearL.dd) nearL = { dd: dd, side: sideDist, r: r }; }
+      }
+      urgency = (0.4 + 0.6 * (30 - Math.min(30, dd)) / 30) * (urban && obR > 8 ? 1.4 : 1);   // v3：建筑更危险
       w = overlap * urgency;
       push += (sideDist >= 0 ? -1 : 1) * (0.25 + 0.75 * overlap) * w;
       wSum += w;
+      if (overlap > maxOv) maxOv = overlap;
     }
+    // 缝宽判断：前方两侧都有近障且横向净缝 <8m → 不钻缝，往宽的一侧全力绕 + 狠减速
+    var brake = 0.35;
+    if (urban && nearR && nearL) {
+      var gap = (nearR.side - nearR.r) - (nearL.side + nearL.r);   // 两障碍边缘间距
+      if (gap < 8) {
+        var wide = (nearR.side - nearR.r) > -(nearL.side + nearL.r) ? 1 : -1;   // 更宽的一侧
+        push = wide * Math.max(Math.abs(push), 0.85);
+        brake = 0.7;
+        wSum = Math.max(wSum, 1);   // 标记为有效推力
+      }
+    }
+    if (urban && maxOv > 0.7) brake = 0.7;   // v3 紧急贴墙：狠减速
     if (!wSum) return { turn: Math.max(-1, Math.min(1, turn)), thr: thr };
     push = Math.max(-0.85, Math.min(0.85, push));            // 总量封顶（防多障碍叠加过度转向）
     var damp = 1 - Math.min(0.7, Math.abs(push));            // 避让强度越高，基础转向让位越多（防对拉抖动）
     return {
       turn: Math.max(-1, Math.min(1, turn * damp + push)),
-      thr: Math.max(-1, Math.min(1, thr * (1 - 0.35 * Math.min(1, Math.abs(push)))))
+      thr: Math.max(-1, Math.min(1, thr * (1 - brake * Math.min(1, Math.abs(push)))))
     };
   }
 

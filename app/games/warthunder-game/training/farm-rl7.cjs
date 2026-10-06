@@ -33,16 +33,24 @@ function ppoGet(path) {
   });
 }
 
-// 局末(over)延迟重开；45s 未开局强制 reload —— 持续守望（同 farm-rl 模式）
+// 局末(over)延迟重开；45s 未开局强制 reload；wantMap 校验（城市图定向采样）——持续守望
 function armWatch(win, idx, url) {
   if (win.isDestroyed()) return;
+  const wantMap = /wantMap=(\w+)/.exec(url);
   const load = () => win.loadURL(url + '&r=' + Date.now()).catch(() => {});
   let noGameSince = Date.now();
   const w = setInterval(() => {
     if (win.isDestroyed()) { clearInterval(w); return; }
     win.webContents.executeJavaScript(
-      `window.__game ? (window.__game.state === 'over' ? 'over' : 'ok') : 'nogame'`, true
-    ).then((s) => {
+      `window.__game ? JSON.stringify({ s: window.__game.state, m: window.__game.mapId }) : 'null'`, true
+    ).then((r) => {
+      let s = 'nogame', m = '';
+      try { const j = JSON.parse(r); s = j.s === 'over' ? 'over' : 'ok'; m = j.m; } catch (e) { s = r === 'null' ? 'nogame' : 'ok'; }
+      if (s === 'ok' && wantMap && m && m !== wantMap[1]) {   // 地图不对（如非城市）：重开撞图（1/5 概率，均值 5 次内中）
+        log(`win${idx} 地图 ${m}≠${wantMap[1]} → 重开撞图`);
+        clearInterval(w); setTimeout(load, 300); armWatch(win, idx, url);
+        return;
+      }
       if (s === 'over') { log(`win${idx}(${url.match(/rl7=(\w+)/)[1]}) 局结束 → 重开`); clearInterval(w); setTimeout(load, 3000); armWatch(win, idx, url); }
       else if (s === 'ok') noGameSince = Date.now();
       if (s !== 'ok' && Date.now() - noGameSince > 45000) {
@@ -64,14 +72,16 @@ app.whenReady().then(async () => {
   log(`PPO7 服务器就绪: gen=${st.gen}`);
 
   for (let i = 0; i < NWINS; i++) {
-    const side = SIDES[i % SIDES.length] === 'A' ? 'ally' : 'enemy';
+    const ch = SIDES[i % SIDES.length];
+    const side = ch === 'E' ? 'enemy' : 'ally';                 // A/C=ally（蓝队友位）、E=enemy（红弱侧位）
+    const mapQ = ch === 'C' ? '&wantMap=city' : '';             // C=城市专窗（撞图重开，密集场景定向采样）
     const win = new BrowserWindow({
       show: false,
       webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
     });
-    const url = `http://localhost:${PORT}/?auto=tank&rl7=${side}` +
+    const url = `http://localhost:${PORT}/?auto=tank&rl7=${side}${mapQ}` +
       `&rl7Srv=${encodeURIComponent('http://127.0.0.1:' + PPO_PORT)}&farmSeed=${i}-${Date.now()}`;
-    win.webContents.on('render-process-gone', (e, d) => log(`win${i}(${side}) RENDERER GONE: ${d.reason}`));
+    win.webContents.on('render-process-gone', (e, d) => log(`win${i}(${side}${ch === 'C' ? '/city' : ''}) RENDERER GONE: ${d.reason}`));
     win.loadURL(url).catch(() => {});
     armWatch(win, i, url);
   }

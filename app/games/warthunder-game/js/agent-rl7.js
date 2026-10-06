@@ -45,7 +45,8 @@
   var APPROACH_K = 0.01 / 10;         // 干净接近奖：+0.01×Δdist/10（每米 0.001）
   var APPROACH_CAP = 20;              // 单步 Δdist 封顶（防换目标/传送虚增）
   var FACE_K = 0.003;                 // 朝敌奖：+0.003×max(0,cos 朝敌角)（治绕圈·正向）
-  var TRAIL_N = 40;                   // 绕圈检测窗：40 步 = 4s
+  var TRAIL_N = 40;                   // 绕圈小圈窗：40 步 = 4s
+  var TRAIL_BIG = 80;                 // 绕圈大圈窗：80 步 = 8s（大半径绕行 4s 窗抓不到）
   var TRAIL_PATH_MIN = 15;            // 窗口里程阈值（m）：低于它=没在跑，不判绕圈
   var TRAIL_RATIO = 0.3;              // 净位移/里程 < 0.3 = 绕圈/空转（直线冲敌≈0.9）
   var CIRCLE_PEN = 0.03;              // 绕圈罚：-0.03/步（连续绕 10s=-3.0；窗口内开过火不罚=合法缠斗）
@@ -197,8 +198,8 @@
       pilots.forEach(function (rec, tank) {
         if (rec.dead) return;
         if (h.owner === tank && h.target && h.target.team !== tank.team) {
-          if (h.killed) { rec.pend += 10; stats.kills++; }
-          else { rec.pend += 2; stats.hits++; }
+          if (h.killed) { rec.pend += 10; stats.kills++; rec.hitSinceThink = true; }
+          else { rec.pend += 2; stats.hits++; rec.hitSinceThink = true; }
         }
         if (h.target === tank) {
           if (h.killed) closeEpisode(tank, true);
@@ -217,7 +218,7 @@
     tank.__pilotedBy = 'rl7';   // 跨脚本互斥：agent-bc / agent-rl 见此标记不重复接管
     var rec = {
       tank: tank, tid: winId + '-' + (++tidSeq), dead: false, pend: 0,
-      applied: null, appliedAim: null, appliedFire: 0, firedSinceThink: false,
+      applied: null, appliedAim: null, appliedFire: 0, firedSinceThink: false, hitSinceThink: false,
       nextObs: null, lastEnemies: [], lastObstacles: [],
       stuck: CORE.makeStuck(), tgt: null, prevD: null, prevTgt: null,
       trail: [],   // 绕圈检测窗：[{x,z,fired}]
@@ -446,10 +447,6 @@
       if (d > BAND_HI || d < BAND_LO) rec.pend -= 0.01;
 
       // ③ 朝敌奖（+0.003×max(0,cos)）：车头指向最近敌（治绕圈·正向引导）
-      var dxE = e0.position.x - tank.position.x, dzE = e0.position.z - tank.position.z;
-      var distE = Math.hypot(dxE, dzE) || 1;
-      var cosB = (dxE * Math.sin(tank.heading) + dzE * Math.cos(tank.heading)) / distE;
-      if (cosB > 0) rec.pend += FACE_K * cosB;
 
       // ⑤ 瞄准蒸馏塑形（A'）：|网络瞄准 − 几何炮手解|（归一化域，yaw 带 wrap 处理）每步小额罚。
       //    几何炮手解=打当前认领目标的最优瞄准（含提前量+下坠补偿）——比录制标签还好的老师。
@@ -466,27 +463,58 @@
         stats.aimErrN = (stats.aimErrN || 0) + 1;
       }
 
-      // ④ 绕圈罚（-0.03/步）：4s 滑动窗，里程>15m 且净位移比<0.3 且窗口内未开火
-      rec.trail.push({ x: tank.position.x, z: tank.position.z, fired: rec.firedSinceThink });
-      if (rec.trail.length > TRAIL_N) rec.trail.shift();
-      rec.firedSinceThink = false;
-      if (rec.trail.length === TRAIL_N) {
-        var pathLen = 0, firedAny = false, i2;
-        for (i2 = 1; i2 < TRAIL_N; i2++) {
-          pathLen += Math.hypot(rec.trail[i2].x - rec.trail[i2 - 1].x, rec.trail[i2].z - rec.trail[i2 - 1].z);
-          if (rec.trail[i2].fired) firedAny = true;
+      // ④ 绕圈罚 v2（10-06 用户实战反馈"还是绕圈"→ 修两漏洞）：
+      //    小圈（4s/40步）：位移比<0.3 且未开火——开火窗口收紧到 0.15（开一炮≠整窗免罚）
+      //    大圈（8s/80步）：累积航向>270° 且未命中（命中=绕圈打弱侧是战术，光绕不中才是空转）
+      //      且位移比<0.6 → 罚 -0.02/步
+      rec.trail.push({ x: tank.position.x, z: tank.position.z,
+                       fired: rec.firedSinceThink, hit: rec.hitSinceThink,
+                       h: tank.heading });
+      if (rec.trail.length > TRAIL_BIG) rec.trail.shift();
+      rec.firedSinceThink = false; rec.hitSinceThink = false;
+      var T = rec.trail, tn = T.length;
+      if (tn >= TRAIL_N) {   // —— 小圈检测（最近 40 步）——
+        var s0i = tn - TRAIL_N, pathLen = 0, firedAny = false, i2;
+        for (i2 = s0i + 1; i2 < tn; i2++) {
+          pathLen += Math.hypot(T[i2].x - T[i2 - 1].x, T[i2].z - T[i2 - 1].z);
+          if (T[i2].fired) firedAny = true;
         }
-        if (rec.trail[0].fired) firedAny = true;
-        var netDist = Math.hypot(rec.trail[TRAIL_N - 1].x - rec.trail[0].x,
-                                 rec.trail[TRAIL_N - 1].z - rec.trail[0].z);
-        if (!firedAny && pathLen > TRAIL_PATH_MIN && netDist / pathLen < TRAIL_RATIO) {
+        if (T[s0i].fired) firedAny = true;
+        var netDist = Math.hypot(T[tn - 1].x - T[s0i].x, T[tn - 1].z - T[s0i].z);
+        var ratio = netDist / (pathLen || 1);
+        var lim = firedAny ? 0.15 : TRAIL_RATIO;   // 开过火只豁免小幅绕（一炮免罚漏洞收紧）
+        if (pathLen > TRAIL_PATH_MIN && ratio < lim) {
           rec.pend -= CIRCLE_PEN;
-          stats.circlePen++;
-          stats.circleTrig++;
+          stats.circlePen++; stats.circleTrig++;
+        }
+      }
+      if (tn >= TRAIL_BIG) {  // —— 大圈检测（80 步全窗）——
+        var pathB = 0, rot = 0, hitAny = false, i3;
+        for (i3 = 1; i3 < tn; i3++) {
+          pathB += Math.hypot(T[i3].x - T[i3 - 1].x, T[i3].z - T[i3 - 1].z);
+          var dh = T[i3].h - T[i3 - 1].h;
+          while (dh > Math.PI) dh -= 2 * Math.PI;
+          while (dh < -Math.PI) dh += 2 * Math.PI;
+          rot += dh;
+          if (T[i3].hit) hitAny = true;
+        }
+        if (T[0].hit) hitAny = true;
+        var netB = Math.hypot(T[tn - 1].x - T[0].x, T[tn - 1].z - T[0].z);
+        if (!hitAny && pathB > 40 && Math.abs(rot) > 4.7 && netB / pathB < 0.6) {   // >270° 且位移效率低
+          rec.pend -= 0.02;
+          stats.bigCircleTrig = (stats.bigCircleTrig || 0) + 1;
         }
       }
     } else {
       rec.trail.length = 0;   // 离开交战区清窗（导航段不算绕圈账）
+    }
+
+    // ③ 朝敌奖（+0.003×max(0,cos)）：导航段+交战段都发——导航段是主战场（进场走直线不绕路）
+    if (sampled && e0) {
+      var dxE = e0.position.x - tank.position.x, dzE = e0.position.z - tank.position.z;
+      var distE = Math.hypot(dxE, dzE) || 1;
+      var cosB = (dxE * Math.sin(tank.heading) + dzE * Math.cos(tank.heading)) / distE;
+      if (cosB > 0) rec.pend += FACE_K * cosB;
     }
 
     // ② 干净接近奖（+0.01×Δdist/10）：导航段+交战段都发（导航段是它最大的用武之地）
@@ -544,7 +572,7 @@
     }
     // ① 避让折叠：执行值 = 采样值经 avoidCmd（连续转向场）——策略从此「看见」避让层，
     //    PPO 学会与它配合直至内化（收敛后避让推力趋零）。执行值参与 logp（aim/fire 维用原采样）。
-    var avF = CORE.avoidCmd(tank, obstacles, clamp1(a1), clamp1(a0), 0.6);   // 0.6=侧向排斥（治瞻前不顾后）
+    var avF = CORE.avoidCmd(tank, obstacles, clamp1(a1), clamp1(a0), 0.6, true);   // 0.6=侧向排斥；true=城市强化v3（预警45m/建筑权重/缝宽/急减速）
     var eThr = avF.thr, eTurn = avF.turn;
     if (TRAIN) {
       var z0e = (eThr - out.m[0]) / s0, z1e = (eTurn - out.m[1]) / s1;
@@ -629,7 +657,7 @@
               var obs = buildObs7(t, g, lastEnemies, lastObstacles);   // 92 维感知扩容
               var out = forward(obs);                       // 确定性均值
               // 避让折叠（与训练壳同款：10Hz think 内算执行值，帧间直接执行）
-              var avT = CORE.avoidCmd(t, lastObstacles, clamp1(out.m[1]), clamp1(out.m[0]), 0.6);   // 侧向排斥同款
+              var avT = CORE.avoidCmd(t, lastObstacles, clamp1(out.m[1]), clamp1(out.m[0]), 0.6, true);   // 侧向排斥+城市强化同款
               applied = [avT.thr, avT.turn];
               appliedFire = out.f > 0 ? 1 : 0;              // 不带温度（保守），兜底会补
               q.thinks++;
