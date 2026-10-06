@@ -33,34 +33,47 @@ function ppoGet(path) {
   });
 }
 
-// 地图池（与 main.js MAPS 同步；auto=tank 默认恒为 MAPS[0]=city——无头窗不点按钮永远同一张图）
+// 地图池（与 main.js MAPS 同步；auto=tank 恒取 MAPS[0]=city——reload 会把 mapIndex 归零，换图只能游戏内）
 const MAPS_TANK = ['city','open','hills','desert','forest','factory','snow','night','rain','canyon','island','storm'];
-// 局末(over)延迟重开；45s 未开局强制 reload；wantMap 校验重开撞图 —— 持续守望
-// mapSeq：'' 固定图（兼容旧行为）| 'all' 按序轮换 12 图 | 'rand' 每局随机（用户会换图玩 → 训练必须覆盖）
-function armWatch(win, idx, mkUrl, nextMap) {
+const MAP_NAMES = ['城镇巷战','旷野','丘陵山地','沙漠','密林','工业厂区','雪原','夜战','雨天','峡谷','海岛','雷暴'];
+// 局末游戏内换图（v3 确定性换图，替代撞图重开——游戏开局恒 city，撞图对非 city 目标=死循环）：
+// 读 #btn-map 文本得当前图索引 → 点 N 次推到目标图 → 点 #btn-again（restart 不重载页面，mapIndex 保留）
+function armWatch(win, idx, url, nextMap) {
   if (win.isDestroyed()) return;
-  const load = () => win.loadURL(mkUrl(nextMap && nextMap())).catch(() => {});
-  const wantOf = () => nextMap && nextMap.peek();
-  let noGameSince = Date.now();
+  const load = () => win.loadURL(url + '&r=' + Date.now()).catch(() => {});
+  let noGameSince = Date.now(), restarting = false, restartAt = 0;
   const w = setInterval(() => {
     if (win.isDestroyed()) { clearInterval(w); return; }
+    if (restarting && Date.now() - restartAt > 8000) restarting = false;
     win.webContents.executeJavaScript(
       `window.__game ? JSON.stringify({ s: window.__game.state, m: window.__game.mapId }) : 'null'`, true
     ).then((r) => {
       let s = 'nogame', m = '';
-      try { const j = JSON.parse(r); s = j.s === 'over' ? 'over' : 'ok'; m = j.m; } catch (e) { s = r === 'null' ? 'nogame' : 'ok'; }
-      const want = wantOf();
-      if (s === 'ok' && want && m && m !== want) {   // 本局图 ≠ 目标图：重开撞图
-        log(`win${idx} 地图 ${m}≠${want} → 重开撞图`);
-        clearInterval(w); setTimeout(load, 300); armWatch(win, idx, mkUrl, nextMap);
-        return;
+      try { const j = JSON.parse(r); s = j.s; m = j.m; } catch (e) { }
+      if (s !== 'nogame') noGameSince = Date.now();
+      if (s === 'over' && !restarting) {
+        restarting = true; restartAt = Date.now();
+        const tgt = nextMap();
+        win.webContents.executeJavaScript(`(() => {
+          const IDS = ${JSON.stringify(MAPS_TANK)}, NAMES = ${JSON.stringify(MAP_NAMES)};
+          const tgt = ${JSON.stringify(tgt)};
+          const btn = document.getElementById('btn-map'), again = document.getElementById('btn-again');
+          if (!btn || !again) return 'no-ui';
+          const mm = btn.innerHTML.match(/<b>([^<]*)<\\/b>/);
+          const curIdx = mm ? Math.max(0, NAMES.indexOf(mm[1])) : 0;
+          const clicks = (IDS.indexOf(tgt) - curIdx + IDS.length) % IDS.length;
+          for (let k = 0; k < clicks; k++) btn.click();
+          again.click();
+          return '→' + tgt + '(+' + clicks + ')';
+        })()`, true).then((res) => {
+          log(`win${idx} 局结束(${m}) ${res || '换图重开'}`);
+          setTimeout(() => { restarting = false; }, 3000);
+        }).catch(() => { restarting = false; });
       }
-      if (s === 'over') { log(`win${idx} 局结束(${m}) → 重开`); clearInterval(w); setTimeout(load, 3000); armWatch(win, idx, mkUrl, nextMap); }
-      else if (s === 'ok') noGameSince = Date.now();
-      if (s !== 'ok' && Date.now() - noGameSince > 45000) {
-        log(`win${idx} 45s 未开局 → reload`); clearInterval(w); load(); armWatch(win, idx, mkUrl, nextMap);
+      if (s === 'nogame' && Date.now() - noGameSince > 45000) {
+        log(`win${idx} 45s 未开局 → reload 兜底`); clearInterval(w); load(); armWatch(win, idx, url, nextMap);
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }, 2000);
 }
 
@@ -75,29 +88,24 @@ app.whenReady().then(async () => {
   if (!st) { log(`❌ PPO 服务器 ${PPO} 不可达，先启动：python3 training/ppo7_train.py ${PPO_PORT}`); app.quit(); return; }
   log(`PPO7 服务器就绪: gen=${st.gen}`);
 
-  const MAPSEQ = (process.env.MAPSEQ || (process.argv[7] || 'rand')).toLowerCase();   // ''/all/rand
+  const MAPSEQ = (process.argv[7] || 'rand').toLowerCase();   // ''=固定不换 | all=按序轮换 | rand=随机（默认）
   for (let i = 0; i < NWINS; i++) {
     const ch = SIDES[i % SIDES.length];
-    const side = ch === 'E' ? 'enemy' : 'ally';                 // A/C=ally（蓝队友位）、E=enemy（红弱侧位）
-    const fixedMap = ch === 'C' ? 'city' : null;                // C=城市专窗（固定 city）
+    const side = ch === 'E' ? 'enemy' : 'ally';               // A/C=ally（蓝队友位）、E=enemy（红弱侧位）
+    const fixedMap = ch === 'C' ? 'city' : null;              // C=城市保底窗（固定 city）
     let round = 0;
-    const nextMap = (MAPSEQ && !fixedMap) ? (() => {
-      let cur = null;
-      const gen = () => { cur = MAPSEQ === 'rand'
-        ? MAPS_TANK[Math.floor(Math.random() * MAPS_TANK.length)]
-        : MAPS_TANK[(i + round++) % MAPS_TANK.length]; return cur; };
-      gen.peek = () => cur;
-      return gen;
-    })() : null;
-    const mkUrl = (m) => `http://localhost:${PORT}/?auto=tank&rl7=${side}` +
-      `${m ? '&wantMap=' + m : ''}&rl7Srv=${encodeURIComponent('http://127.0.0.1:' + PPO_PORT)}&farmSeed=${i}-${Date.now()}`;
+    const nextMap = fixedMap ? (() => fixedMap)
+      : (MAPSEQ === 'rand' ? () => MAPS_TANK[Math.floor(Math.random() * MAPS_TANK.length)]
+                           : () => MAPS_TANK[(i + round++) % MAPS_TANK.length]);
+    const url = `http://localhost:${PORT}/?auto=tank&rl7=${side}` +
+      `&rl7Srv=${encodeURIComponent('http://127.0.0.1:' + PPO_PORT)}&farmSeed=${i}-${Date.now()}`;
     const win = new BrowserWindow({
       show: false,
       webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
     });
-    win.webContents.on('render-process-gone', (e, d) => log(`win${i}(${side}${fixedMap ? '/' + fixedMap : MAPSEQ ? '/' + MAPSEQ : ''}) RENDERER GONE: ${d.reason}`));
-    win.loadURL(mkUrl(nextMap ? nextMap() : fixedMap)).catch(() => {});
-    armWatch(win, i, mkUrl, nextMap || (fixedMap ? { peek: () => fixedMap, call: () => fixedMap } : null));
+    win.webContents.on('render-process-gone', (e, d) => log(`win${i}(${side}) RENDERER GONE: ${d.reason}`));
+    win.loadURL(url).catch(() => {});
+    armWatch(win, i, url, nextMap);
   }
   log(`farm started: 目标 ${STEP_GOAL} 步 windows=${NWINS} sides=${SIDES} game=:${PORT} ppo=:${PPO_PORT}`);
   const goal0 = (await ppoGet('/stats') || {}).steps_total || 0;   // 起跑线（不含历史步数）
