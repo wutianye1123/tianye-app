@@ -33,11 +33,14 @@ function ppoGet(path) {
   });
 }
 
-// 局末(over)延迟重开；45s 未开局强制 reload；wantMap 校验（城市图定向采样）——持续守望
-function armWatch(win, idx, url) {
+// 地图池（与 main.js MAPS 同步；auto=tank 默认恒为 MAPS[0]=city——无头窗不点按钮永远同一张图）
+const MAPS_TANK = ['city','open','hills','desert','forest','factory','snow','night','rain','canyon','island','storm'];
+// 局末(over)延迟重开；45s 未开局强制 reload；wantMap 校验重开撞图 —— 持续守望
+// mapSeq：'' 固定图（兼容旧行为）| 'all' 按序轮换 12 图 | 'rand' 每局随机（用户会换图玩 → 训练必须覆盖）
+function armWatch(win, idx, mkUrl, nextMap) {
   if (win.isDestroyed()) return;
-  const wantMap = /wantMap=(\w+)/.exec(url);
-  const load = () => win.loadURL(url + '&r=' + Date.now()).catch(() => {});
+  const load = () => win.loadURL(mkUrl(nextMap && nextMap())).catch(() => {});
+  const wantOf = () => nextMap && nextMap.peek();
   let noGameSince = Date.now();
   const w = setInterval(() => {
     if (win.isDestroyed()) { clearInterval(w); return; }
@@ -46,15 +49,16 @@ function armWatch(win, idx, url) {
     ).then((r) => {
       let s = 'nogame', m = '';
       try { const j = JSON.parse(r); s = j.s === 'over' ? 'over' : 'ok'; m = j.m; } catch (e) { s = r === 'null' ? 'nogame' : 'ok'; }
-      if (s === 'ok' && wantMap && m && m !== wantMap[1]) {   // 地图不对（如非城市）：重开撞图（1/5 概率，均值 5 次内中）
-        log(`win${idx} 地图 ${m}≠${wantMap[1]} → 重开撞图`);
-        clearInterval(w); setTimeout(load, 300); armWatch(win, idx, url);
+      const want = wantOf();
+      if (s === 'ok' && want && m && m !== want) {   // 本局图 ≠ 目标图：重开撞图
+        log(`win${idx} 地图 ${m}≠${want} → 重开撞图`);
+        clearInterval(w); setTimeout(load, 300); armWatch(win, idx, mkUrl, nextMap);
         return;
       }
-      if (s === 'over') { log(`win${idx}(${url.match(/rl7=(\w+)/)[1]}) 局结束 → 重开`); clearInterval(w); setTimeout(load, 3000); armWatch(win, idx, url); }
+      if (s === 'over') { log(`win${idx} 局结束(${m}) → 重开`); clearInterval(w); setTimeout(load, 3000); armWatch(win, idx, mkUrl, nextMap); }
       else if (s === 'ok') noGameSince = Date.now();
       if (s !== 'ok' && Date.now() - noGameSince > 45000) {
-        log(`win${idx} 45s 未开局 → reload`); clearInterval(w); load(); armWatch(win, idx, url);
+        log(`win${idx} 45s 未开局 → reload`); clearInterval(w); load(); armWatch(win, idx, mkUrl, nextMap);
       }
     }).catch(() => {});
   }, 2000);
@@ -71,19 +75,29 @@ app.whenReady().then(async () => {
   if (!st) { log(`❌ PPO 服务器 ${PPO} 不可达，先启动：python3 training/ppo7_train.py ${PPO_PORT}`); app.quit(); return; }
   log(`PPO7 服务器就绪: gen=${st.gen}`);
 
+  const MAPSEQ = (process.env.MAPSEQ || (process.argv[7] || 'rand')).toLowerCase();   // ''/all/rand
   for (let i = 0; i < NWINS; i++) {
     const ch = SIDES[i % SIDES.length];
     const side = ch === 'E' ? 'enemy' : 'ally';                 // A/C=ally（蓝队友位）、E=enemy（红弱侧位）
-    const mapQ = ch === 'C' ? '&wantMap=city' : '';             // C=城市专窗（撞图重开，密集场景定向采样）
+    const fixedMap = ch === 'C' ? 'city' : null;                // C=城市专窗（固定 city）
+    let round = 0;
+    const nextMap = (MAPSEQ && !fixedMap) ? (() => {
+      let cur = null;
+      const gen = () => { cur = MAPSEQ === 'rand'
+        ? MAPS_TANK[Math.floor(Math.random() * MAPS_TANK.length)]
+        : MAPS_TANK[(i + round++) % MAPS_TANK.length]; return cur; };
+      gen.peek = () => cur;
+      return gen;
+    })() : null;
+    const mkUrl = (m) => `http://localhost:${PORT}/?auto=tank&rl7=${side}` +
+      `${m ? '&wantMap=' + m : ''}&rl7Srv=${encodeURIComponent('http://127.0.0.1:' + PPO_PORT)}&farmSeed=${i}-${Date.now()}`;
     const win = new BrowserWindow({
       show: false,
       webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
     });
-    const url = `http://localhost:${PORT}/?auto=tank&rl7=${side}${mapQ}` +
-      `&rl7Srv=${encodeURIComponent('http://127.0.0.1:' + PPO_PORT)}&farmSeed=${i}-${Date.now()}`;
-    win.webContents.on('render-process-gone', (e, d) => log(`win${i}(${side}${ch === 'C' ? '/city' : ''}) RENDERER GONE: ${d.reason}`));
-    win.loadURL(url).catch(() => {});
-    armWatch(win, i, url);
+    win.webContents.on('render-process-gone', (e, d) => log(`win${i}(${side}${fixedMap ? '/' + fixedMap : MAPSEQ ? '/' + MAPSEQ : ''}) RENDERER GONE: ${d.reason}`));
+    win.loadURL(mkUrl(nextMap ? nextMap() : fixedMap)).catch(() => {});
+    armWatch(win, i, mkUrl, nextMap || (fixedMap ? { peek: () => fixedMap, call: () => fixedMap } : null));
   }
   log(`farm started: 目标 ${STEP_GOAL} 步 windows=${NWINS} sides=${SIDES} game=:${PORT} ppo=:${PPO_PORT}`);
   const goal0 = (await ppoGet('/stats') || {}).steps_total || 0;   // 起跑线（不含历史步数）
