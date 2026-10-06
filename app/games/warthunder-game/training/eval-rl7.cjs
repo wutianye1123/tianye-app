@@ -38,9 +38,10 @@ app.whenReady().then(() => {
       webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
     });
     let round = 0, lastSnap = 0, lastState = '', noGameSince = Date.now();
-    // 多图评测（10-06）：每窗每局轮换 12 图——对齐用户真实玩法（换图玩）；历史成绩为全 city 口径
+    // 地图口径（10-06）：默认 city（与历史成绩可比）；EVALMAP=all 时轮换 12 图（多图口径）
     const MAPS_TANK = ['city','open','hills','desert','forest','factory','snow','night','rain','canyon','island','storm'];
-    const mapOf = () => MAPS_TANK[(i + round) % MAPS_TANK.length];
+    const evalMap = (process.env.EVALMAP || 'city').toLowerCase();
+    const mapOf = () => evalMap === 'all' ? MAPS_TANK[(i + round) % MAPS_TANK.length] : evalMap;
     const load = () => win.loadURL(url + '&wantMap=' + mapOf() + '&r=' + Date.now()).catch(() => {});
     win.webContents.on('console-message', (e, level, message) => {
       if (/\[RL7\]|\[BC\]|error|Error|failed/i.test(message)) log(`w${i}(${mode}) console: ${message.slice(0, 160)}`);
