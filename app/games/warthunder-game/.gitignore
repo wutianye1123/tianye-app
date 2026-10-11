@@ -1,0 +1,7 @@
+# AI 训练滚动 checkpoint 不入库（AI-AGENT.md 约定：只保留关键权重进库；
+# 已跟踪的 bc-weights / rl7-weights / *-latest 等不受本规则影响，可继续正常提交）
+training/ppo*-weights-g*.json
+training/ppo7-weights-B*.json
+training/ppo7-weights-sem2*.json
+training/rl7-weights-*.json
+training/*.bak

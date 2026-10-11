@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "python3 -m http.server 8000",
-    "check": "node --check js/main.js && node --check js/lib.js && node --check js/mp.js"
+    "check": "node --check js/main.js && node --check js/lib.js && node --check js/mp.js && node --check js/net-stub.js && node --check js/fair-mode.js && node --check js/agent-core.js && node --check js/agent-bc.js && node --check js/agent-recorder.js && node --check js/agent-dagger.js && node --check js/agent-rl.js && node --check js/agent-rl7.js",
+    "test:e2e": "../../node_modules/.bin/electron e2e-main.cjs http://localhost:8000/?auto=tank smoke"
   }
 }

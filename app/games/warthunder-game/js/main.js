@@ -12,7 +12,7 @@ window.addEventListener('error', (e) => {
   };
   show('⚠ 页面脚本出错：' + (e.message || '未知错误') + '\n' + (e.filename || '') + ':' + (e.lineno || '?') + '\n（把这段红字告诉开发者即可修复）');
 });
-const GAME_VERSION = '2026.09.26.5';
+const GAME_VERSION = '2026.10.11.1';
 
 // 坦克贴地姿态用的临时对象（避免每帧分配）
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
@@ -182,6 +182,7 @@ const TANK_TYPES = [
   { id:'cromwell',name:'克伦威尔',     icon:'🇬🇧', scale:1.0,  hp:1.0,  speed:1.45, turn:1.2,  turret:1.1,  reload:0.85,dmg:0.9,  armor:[64,42,32], tArmor:[76,50,40], slope:[25,10,25], pen:120, rank:3, rp:750,  prereq:'matilda', price:3300 },
   { id:'td',      name:'SU-100',      icon:'🇷🇺', scale:1.05, hp:1.1,  speed:0.9,  turn:0.8,  turret:0.7,  reload:1.4, dmg:2.8,  armor:[75,45,45], tArmor:[100,45,45], slope:[50,0,0], pen:185, rank:3, rp:800,  prereq:'light',   price:3500 },
   { id:'panther', name:'黑豹 V',       icon:'🇩🇪', scale:1.1,  hp:1.3,  speed:1.05, turn:0.85, turret:0.9,  reload:1.1, dmg:1.9,  armor:[120,60,50], tArmor:[110,45,45], slope:[55,25,35], pen:160, rank:3, rp:900,  prereq:'td',      price:4200 },
+  { id:'chinu',   name:'三式中战车',   icon:'🇯🇵', scale:0.95, hp:1.0,  speed:0.95, turn:1.05, turret:1.0,  reload:1.05, dmg:1.15, armor:[50,30,25], tArmor:[50,30,25], slope:[20,0,10], pen:120, rank:3, rp:700,  prereq:null,      price:3100 }, // 日本线起点：无需前置直接攒钱买
   // Rank 4
   { id:'heavy',   name:'虎 I',        icon:'🇩🇪', scale:1.2,  hp:2.0,  speed:0.7,  turn:0.7,  turret:0.9,  reload:1.3, dmg:2.2,  armor:[110,80,80], tArmor:[110,80,80], slope:[10,0,0], pen:165, rank:4, rp:1600, prereq:'panther', price:4500 },
   { id:'is2',     name:'IS-2',        icon:'🇷🇺', scale:1.2,  hp:2.2,  speed:0.65, turn:0.65, turret:0.8,  reload:1.5, dmg:2.6,  armor:[120,90,60], tArmor:[100,90,60], slope:[60,20,45], pen:190, rank:4, rp:2000, prereq:'heavy',   price:5500 },
@@ -195,6 +196,8 @@ const TANK_TYPES = [
   { id:'t80',     name:'T-80U',       icon:'🇷🇺', scale:1.1,  hp:2.4,  speed:1.2,  turn:1.1,  turret:1.3,  reload:0.9, dmg:2.5,  armor:[200,120,70], tArmor:[280,130,80], slope:[68,30,45], tSlope:[30,0,0], pen:450, rank:5, rp:3000, prereq:'is2',     price:8800 },
   { id:'assault', name:'鼠式',        icon:'🇩🇪', scale:1.3,  hp:2.6,  speed:0.6,  turn:0.6,  turret:0.85, reload:1.6, dmg:3.4,  armor:[240,185,160], tArmor:[240,185,160], slope:[30,0,20], pen:245, rank:5, rp:3200, prereq:'is2',     price:9500 },
   { id:'tiger2',  name:'虎王',        icon:'🇩🇪', scale:1.25, hp:2.3,  speed:0.65, turn:0.65, turret:0.75, reload:1.4, dmg:2.6,  armor:[185,80,80], tArmor:[185,90,80], slope:[50,25,35], tSlope:[15,0,0], pen:260, rank:5, rp:3400, prereq:'heavy',   price:9800 },
+  { id:'jagdtiger', name:'猎虎',      icon:'🇩🇪', scale:1.25, hp:2.5,  speed:0.5,  turn:0.55, turret:0.55, reload:1.7,  dmg:3.0,  armor:[250,120,80], tArmor:[250,120,80], slope:[30,0,15], pen:275, rank:5, rp:3000, prereq:'td',     price:9200 }, // 超重 TD：128 炮二战最穿、战斗室近全向重甲——慢，但一炮定生死
+  { id:'type15',  name:'15 式轻坦',    icon:'🇨🇳', scale:0.95, hp:1.6,  speed:1.65, turn:1.7,  turret:1.7,  reload:0.75, dmg:2.2,  armor:[60,35,25], tArmor:[80,40,30], slope:[55,15,20], tSlope:[15,0,0], pen:480, rank:5, rp:2800, prereq:'type59', price:10500 }, // 中国高原轻坦：快、灵、炮狠甲薄——打完就跑别对炮
   // ===== 现代（1990-今）=====
   // Rank 6
   { id:'m1a2',    name:'M1A2 艾布拉姆斯', icon:'🇺🇸', scale:1.4, hp:3.5, speed:1.9, turn:2.0, turret:2.0, reload:0.5, dmg:3.6, armor:[380,150,90], tArmor:[420,170,90], slope:[75,0,0], tSlope:[25,0,0], pen:600, rank:6, rp:6000, prereq:'is2', price:20000 },
@@ -318,9 +321,11 @@ const PLANE_TYPES = [
   // Rank 2
   { id:'mig29',     name:'MiG-29 支点',   icon:'🇷🇺', hp:0.9,  speed:1.1,  agi:1.15, dmg:0.95, rank:2, rp:400,  prereq:'fighter', price:2200 },
   { id:'j10',       name:'歼-10 猛龙',    icon:'🇨🇳', hp:0.95, speed:1.15, agi:1.1,  dmg:1.0,  rank:2, rp:500,  prereq:'fighter', price:2600 },
+  { id:'j8f',       name:'歼-8F',         icon:'🇨🇳', hp:0.85, speed:1.35, agi:0.75, dmg:1.0,  rank:2, rp:350,  prereq:'fighter', price:2000 }, // 二代高空高速：直线最快、转弯最废——能量战打法
+  { id:'m2k',       name:'幻影 2000',     icon:'🇫🇷', hp:0.95, speed:1.15, agi:1.1,  dmg:0.95, rank:2, rp:450,  prereq:'fighter', price:2400 }, // 法国线起点
   { id:'intercept', name:'MiG-31 捕狐犬', icon:'🇷🇺', hp:0.9,  speed:1.35, agi:0.75, dmg:1.15, rank:3, rp:900,  prereq:'mig29',   price:3800 },
   // Rank 3
-  { id:'rafale',    name:'阵风 Rafale',   icon:'🇫🇷', hp:1.1,  speed:1.1,  agi:1.15, dmg:1.1,  rank:3, rp:1000, prereq:'j10',     price:4200 },
+  { id:'rafale',    name:'阵风 Rafale',   icon:'🇫🇷', hp:1.1,  speed:1.1,  agi:1.15, dmg:1.1,  rank:3, rp:1000, prereq:'m2k',     price:4200 },
   { id:'heavy',     name:'F-15 鹰',       icon:'🇺🇸', hp:1.4,  speed:1.05, agi:0.85, dmg:1.25, rank:3, rp:1100, prereq:'mig29',   price:4500 },
   { id:'attacker',  name:'A-10 雷电II',   icon:'🇺🇸', hp:1.8,  speed:0.7,  agi:0.6,  dmg:1.7,  rank:4, rp:1600, prereq:'heavy',   price:6000 },
   { id:'tornado',  name:'狂风 IDS',       icon:'🇩🇪', hp:1.2,  speed:1.25, agi:0.95, dmg:1.25, rank:3, rp:1000, prereq:'mig29',   price:4300 }, // 德国线起点
