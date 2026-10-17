@@ -871,8 +871,8 @@ function createWindow() {
     if (input.key === 'F12' && input.type === 'keyDown') {
       win.webContents.toggleDevTools();
     }
-    // F2返回启动器
-    if (input.key === 'F2' && input.type === 'keyDown') {
+    // F1 返回启动器（Mac 按 fn+F1；before-input-event 拦截后页面收不到 F1）
+    if (input.key === 'F1' && input.type === 'keyDown') {
       const url = win.webContents.getURL();
       if (!url.includes('launcher.html')) {
         firstLoad = false;

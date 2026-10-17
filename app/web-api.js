@@ -508,9 +508,13 @@
       }
     };
 
-    // F2 返回
+    // F1 返回（Mac 上需按 fn+F1；stopImmediatePropagation 压掉游戏页自己的 F1 处理，如 Sandboxels 标题页切换）
     document.addEventListener('keydown', function(e) {
-      if (e.key === 'F2') { e.preventDefault(); window.parent.postMessage({ type: 'mp-back' }, '*'); }
-    });
+      if (e.key === 'F1') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        window.parent.postMessage({ type: 'mp-back' }, '*');
+      }
+    }, true);
   }
 })();

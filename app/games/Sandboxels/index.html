@@ -14342,7 +14342,8 @@ function dependOn(modName, callback, forceLoad) {
 	}
 	dependents[modName].push(callback);
 	if (forceLoad && loadedMods.indexOf(modName) === -1 && queuedMods.indexOf(modName) === -1 && queuedDependencies.indexOf(modName) === -1) {
-		queuedDependencies.push((modName.startsWith("http") ? "" : (standalone ? "https://sandboxels.r74n.com/mods/" : "mods/")) + modName);
+		// [游戏中心补丁] 依赖模组同样从官方模组库在线解析（本地未随附 mods/ 目录）
+		queuedDependencies.push((modName.startsWith("http") ? "" : "https://sandboxels.r74n.com/mods/") + modName);
 	}
 }
 function checkDependents(modName) {
@@ -18958,11 +18959,9 @@ for (var k = 0; k < b0.split(" AND ").length; k++) {
 			// if the url doesn't start with http, add "mods/" to the beginning
 			if (url.indexOf("http") == -1 && url.indexOf("mods/") == -1) {
 				url = "mods/"+url;
-				if (standalone) url = "https://sandboxels.r74n.com/" + url;
 			}
-			else if (standalone && url.startsWith("mods/")) {
-				url = "https://sandboxels.r74n.com/" + url;
-			}
+			// [游戏中心补丁] 本地未随附 mods/ 目录：相对模组路径一律改由官方模组库(sandboxels.r74n.com)在线加载
+			if (url.startsWith("mods/")) { url = "https://sandboxels.r74n.com/" + url; }
 			// if the mod is in enabledMods, return
 			for (var i = 0; i < enabledMods.length; i++) {
 				if (enabledMods[i] == url) { return; }
