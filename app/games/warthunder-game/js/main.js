@@ -12,7 +12,7 @@ window.addEventListener('error', (e) => {
   };
   show('⚠ 页面脚本出错：' + (e.message || '未知错误') + '\n' + (e.filename || '') + ':' + (e.lineno || '?') + '\n（把这段红字告诉开发者即可修复）');
 });
-const GAME_VERSION = '2026.10.11.1';
+const GAME_VERSION = '2026.10.17.1';
 
 // 坦克贴地姿态用的临时对象（避免每帧分配）
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
@@ -3696,7 +3696,9 @@ class Plane {
         this.blobWrap.visible = this.alive;
       }
     }
-    const liftFactor = clamp(this.speed / CONFIG.plane.maxSpeed, 0, 1);
+    let liftFactor = clamp(this.speed / CONFIG.plane.maxSpeed, 0, 1);
+    // 地面效应：离地数秒内升力托底——低速机型（A-10 等）刚离地升力系数只有 0.2~0.3，会以近 5/s 下沉直接砸回地面，托一把让飞行员有时间加速爬升
+    if ((this._airTime || 0) < 4 && liftFactor < 0.55) liftFactor = 0.55;
     // —— 地面滑跑（机场起飞）：贴地、锁平姿态、方向舵转向；速度≥起飞值且带杆→离地 ——
     if (this.onGround) {
       const gy = terrainHeight(this.group.position.x, this.group.position.z);
@@ -3705,28 +3707,40 @@ class Plane {
       this.group.quaternion.setFromEuler(new THREE.Euler(-0.03, yaw0, 0, 'YXZ'));   // 机首微抬 2°，机轮姿态
       this.group.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), clamp(this._gndRud || 0, -1, 1) * 0.85 * dt);   // 方向舵
       this.group.position.y = gy + (this.gearHeight || 1.15);   // 贴轮（起落架主轮底；前进积分已在上方统一做过，不重复）
-      const takeV = CONFIG.plane.minSpeed * (this.speedMult || 1) * 0.92;
+      const takeV = CONFIG.plane.minSpeed * (this.speedMult || 1) * 1.12;   // 离地速度留足升力余量（原 0.92 太贴失速，离地即沉）
       if (this.speed >= takeV && (this._gndPull || 0) > 0.25) {
         this.onGround = false;
+        this._airTime = 0;   // 离地计时：起飞保护窗（地面效应/再接地免死）从这一刻起算
         this.group.rotateX(-0.3);   // 抬轮攻角
         if (this.em && this.em.sfx) this.em.sfx._blip(300, 520, 0.3, 0.2, 'sine');   // 离地轻响
       }
       return;   // 地面段不走重力/撞地逻辑
     }
+    this._airTime = (this._airTime || 0) + dt;
     this.group.position.y -= CONFIG.plane.gravity * dt * (1 - liftFactor) * 0.5;
     const gnd = terrainHeight(this.group.position.x, this.group.position.z) + 2;
     if (this.group.position.y <= gnd) {
-      this.group.position.y = gnd; this.health = 0; this.alive = false;
-      // 坠机爆炸：伤害附近实体（冲击波，像炸弹）
-      if (this.em && !this._crashed) {
-        this._crashed = true;
-        const _pos = this.position.clone();
-        this.em.addEffect(new Explosion(_pos.clone().add(new THREE.Vector3(0, 2, 0)), 10, 0xff6600));
-        const _R = 28, _dmg = 100;
-        for (const t of [...this.em.tanks, ...this.em.planes]) {
-          if (t === this || !t.alive || t.team === this.team) continue;   // 不伤同队（坠机不误伤友军，与子弹/炸弹一致）
-          const _d = t.position.distanceTo(_pos);
-          if (_d < _R) { t.onHit(_dmg * (1 - _d / _R)); t._lastAttacker = this; }
+      // 起飞保护：离地后短时间内再接地 → 落回机轮继续滑跑（松杆蓄速再拉起），不判坠机。
+      // 修复「离地即坠」：滑跑贴轮高度与坠机判定线只差 0.85，原先离地后轻触地面直接爆炸。
+      if ((this._airTime || 0) < 5) {
+        this.onGround = true; this._airTime = 0;
+        const fwd1 = this.forwardVector();
+        this.group.quaternion.setFromEuler(new THREE.Euler(-0.03, Math.atan2(fwd1.x, fwd1.z), 0, 'YXZ'));   // 落回机轮姿态
+        this.group.position.y = terrainHeight(this.group.position.x, this.group.position.z) + (this.gearHeight || 1.15);
+        if (this.em && this.em.sfx) this.em.sfx._blip(220, 140, 0.25, 0.18, 'sine');   // 机轮触地闷响
+      } else {
+        this.group.position.y = gnd; this.health = 0; this.alive = false;
+        // 坠机爆炸：伤害附近实体（冲击波，像炸弹）
+        if (this.em && !this._crashed) {
+          this._crashed = true;
+          const _pos = this.position.clone();
+          this.em.addEffect(new Explosion(_pos.clone().add(new THREE.Vector3(0, 2, 0)), 10, 0xff6600));
+          const _R = 28, _dmg = 100;
+          for (const t of [...this.em.tanks, ...this.em.planes]) {
+            if (t === this || !t.alive || t.team === this.team) continue;   // 不伤同队（坠机不误伤友军，与子弹/炸弹一致）
+            const _d = t.position.distanceTo(_pos);
+            if (_d < _R) { t.onHit(_dmg * (1 - _d / _R)); t._lastAttacker = this; }
+          }
         }
       }
     }
