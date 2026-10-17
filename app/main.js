@@ -871,8 +871,8 @@ function createWindow() {
     if (input.key === 'F12' && input.type === 'keyDown') {
       win.webContents.toggleDevTools();
     }
-    // F1 返回启动器（Mac 按 fn+F1；before-input-event 拦截后页面收不到 F1）
-    if (input.key === 'F1' && input.type === 'keyDown') {
+    // 返回启动器：统一 F2；Sandboxels 例外用 F5（其内部 F2 是工具快捷键）
+    if (input.type === 'keyDown' && (input.key === 'F2' || (input.key === 'F5' && win.webContents.getURL().includes('Sandboxels')))) {
       const url = win.webContents.getURL();
       if (!url.includes('launcher.html')) {
         firstLoad = false;

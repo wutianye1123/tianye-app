@@ -508,10 +508,11 @@
       }
     };
 
-    // F1 返回（Mac 按 fn+F1）。window 捕获阶段＝整条事件链最早的监听点，
-    // 无论游戏页自己怎么监听/吞键（如 Sandboxels 标题页、陆空对战小队指令）都拦得住
+    // 返回键：Sandboxels 用 F5（它内部 F2 是工具快捷键），其余游戏统一 F2。
+    // window 捕获阶段监听＝事件链最早点：压掉浏览器默认行为（F5 刷新）和游戏自身按键处理
+    var backKey = /sandboxels/i.test(location.pathname) ? 'F5' : 'F2';
     window.addEventListener('keydown', function(e) {
-      if (e.key === 'F1') {
+      if (e.key === backKey) {
         e.preventDefault();
         e.stopImmediatePropagation();
         window.parent.postMessage({ type: 'mp-back' }, '*');
