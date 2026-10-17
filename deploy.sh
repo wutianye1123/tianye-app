@@ -42,7 +42,7 @@ LOCAL_LIST=$(mktemp); REMOTE_LIST=$(mktemp); DIFF_LIST=$(mktemp); trap 'rm -f "$
     | xargs -0 md5 | sed -E 's|^MD5 \(app/(.*)\) = ([a-f0-9]+)$|\2  \1|'
 } | sort -k2 > "$LOCAL_LIST"
 
-ssh "$HOST" "cd $WEBROOT/app && { md5sum launcher.html launcher.css web-api.js 2>/dev/null; find games -type f ! -path '*/training/*' ! -name '.DS_Store' ! -name '._*' -print0 | xargs -0 md5sum 2>/dev/null; }" | awk '{n=$1; $1=""; sub(/^ +/,""); print n"  "$1}' | sort -k2 > "$REMOTE_LIST"
+ssh "$HOST" "cd $WEBROOT/app && { md5sum launcher.html launcher.css web-api.js 2>/dev/null; find games -type f ! -path '*/training/*' ! -name '.DS_Store' ! -name '._*' -print0 | xargs -0 md5sum 2>/dev/null; }" | awk '{n=$1; $1=""; sub(/^ +/,""); print n"  "$0}' | sort -k2 > "$REMOTE_LIST"   # $0 而非 $1：文件名可含空格
 
 # 差异 = 本地有而远端无 或 md5 不同；顺带报告远端独有文件（不删，仅提示）
 join -j 2 -o 0,1.1,2.1 "$LOCAL_LIST" "$REMOTE_LIST" | awk '$2 != $3 {print $1}' > "$DIFF_LIST"
