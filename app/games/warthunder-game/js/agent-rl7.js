@@ -614,8 +614,8 @@
   function qGenIs7() {
     var q = qs.get('qGen');
     if (q === '7') return true;
-    if (q === '5' || q === '6') return false;
-    try { var g = localStorage.getItem('wt_qgen'); return g !== '5' && g !== '6'; } catch (e) { return true; }
+    if (q === '5' || q === '6' || q === 'rule') return false;   // rule=规则AI：三代全让位（游戏原版 Q 代打）
+    try { var g = localStorage.getItem('wt_qgen'); return g !== '5' && g !== '6' && g !== 'rule'; } catch (e) { return true; }
   }
   function startQCopilot7() {
     setInterval(function () {

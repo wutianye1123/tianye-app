@@ -835,15 +835,17 @@ html, body {
       });
       sync();
     })();
-    // 🎮 Q 代打选代（第五代⇄第六代⇄第七代B，默认七代）：写 localStorage.wt_qgen；下次按 Q 生效
+    // 🎮 Q 代打选代（第五代⇄第六代⇄第七代⇄规则AI，默认七代）：写 localStorage.wt_qgen；下次按 Q 生效
+    // rule=规则AI：三代学习型全让位，用游戏原版 Q 代打
     (function () {
       var b = document.getElementById('btn-qgen');
       if (!b) return;
       var v = '7'; try { v = localStorage.getItem('wt_qgen') || '7'; } catch (e) { }
-      var NAME = { '5': '第五代', '6': '第六代', '7': '第七代' };
+      var NAME = { '5': '第五代', '6': '第六代', '7': '第七代', 'rule': '规则AI' };
+      var ORDER = ['5', '6', '7', 'rule'];
       var sync = function () { b.textContent = '🎮 Q 代打：' + (NAME[v] || '第七代'); };
       b.addEventListener('click', function () {
-        v = v === '5' ? '6' : (v === '6' ? '7' : '5');
+        v = ORDER[(ORDER.indexOf(v) + 1) % ORDER.length];
         try { localStorage.setItem('wt_qgen', v); } catch (e) { }
         sync();
       });
