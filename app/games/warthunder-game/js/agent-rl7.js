@@ -68,7 +68,7 @@
   //   [障碍 7~10 号 ×3 维（d/60, sinB, cosB，格式同旧槽）] + [前 10 障碍半径 ×1 维（r/15）]
   // = 92 维。网络从"6 个没有大小的点"升级为"10 个有半径的障碍"。
   // 旧 BC 锚数据 pad 22 个 0（网络初始忽略新维=旧行为，PPO 在线学会利用）。
-  var OBS7_DIM = 92;
+  var OBS7_DIM = 104;   // 92 + 12 维图 ID one-hot（B 形态）
   function buildObs7(tank, game, enemies, obstacles) {
     var base = CORE.buildObs(tank, game, enemies, obstacles);
     var obs = base.slice();   // 70 维
@@ -95,6 +95,10 @@
       ob = list[i];
       obs.push(ob ? Math.min(1, (ob.radius || 3) / 15) : 0);
     }
+    // B 形态（10-06）：图 ID one-hot 12 维——「我在哪张图」显式信号，治 C 形态 12 图打法单网络拉扯
+    var MID = ['city','open','hills','desert','forest','factory','snow','night','rain','canyon','island','storm'];
+    var mi = MID.indexOf(game && game.mapId);
+    for (i = 0; i < 12; i++) obs.push(i === mi ? 1 : 0);
     return obs;
   }
 

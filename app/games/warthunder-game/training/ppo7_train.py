@@ -29,7 +29,9 @@ torch.set_num_threads(4)   # 留核给农场窗口/用户游戏
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 # obs 92 维（2026-10-05 感知扩容）：旧 70 维原样 + 障碍7~10号×3维 + 前10障碍半径×10维
-OBS_DIM, H1, H2, HEAD = 92, 256, 256, 6          # head: [mean_thr, mean_turn, mean_yaw, mean_pitch, fireLogit, value]
+OBS_DIM, H1, H2, HEAD = 104, 256, 256, 6         # head: [mean_thr, mean_turn, mean_yaw, mean_pitch, fireLogit, value]
+# obs 104 维（B 形态 10-06）：92 + 12 维图 ID one-hot——「我在哪张图」显式信号，
+# 治 C 形态（隐式泛化）12 图打法单网络拉扯（KL 0.4~0.78 震荡两轮实证退步）
 OBS_DIM_OLD = 70                                 # BC 锚数据/旧 checkpoint 的输入维（pad 兼容）
 ACT_DIM = 5                                        # [thr, turn, aimYaw, aimPitch, fire]
 GAUSS_DIM = 4                                      # 前 4 维高斯，第 5 维伯努利
@@ -153,8 +155,9 @@ def load_bc_anchor():
                     obs_l.append(d['obs']); act_l.append(d['act'])
             except Exception:
                 pass
-    obs = torch.tensor(np.array([o + [0.0] * (OBS_DIM - len(o)) for o in obs_l],   # 旧 70 维锚 pad 22 零
-                                 dtype=np.float32))
+    # 旧 70 维锚 pad：22 零（92 扩容维）+ 12 维图 ID——锚数据全是 city 局，点亮 city 灯
+    pad = [0.0] * (OBS_DIM - OBS_DIM_OLD - 12) + [1.0] + [0.0] * 11
+    obs = torch.tensor(np.array([o + pad[:OBS_DIM - len(o)] for o in obs_l], dtype=np.float32))
     act = torch.tensor(np.array(act_l, dtype=np.float32))
     return obs, act
 
