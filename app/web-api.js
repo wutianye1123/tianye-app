@@ -508,8 +508,9 @@
       }
     };
 
-    // F1 返回（Mac 上需按 fn+F1；stopImmediatePropagation 压掉游戏页自己的 F1 处理，如 Sandboxels 标题页切换）
-    document.addEventListener('keydown', function(e) {
+    // F1 返回（Mac 按 fn+F1）。window 捕获阶段＝整条事件链最早的监听点，
+    // 无论游戏页自己怎么监听/吞键（如 Sandboxels 标题页、陆空对战小队指令）都拦得住
+    window.addEventListener('keydown', function(e) {
       if (e.key === 'F1') {
         e.preventDefault();
         e.stopImmediatePropagation();
