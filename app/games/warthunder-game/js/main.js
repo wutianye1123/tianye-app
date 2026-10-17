@@ -12,7 +12,7 @@ window.addEventListener('error', (e) => {
   };
   show('⚠ 页面脚本出错：' + (e.message || '未知错误') + '\n' + (e.filename || '') + ':' + (e.lineno || '?') + '\n（把这段红字告诉开发者即可修复）');
 });
-const GAME_VERSION = '2026.10.17.1';
+const GAME_VERSION = '2026.10.17.2';
 
 // 坦克贴地姿态用的临时对象（避免每帧分配）
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
@@ -4751,7 +4751,7 @@ class CrashFall {
 class PlaneAI {
   constructor(plane) {
     this.plane = plane;
-    this.phase = 'cruise';   // 对地攻击循环：cruise(高空巡航) → dive(俯冲攻击) → climb(拉起回高)
+    this.phase = plane.onGround ? 'takeoff' : 'cruise';   // 跑道出生→先滑跑起飞，爬升出航后再进攻击循环
     this._diveCd = 0;
     this._orbit = Math.random() < 0.5 ? 1 : -1;
   }
@@ -4760,6 +4760,21 @@ class PlaneAI {
     const { target, entityManager: em, obstacles = [], smokes = [] } = ctx;
     const plane = this.plane;
     if (!plane.alive) return;
+    // —— 跑道起飞（战雷式）：满油门直线滑跑 → 到离地速度带杆 → 沿跑道方向爬升 → AGL>60 交接空战循环 ——
+    if (this.phase === 'takeoff') {
+      plane.throttle = 1;
+      const wantZ = plane._rwDir || 1;   // +1 朝北（蓝南跑道）/ -1 朝南（红北跑道）
+      if (plane.onGround) {
+        const fwd = plane.forwardVector();
+        plane._gndRud = clamp(-(fwd.x * 2.2 + plane.group.position.x * 0.045) * wantZ, -0.5, 0.5);   // 走直线 + 微修回中线
+        plane._gndPull = plane.speed >= CONFIG.plane.minSpeed * (plane.speedMult || 1) * 1.12 ? 1 : 0;   // 到离地速度带杆
+      } else {
+        const agl = plane.position.y - terrainHeight(plane.position.x, plane.position.z);
+        if (agl > 60) { this.phase = 'cruise'; plane._gndPull = 0; }   // 出航完成，进正常空战
+        else plane.aimToward(new THREE.Vector3(0, 0.45, wantZ).normalize(), dt, 1);   // 沿跑道方向上仰爬升
+      }
+      return;   // 起飞阶段不开火、不做机动
+    }
     // 烟幕判定：目标或自己在烟里 → 不开火（与 TankAI 一致,飞机不能无视烟）
     const inSmoke = (p) => smokes.some((s) => p.distanceToSquared(s.pos) < s.r * s.r);
     const smokeBlind = target && (inSmoke(target.position) || inSmoke(plane.position));
@@ -5948,7 +5963,7 @@ class Game {
       this._mpSavedWorldSize = CONFIG.tank.worldSize;
       CONFIG.tank.worldSize = 480;
     }
-    this.terrain = createTerrain(this.scene, (this.mp || this.worldwar) ? 'tank' : mode, this.mapId, !!this.mp);   // 世界大战/联机永远用坦克地形；联机画南北双跑道（飞机机场起飞）
+    this.terrain = createTerrain(this.scene, (this.mp || this.worldwar) ? 'tank' : mode, this.mapId, !!this.mp || (!this.worldwar && mode === 'plane'));   // 世界大战/联机永远用坦克地形；联机+单机空战画南北双跑道（飞机机场起飞，敌机走北跑道）
     if (this.limitedAmmo && (this.worldwar || mode === 'tank')) {   // 有限弹药：中央补给区地面环
       const ring = new THREE.Mesh(new THREE.RingGeometry(12.5, 14, 40), new THREE.MeshBasicMaterial({ color: 0xffb040, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
       ring.rotation.x = -Math.PI / 2;
@@ -6293,9 +6308,18 @@ class Game {
         const e = new Plane({ side: 'enemy', team: 'red', color: 0xb5462e, type: randomPlaneType(rk).id });
         if (e.bulletDamage != null) e.bulletDamage *= 0.6;   // 敌方机炮伤害-40%：不再秒玩家
         e.displayName = this._nextName();
-        e.group.position.set(Math.sin(ang) * dist, CONFIG.plane.spawnAltitude + randRange(-10, 12), Math.cos(ang) * dist);
-        const toCenter = this._playerBasePos().clone().sub(e.group.position).normalize();
-        e.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), toCenter);
+        const ws = CONFIG.plane.worldSize;
+        if (this.mode === 'plane' && !this.worldwar && !this.mp) {
+          // 战雷式：敌机从北跑道起飞（跑道头朝南），滑跑离地后进场交战——不再是凭空空降
+          const lane = [-9, 9, -4.5, 4.5][(this._redIdx = ((this._redIdx || 0) + 1) % 4)];
+          e.group.position.set(lane, terrainHeight(lane, ws - 90) + (e.gearHeight || 1.15), ws - 90 - randRange(0, 24));
+          e.group.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);   // 机头朝南
+          e.speed = 0; e.throttle = 0; e.onGround = true; e._rwDir = -1;
+        } else {
+          e.group.position.set(Math.sin(ang) * dist, CONFIG.plane.spawnAltitude + randRange(-10, 12), Math.cos(ang) * dist);
+          const toCenter = this._playerBasePos().clone().sub(e.group.position).normalize();
+          e.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), toCenter);
+        }
         e.ai = new PlaneAI(e);
         this.em.addPlane(e);
         if (this.worldwar) e.worldSize = CONFIG.tank.worldSize;   // 世界大战：飞机用坦克地图大小，不飞出地图
@@ -6378,8 +6402,17 @@ class Game {
       }
       const e = new Plane({ side: 'ally', team: 'blue', color: 0x5a8eb8, type: randomPlaneType(planeTypeById(this.planeType).rank).id });   // 队友同难度池（与坦克一致）
       e.displayName = this._nextName();
-      e.group.position.set(randRange(-30, 30), CONFIG.plane.spawnAltitude + randRange(-8, 8), randRange(-30, 30));
-      e.group.quaternion.identity();
+      const ws = CONFIG.plane.worldSize;
+      if (this.mode === 'plane' && !this.worldwar && !this.mp) {
+        // 战雷式：队友与玩家同在南跑道并列滑跑起飞（四车道轮换，不叠机）
+        const lane = [-9, 9, -4.5, 4.5][(this._blueIdx = ((this._blueIdx || 0) + 1) % 4)];
+        e.group.position.set(lane, terrainHeight(lane, -(ws - 90)) + (e.gearHeight || 1.15), -(ws - 90) - randRange(0, 24));
+        e.group.quaternion.identity();   // 机头朝北（与玩家同向）
+        e.speed = 0; e.throttle = 0; e.onGround = true; e._rwDir = 1;
+      } else {
+        e.group.position.set(randRange(-30, 30), CONFIG.plane.spawnAltitude + randRange(-8, 8), randRange(-30, 30));
+        e.group.quaternion.identity();
+      }
       e.ai = new PlaneAI(e);
       this.em.addPlane(e);
       if (this.worldwar) e.worldSize = CONFIG.tank.worldSize;
