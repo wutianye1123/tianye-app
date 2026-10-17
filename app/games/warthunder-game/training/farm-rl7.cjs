@@ -94,8 +94,10 @@ app.whenReady().then(async () => {
     const side = ch === 'E' ? 'enemy' : 'ally';               // A/C=ally（蓝队友位）、E=enemy（红弱侧位）
     const fixedMap = ch === 'C' ? 'city' : null;              // C=城市保底窗（固定 city）
     let round = 0;
+    const CUR1 = ['city', 'city', 'open', 'desert', 'canyon'];   // 课程一：城市 40% + 三张简单图
     const nextMap = fixedMap ? (() => fixedMap)
       : (MAPSEQ === 'rand' ? () => MAPS_TANK[Math.floor(Math.random() * MAPS_TANK.length)]
+                           : MAPSEQ === 'cur1' ? () => CUR1[(i + round++) % CUR1.length]
                            : () => MAPS_TANK[(i + round++) % MAPS_TANK.length]);
     const url = `http://localhost:${PORT}/?auto=tank&rl7=${side}` +
       `&rl7Srv=${encodeURIComponent('http://127.0.0.1:' + PPO_PORT)}&farmSeed=${i}-${Date.now()}`;

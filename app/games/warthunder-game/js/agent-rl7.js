@@ -144,6 +144,19 @@
              z: tank.position.z + Math.cos(wh) * horiz };
   }
 
+  // 拦截点（10-07 残局追捕解）：敌位置 + 敌速度×追击时间（迭代 2 次）——追它要去的地方，
+  // 不是它所在的地方。追击方直线追同速敌人物理上永远追不上，必须堵路。
+  function interceptPoint(tank, e) {
+    var px = e.position.x, pz = e.position.z;
+    for (var i = 0; i < 2; i++) {
+      var d = Math.hypot(px - tank.position.x, pz - tank.position.z);
+      var t = d / 10;   // 有效接近速度 10m/s（我 12 - 敌机动折损）
+      px = e.position.x + (e.velX || 0) * t;
+      pz = e.position.z + (e.velZ || 0) * t;
+    }
+    return { x: px, z: pz };
+  }
+
   // ---------- 权重加载：静态文件（评测/玩家）或 PPO 服务器拉模式（训练） ----------
   var stats = { bots: 0, thinking: 0, steps: 0, posts: 0, postErr: 0, kills: 0, hits: 0,
                 taken: 0, deaths: 0, fires: 0, nav: 0, fallbacks: 0, gen: -1,
@@ -351,6 +364,19 @@
           return;
         }
 
+        // —— 残局拦截（敌≤2，10-07 治 1226s 型拖尾）：驾驶切脚本朝拦截点追堵
+        //    （网络学会追没学会堵——同速直线追物理上追不上），瞄准/开火照旧（家教+火头）。
+        //    残局=脚本段，不采样（think 侧 endgame 同步关采样）
+        if (rec.lastEnemies.length <= 2) {
+          stats.intercept = (stats.intercept || 0) + 1;
+          var ip = interceptPoint(tank, e0);
+          var hdI = CORE.wrap2pi(Math.atan2(ip.x - tank.position.x, ip.z - tank.position.z) - tank.heading);
+          var avI = CORE.avoidCmd(tank, rec.lastObstacles, Math.max(-1, Math.min(1, hdI * 2.2)), 1, 0.6, true);
+          tank.drive(avI.thr, avI.turn, dt);
+          engageAimFire(tank, rec, e0, dE, dt, ctx);
+          return;
+        }
+
         // —— 远距进场：网络驾驶（避让已折叠进 applied）+ 家教炮手。
         //    ②采样扩展：进场 60~100s 第一次成为可学习对象（接近奖/撞墙罚有地方落账）
         if (dE > NAV_DIST * 450) {
@@ -439,12 +465,14 @@
         tankDist(tank, rec.lastEnemies[0]) < 150) {
       newTgt = rec.lastEnemies[0];
     }
-    if (newTgt !== rec.tgt) { CORE.releaseTarget(tank, rec.tgt); CORE.claimTarget(tank, newTgt); rec.tgt = newTgt; }
+    if (newTgt !== rec.tgt) { CORE.releaseTarget(tank, rec.tgt); CORE.claimTarget(tank, newTgt); rec.tgt = newTgt;
+      rec.chaseT = 0; rec.chaseFired = false; rec.chasePhase = 0; }   // 换目标：追击计时清零
     var e0 = rec.lastEnemies[0];
     var d = e0 ? tankDist(tank, e0) : 9999;
     var inEngage = e0 && d <= NAV_DIST * 450;   // 交战区
     var inNav = e0 && !inEngage;                // 导航段（有敌但远）：②采样扩展——进场 60~100s 变成可学习对象
-    var sampled = inEngage || inNav;            // 记步段（无敌=回退规则 AI 待机，不采）
+    var endgame = e0 && rec.lastEnemies.length <= 2;   // 残局（敌≤2）：拦截壳接管驾驶，不采样
+    var sampled = (inEngage || inNav) && !endgame;     // 记步段（无敌/残局=脚本，不采）
 
     if (inEngage) {
       // ① 出环带罚（只计交战段，照旧）
@@ -511,6 +539,17 @@
       }
     } else {
       rec.trail.length = 0;   // 离开交战区清窗（导航段不算绕圈账）
+    }
+
+    // 追击超时罚（10-07）：同一敌人 40s 未杀 −1，之后每 10s −0.2（防傻追，教时机；
+    // 残局兜底靠拦截壳，此罚治"中局盯一个目标死磕"）
+    if (sampled && rec.tgt && rec.tgt.alive) {
+      rec.chaseT = (rec.chaseT || 0) + 0.1;
+      if (rec.chaseT > 40 && !rec.chaseFired) { rec.pend -= 1; rec.chaseFired = true; stats.chasePen = (stats.chasePen || 0) + 1; }
+      else if (rec.chaseFired) {
+        var ph = Math.floor((rec.chaseT - 40) / 10);
+        if (ph > (rec.chasePhase || 0)) { rec.pend -= 0.2; rec.chasePhase = ph; }
+      }
     }
 
     // ③ 朝敌奖（+0.003×max(0,cos)）：导航段+交战段都发——导航段是主战场（进场走直线不绕路）
@@ -678,6 +717,23 @@
             if (!t.alive) return;
             var e0 = (qTgt && qTgt.alive) ? qTgt : lastEnemies[0];
             ai.phase = '七代交战中';
+            if (e0 && lastEnemies.length <= 2) {
+              // 残局拦截（同 bot 模式：治 1226s 型拖尾——追它要去的地方）
+              ai.phase = '七代拦截';
+              q.intercept = (q.intercept || 0) + 1;
+              var ipq = interceptPoint(t, e0);
+              var hdq = CORE.wrap2pi(Math.atan2(ipq.x - t.position.x, ipq.z - t.position.z) - t.heading);
+              var avq = CORE.avoidCmd(t, lastObstacles, Math.max(-1, Math.min(1, hdq * 2.2)), 1, 0.6, true);
+              t.drive(avq.thr, avq.turn, dt);
+              var apq = CORE.gunAimPoint(t, e0);
+              t.aimTurretAt(apq, dt);
+              if (t.canFire() && Math.hypot(e0.position.x - t.position.x, e0.position.z - t.position.z) < 240) {
+                var cvq = CORE.barrelAligned(t, apq, CORE.fireTol(Math.hypot(e0.position.x - t.position.x, e0.position.z - t.position.z)));
+                var thq = CORE.terrainLos(t.position.x, t.position.y + 1.8, t.position.z, apq.x, apq.y, apq.z);
+                if (cvq && !thq && (appliedFire === 1 || ASSIST)) t.tryFire((ctx && ctx.entityManager) || g.em);
+              }
+              return;
+            }
             if (e0) {
               var d = Math.hypot(e0.position.x - t.position.x, e0.position.z - t.position.z);
               var thrIntent = d > NAV_DIST * 450 ? 1 : applied[0];
