@@ -12,7 +12,7 @@ window.addEventListener('error', (e) => {
   };
   show('⚠ 页面脚本出错：' + (e.message || '未知错误') + '\n' + (e.filename || '') + ':' + (e.lineno || '?') + '\n（把这段红字告诉开发者即可修复）');
 });
-const GAME_VERSION = '2026.10.17.5';
+const GAME_VERSION = '2026.10.17.6';
 
 // 坦克贴地姿态用的临时对象（避免每帧分配）
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
@@ -6427,9 +6427,9 @@ class Game {
     }
   }
 
-  // —— 队伍指挥（F1/F2/F3）：跟随我 / 集火我的目标 / 自由作战 ——
+  // —— 队伍指挥（F4/F2/F3）：跟随我 / 集火我的目标 / 自由作战 ——
   _squadCommand(inp) {
-    if (this._consumePress(inp, 'F1')) { this._squadCmd = 'follow'; this.hud.addFeed('📢 队伍：跟随我', 'info'); }
+    if (this._consumePress(inp, 'F4')) { this._squadCmd = 'follow'; this.hud.addFeed('📢 队伍：跟随我', 'info'); }   // F1 已被游戏中心全局「返回启动器」占用，跟随指令挪到 F4
     else if (this._consumePress(inp, 'F2')) { this._squadCmd = 'focus'; this.hud.addFeed('📢 队伍：集火我的目标（V 标记优先）', 'info'); }
     else if (this._consumePress(inp, 'F3')) { this._squadCmd = 'free'; this.hud.addFeed('📢 队伍：自由作战', 'info'); }
   }
