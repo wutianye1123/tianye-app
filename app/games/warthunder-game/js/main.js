@@ -12,7 +12,7 @@ window.addEventListener('error', (e) => {
   };
   show('⚠ 页面脚本出错：' + (e.message || '未知错误') + '\n' + (e.filename || '') + ':' + (e.lineno || '?') + '\n（把这段红字告诉开发者即可修复）');
 });
-const GAME_VERSION = '2026.10.17.2';
+const GAME_VERSION = '2026.10.17.3';
 
 // 坦克贴地姿态用的临时对象（避免每帧分配）
 const _tankN = new THREE.Vector3(), _tankFwd = new THREE.Vector3(), _tankRight = new THREE.Vector3();
@@ -5642,7 +5642,7 @@ class Music {
 }
 
 class Game {
-  constructor({ canvas, mode = 'tank', difficulty = 'normal', tankType = 'medium', planeType = 'fighter', endless = false, objective = 'battle', mapId = 'open', worldwar = false, solo = false, limitedAmmo = false, ownedTanks = ['medium'], ownedPlanes = ['fighter'], daily = false, tutorial = false, sim = false, mp = null, hudContainer, onExit, onResult } = {}) {
+  constructor({ canvas, mode = 'tank', difficulty = 'normal', tankType = 'medium', planeType = 'fighter', endless = false, objective = 'battle', mapId = 'open', worldwar = false, solo = false, limitedAmmo = false, ownedTanks = ['medium'], ownedPlanes = ['fighter'], daily = false, tutorial = false, sim = false, mp = null, hudContainer, onExit, onResult, smallMap = false } = {}) {
     this.canvas = canvas;
     this.mode = mode;
     this.mp = mp || null;   // 联机对战（PvP）：非空=联机局（AI/波次/票数等单机规则全部让位，见 _initMatch）
@@ -5666,6 +5666,13 @@ class Game {
     this.solo = solo;   // 无队友模式（成就用）
     this.limitedAmmo = limitedAmmo;   // 有限弹药模式：主炮备弹40发+地图中央补给区
     this.mapId = mapId;                                        // 地图主题（陆战/空战通用；空战地图池由菜单侧把关，跳过纯巷战图）
+    // 小型地图（复古小图，玩家要求"地形一样、地图更小"）：仅单机陆战——地形/出生/占领区/旗帜/边界全部由 worldSize 派生，
+    // 构造时缩小到 480（与联机小图同款机制），dispose 还原；>600 守卫保证幂等（连续小图局不叠加缩小）
+    this._smallSaved = null;
+    if (smallMap && mode === 'tank' && !worldwar && !mp && CONFIG.tank.worldSize > 600) {
+      this._smallSaved = CONFIG.tank.worldSize;
+      CONFIG.tank.worldSize = 480;
+    }
     this._isNight = !!(MAPS.find((m) => m.id === this.mapId) || {}).night;   // 夜战：月光+星空+车头灯
     this._isRain = !!(MAPS.find((m) => m.id === this.mapId) || {}).rain;     // 雨天：雨幕+湿滑反光
     this.worldwar = worldwar;                                  // 世界大战：混合作战（坦克+飞机同场）
@@ -6035,7 +6042,7 @@ class Game {
 
     this._setupObjective();
     this.hud.setCenterMessage('');
-    this.hud.addFeed(this.worldwar ? '世界大战 · 坦克+飞机混合作战！死后按 T/P 选新载具' : (this.objective === 'capture' ? '战斗开始 · 征服 A/B/C 三点！' : '战斗开始 · 队友已就位'), 'info');
+    this.hud.addFeed(this.worldwar ? '世界大战 · 坦克+飞机混合作战！死后按 T/P 选新载具' : (this.objective === 'capture' ? '战斗开始 · 征服 A/B/C 三点！' : '战斗开始 · 队友已就位') + (this._smallSaved ? ' · 📐 小型地图' : ''), 'info');
     if (this.timeScale !== 1) this.hud.addFeed(`🐢 ${this.timeScale === 0.5 ? '慢速' : '超慢'}节奏（设置里可切回正常）`, 'info');
   }
 
@@ -9133,6 +9140,7 @@ class Game {
     cancelAnimationFrame(this._raf);
     clearTimeout(this._relockTO);
     if (this._mpSavedWorldSize != null) { CONFIG.tank.worldSize = this._mpSavedWorldSize; this._mpSavedWorldSize = null; }   // 联机小图还原
+    if (this._smallSaved != null) { CONFIG.tank.worldSize = this._smallSaved; this._smallSaved = null; }   // 单机小型地图还原
     if (this.mp) { this.mp.detachGame(); }   // 联机：脱钩战局（幽灵/横幅清理，会话保留在大厅）
     this._endShellcam();   // 清理跟拍小窗/X 光组/还原材质
     window.removeEventListener('resize', this._onResize);
@@ -9486,6 +9494,7 @@ let difficulty = 'normal';
 let endless = false;
 let objective = 'battle';   // 陆战目标：'battle'(歼灭) | 'capture'(占领)
 let mapIndex = 0;           // 地图主题索引（坦克默认 MAPS[0]='city'；空战对空战池取模）
+let smallMap = false;       // 小型地图（复古小图，仅单机陆战）：地形主题照旧，地图缩到 480
 // 空战地图池：跳过纯巷战图（city/factory 的街区建筑只进坦克地形，空战选它们=货不对板的空旷平地）
 const PLANE_MAPS = MAPS.filter((m) => !m.urban);
 function mapCycle() { return (pendingMode === 'plane' && !worldwar) ? PLANE_MAPS : MAPS; }
@@ -9495,6 +9504,7 @@ const bestEl = document.getElementById('best');
 const endlessBtn = document.getElementById('btn-endless');
 const objectiveBtn = document.getElementById('btn-objective');
 const mapBtn = document.getElementById('btn-map');
+const mapSizeBtn = document.getElementById('btn-mapsize');
 const worldwarBtn = document.getElementById('btn-worldwar');
 const soloBtn = document.getElementById('btn-solo');
 let solo = false;   // 无队友模式
@@ -9595,6 +9605,12 @@ function renderMapBtn() {
   if (!mapBtn) return;
   mapBtn.innerHTML = `🗺 地图：<b>${mapCycle()[mapIndexSafe()].name}</b>`;
   mapBtn.style.display = '';   // 陆战/空战/世界大战都可选图（空战池自动跳过纯巷战图，夜战/雷暴照飞）
+}
+function renderMapSizeBtn() {
+  if (!mapSizeBtn) return;
+  mapSizeBtn.innerHTML = `📐 尺寸：<b>${smallMap ? '小型' : '标准'}</b>`;
+  mapSizeBtn.classList.toggle('active', smallMap);
+  mapSizeBtn.style.display = (pendingMode === 'tank' && !worldwar) ? '' : 'none';   // 仅单机陆战可选（空战/世界大战/联机不适用）
 }
 function renderWorldwarBtn() {
   if (!worldwarBtn) return;
@@ -9792,16 +9808,17 @@ function renderLoadout() {
     if ((st.pace | 0) > 0) tags.push(`🐢 慢速${['', ' 0.5×', ' 0.25×'][st.pace | 0]}（设置里关）`);
     renderLoadout._paceTags = tags.join('　·　');
   }
-  loEls.summary.textContent = `难度：${DIFFICULTY_LABELS[difficulty]}　·　无尽：${endless ? '开' : '关'}${isTank ? `　·　目标：${objective === 'capture' ? '征服' : '歼灭'}` : ''}　·　🗺 ${mapCycle()[mapIndexSafe()].name}${renderLoadout._paceTags ? '　·　' + renderLoadout._paceTags : ''}${worldwar ? '　·　🌍世界大战' : ''}${solo ? '　·　👥无队友' : ''}　·　💰 ${meta.money}`;
+  loEls.summary.textContent = `难度：${DIFFICULTY_LABELS[difficulty]}　·　无尽：${endless ? '开' : '关'}${isTank ? `　·　目标：${objective === 'capture' ? '征服' : '歼灭'}` : ''}　·　🗺 ${mapCycle()[mapIndexSafe()].name}${isTank && !worldwar ? `　·　📐${smallMap ? '小型' : '标准'}` : ''}${renderLoadout._paceTags ? '　·　' + renderLoadout._paceTags : ''}${worldwar ? '　·　🌍世界大战' : ''}${solo ? '　·　👥无队友' : ''}　·　💰 ${meta.money}`;
    updatePreview3d(isTank, t.id, (meta.paints || {})[t.id]);   // 3D 预览（含涂装色）
    renderEndlessBtn();
    renderObjectiveBtn();
    renderMapBtn();
+   renderMapSizeBtn();
    renderWorldwarBtn();
    // —— 联机对战适配：隐藏单机专属开关（模式/地图/波次由房间统一），出战选择实时生效 ——
    const mpOn = !!(window.__mp && window.__mp.active);
    {
-      const hide = ['btn-endless', 'btn-solo', 'btn-ammo', 'btn-objective', 'btn-map', 'btn-worldwar'];   // btn-worldwar 在「更多」弹层内，联机时同样隐藏
+      const hide = ['btn-endless', 'btn-solo', 'btn-ammo', 'btn-objective', 'btn-map', 'btn-mapsize', 'btn-worldwar'];   // btn-worldwar 在「更多」弹层内，联机时同样隐藏
      for (const id of hide) { const b = document.getElementById(id); if (b) b.style.display = mpOn ? 'none' : ''; }
      if (mpOn) {
        loEls.summary.textContent = `🌐 联机对战 · 坦克/飞机自由混战 · 选择实时生效（点「确认出战」收起，顶部栏可重开）`;
@@ -9906,6 +9923,7 @@ function startGame(mode) {
     endless,
     objective,
     mapId: mapCycle()[mapIndexSafe()].id,
+    smallMap,
     worldwar,
     solo,
     limitedAmmo,
@@ -10011,6 +10029,7 @@ document.querySelectorAll('.diff-btn').forEach((btn) => {
 if (endlessBtn) endlessBtn.addEventListener('click', () => { endless = !endless; renderEndlessBtn(); });
 if (objectiveBtn) objectiveBtn.addEventListener('click', () => { const CYC = ['battle', 'capture', 'waves', 'bossrush', 'flag']; objective = CYC[(CYC.indexOf(objective) + 1) % CYC.length]; renderObjectiveBtn(); renderLoadout(); });
 if (mapBtn) mapBtn.addEventListener('click', () => { mapIndex = (mapIndex + 1) % mapCycle().length; renderMapBtn(); renderLoadout(); });
+if (mapSizeBtn) mapSizeBtn.addEventListener('click', () => { smallMap = !smallMap; renderMapSizeBtn(); renderLoadout(); });
 if (soloBtn) soloBtn.addEventListener('click', () => { solo = !solo; soloBtn.innerHTML = `👥 队友：${solo ? '<b>无</b>' : '有'}`; soloBtn.classList.toggle('active', solo); renderLoadout(); });
 if (worldwarBtn) worldwarBtn.addEventListener('click', () => { worldwar = !worldwar; renderWorldwarBtn(); renderLoadout(); });
 // 国家锁定：循环 全部 → 各拥有国家 → 全部；切国家后自动选用该国第一辆已拥有载具
