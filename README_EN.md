@@ -38,6 +38,7 @@ An Electron + HTML5 game collection featuring a variety of web-based mini games.
 | Backrooms | Horror |
 | Scrap Mechanic | Physics |
 | Physics Destruction | Physics |
+| Sandboxels | Sandbox · Physics (by R74n) |
 | Stardew Valley | Simulation |
 | Music Generator | Music |
 
