@@ -18960,8 +18960,10 @@ for (var k = 0; k < b0.split(" AND ").length; k++) {
 			if (url.indexOf("http") == -1 && url.indexOf("mods/") == -1) {
 				url = "mods/"+url;
 			}
-			// [游戏中心补丁] 本地未随附 mods/ 目录：相对模组路径一律改由官方模组库(sandboxels.r74n.com)在线加载
-			if (url.startsWith("mods/")) { url = "https://sandboxels.r74n.com/" + url; }
+			// [游戏中心补丁] 本地 mods/ 目录自带的自产模组走本地(同源,CSP不拦)；其余裸名字解析到官方模组库
+			var _localMods = ["stickman.js"];
+			var _modFile = url.split("/").pop();
+			if (url.startsWith("mods/") && _localMods.indexOf(_modFile) === -1) { url = "https://sandboxels.r74n.com/" + url; }
 			// if the mod is in enabledMods, return
 			for (var i = 0; i < enabledMods.length; i++) {
 				if (enabledMods[i] == url) { return; }
