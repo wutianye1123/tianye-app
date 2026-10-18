@@ -1,14 +1,12 @@
-// 真·火柴人（游戏中心出品 v2）—— 把每个「人类」渲染成火柴人：
-// 擦掉头/身两个原像素，在其位置用画布描线：圆脑袋＋线身＋摆动的手脚（走起来有动画）
-// 纯渲染层，不改任何游戏逻辑/颜色/存档；移除模组即恢复原样。
+// 真·火柴人（游戏中心出品 v3）—— 把每个「人类」渲染成火柴人：
+// 圆脑袋＋线身＋摆动的手脚（走起来有动画）。
+// v3 机制：完全独立的 requestAnimationFrame 覆盖层，不替换/不干扰游戏任何函数与返回值——
+// 游戏每画一帧，我们在其后擦掉人类的头/身原像素并描画火柴人；移除模组即还原。
 // 用法：模组管理器输入 stickman.js 回车，刷新生效。
 (function () {
-  if (typeof drawPixels !== "function") return;   // 游戏未就绪则跳过（安全）
-  var _oldDrawPixels = drawPixels;
-
   function drawStickmen() {
     var canvas = document.getElementById("game");
-    if (!canvas) return;
+    if (!canvas || typeof currentPixels === "undefined" || typeof pixelSize !== "number") return;
     var ctx = canvas.getContext("2d");
     var t = Math.floor(Date.now() / 150);   // 动画时钟：手脚摆动
     ctx.lineWidth = Math.max(1, pixelSize * 0.30);
@@ -27,7 +25,7 @@
 
       // ① 擦掉底下的原像素（头+身），露出背景
       ctx.clearRect(px - 1, py - 1, pixelSize + 2, pixelSize + 2);
-      if (below) ctx.clearRect(px - 1, py + pixelSize - 1, pixelSize + 2, pixelSize + 2);
+      ctx.clearRect(px - 1, py + pixelSize - 1, pixelSize + 2, pixelSize + 2);
 
       // ② 圆脑袋
       ctx.beginPath();
@@ -63,8 +61,11 @@
     }
   }
 
-  drawPixels = function (forceTick) {
-    _oldDrawPixels(forceTick);
-    try { drawStickmen(); } catch (e) { /* 渲染失败不影响游戏 */ }
-  };
+  // 独立覆盖层循环：游戏不动我们不动它的任何函数，只在每帧后面补画
+  function stickLoop() {
+    try { drawStickmen(); } catch (e) { /* 渲染异常不影响游戏 */ }
+    requestAnimationFrame(stickLoop);
+  }
+  if (document.readyState === "complete" || document.readyState === "interactive") requestAnimationFrame(stickLoop);
+  else document.addEventListener("DOMContentLoaded", () => requestAnimationFrame(stickLoop));
 })();
