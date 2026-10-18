@@ -1169,25 +1169,49 @@ ipcMain.handle('mp-add-firewall', async () => {
 });
 
 // 先启动HTTP服务器，再创建窗口（固定端口保证 localStorage 存档不丢失）
-server.listen(FIXED_PORT, '0.0.0.0', () => {
-  port = FIXED_PORT;
-  console.log('本地服务器启动在端口', port, '(绑定 0.0.0.0)');
-  app.whenReady().then(() => {
-    createWindow();
-    // 启动时添加防火墙规则，确保端口可达
-    addFirewallPortRule();
-  });
-}).on('error', () => {
-  // 端口被占用则尝试备选端口
-  server.listen(0, '0.0.0.0', () => {
-    port = server.address().port;
+function startServer() {
+  server.listen(FIXED_PORT, '0.0.0.0', () => {
+    port = FIXED_PORT;
     console.log('本地服务器启动在端口', port, '(绑定 0.0.0.0)');
     app.whenReady().then(() => {
       createWindow();
+      // 启动时添加防火墙规则，确保端口可达
       addFirewallPortRule();
     });
+  }).on('error', () => {
+    // 端口被占：若是本机遗留的开发版进程（tianye/app/main.js），自动清退后重试固定端口——
+    // 随机端口兜底会换掉 localStorage 源，玩家模组/设置全部"消失"（已实际发生过），必须死守 18765
+    try {
+      const { execSync } = require('child_process');
+      const pids = execSync(`lsof -ti tcp:${FIXED_PORT} -sTCP:LISTEN`).toString().trim();
+      for (const pid of pids.split('\n').filter(Boolean)) {
+        let cmd = '';
+        try { cmd = execSync(`ps -p ${pid} -o command=`).toString(); } catch (e) {}
+        if (cmd.includes('tianye') && cmd.includes('main.js')) {
+          try { process.kill(parseInt(pid), 'SIGKILL'); console.log('已清退抢占端口的开发版进程', pid); } catch (e) {}
+        }
+      }
+    } catch (e) {}
+    let tries = 0;
+    const retry = () => {
+      tries++;
+      server.listen(FIXED_PORT, '0.0.0.0', () => {
+        port = FIXED_PORT;
+        console.log('本地服务器(重试)启动在端口', port, '(绑定 0.0.0.0)');
+        app.whenReady().then(() => { createWindow(); addFirewallPortRule(); });
+      }).on('error', () => {
+        if (tries < 5) setTimeout(retry, 1000);
+        else server.listen(0, '0.0.0.0', () => {
+          port = server.address().port;
+          console.log('固定端口仍被占用，随机兜底端口', port, '（注意：localStorage 存档按端口隔离）');
+          app.whenReady().then(() => { createWindow(); addFirewallPortRule(); });
+        });
+      });
+    };
+    setTimeout(retry, 500);
   });
-});
+}
+startServer();
 app.on('window-all-closed', () => {
   try { recordGameEnd(); } catch (e) {}
   server.close();
