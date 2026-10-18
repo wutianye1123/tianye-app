@@ -842,7 +842,7 @@ const server = http.createServer((req, res) => {
     }
     res.writeHead(200, {
       'Content-Type': contentType,
-      'Content-Security-Policy': "default-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; worker-src 'self' blob:; img-src 'self' data: blob:; media-src 'self' blob: data:; connect-src 'self' ws: wss: http: https:",
+      'Content-Security-Policy': "default-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://sandboxels.r74n.com; worker-src 'self' blob:; img-src 'self' data: blob: https:; media-src 'self' blob: data:; connect-src 'self' ws: wss: http: https:",
       'Access-Control-Allow-Origin': '*',
       'Cache-Control': 'no-cache, no-store, must-revalidate'
     });
