@@ -21,7 +21,7 @@ while true; do
     cp training/ppo7-weights-latest.json training/autoeval-weights.json   # 专用评测权重——绝不碰玩家版 rl7-weights.json（10-24 事故：曾覆盖玩家版）
     rm -rf /tmp/wt-eval-rl7   # 坏缓存会致评测窗静默启动失败（10-18 实测），每轮清
     echo "[autoeval] 第${ROUND}轮快评 @ ${STEPS} 步 (gen${GEN})…"
-    EVALW=training/autoeval-weights.json ../../node_modules/.bin/electron training/eval-rl7.cjs 3 1 8123 2>/dev/null | grep "局#" > /tmp/autoeval-r${ROUND}.log
+    EVALW=training/autoeval-weights.json ../../node_modules/.bin/electron training/eval-rl7.cjs 3 1 8123 2>&1 | grep "局#" > /tmp/autoeval-r${ROUND}.log   # 日志走 stderr，2>&1 并入（2>/dev/null 曾致永远空抓）
     AVG=$(grep -o 't=[0-9]*s' /tmp/autoeval-r${ROUND}.log | grep -o '[0-9]*' | awk '{s+=$1;n++}END{if(n)printf "%.0f",s/n;else print 9999}')
     echo "[autoeval] 第${ROUND}轮 @gen${GEN}：均值 ${AVG}s（明细：$(grep -o 't=[0-9]*s' /tmp/autoeval-r${ROUND}.log | tr '\n' ' ')）"
     if [ "$AVG" -ge 9999 ]; then
