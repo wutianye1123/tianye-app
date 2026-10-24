@@ -19,7 +19,7 @@ const results = { rl7: [], rl6: [], bc: [], base: [] };
 const MODES = ['rl7', 'rl6', 'bc', 'base'];
 const LABELS = { rl7: '第七代 RL(队友)', rl6: '第六代 RL(队友)', bc: '第五代 BC(队友)', base: '规则 AI(队友)' };
 const URLS = {
-  rl7: `http://localhost:${PORT}/?auto=tank&rl7=ally&rl7Noise=0&rl7W=training/rl7-weights.json`,
+  rl7: `http://localhost:${PORT}/?auto=tank&rl7=ally&rl7Noise=0&rl7W=${process.env.EVALW || 'training/rl7-weights.json'}`,   // EVALW 覆盖（守望用独立权重，不碰玩家版）
   rl6: `http://localhost:${PORT}/?auto=tank&rl=ally&rlNoise=0&rlW=training/rl-weights.json`,
   bc: `http://localhost:${PORT}/?auto=tank&bc=ally`,
   base: `http://localhost:${PORT}/?auto=tank`,
