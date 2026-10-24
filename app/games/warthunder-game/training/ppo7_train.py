@@ -37,10 +37,10 @@ ACT_DIM = 5                                        # [thr, turn, aimYaw, aimPitc
 GAUSS_DIM = 4                                      # 前 4 维高斯，第 5 维伯努利
 BATCH = 2048
 EPOCHS, MINIB = 4, 256
-CLIP, LR = 0.2, 1e-4
+CLIP, LR = 0.2, 3e-5   # 2026-10-18 gen287 漂移教训：5e-5 长跑震荡，默认降 3e-5（CLI --lr 可覆盖）
 ENT_W, VF_W = 0.004, 0.25
 GAMMA, LAM = 0.99, 0.95
-KL_STOP = 0.05
+KL_STOP = 0.03   # 2026-10-18 收紧（原 0.05）：防策略单步迈大漂移
 GRAD_CLIP = 1.0
 CKPT_EVERY = 10
 LOGSTD_LO = np.array([-2.5, -2.5, -3.9, -3.9], dtype=np.float32)   # σ 下限（驾驶 0.08 / 瞄准 0.02）
@@ -57,12 +57,14 @@ ap.add_argument('port', nargs='?', type=int, default=8771)
 ap.add_argument('--alpha', type=float, default=0.5, help='BC 锚损失权重')
 ap.add_argument('--resume', action='store_true', help='从 ppo7-weights-latest.json 恢复')
 ap.add_argument('--batch', type=int, default=BATCH)
-ap.add_argument('--lr', type=float, default=LR, help='学习率（续训建议 5e-5 治 KL 偏热）')
+ap.add_argument('--lr', type=float, default=LR, help='学习率（默认 3e-5——5e-5 长跑震荡已证伪）')
+ap.add_argument('--kl-stop', type=float, default=KL_STOP, help='KL 早停阈值（默认 0.03）')
 ap.add_argument('--keep-gen', action='store_true', help='resume 保留 gen 继续编（同语义续练用；'
                                                         '默认归零=语义变更基线重置）')
 args = ap.parse_args()
 BATCH = args.batch
 LR = args.lr
+KL_STOP = args.kl_stop
 
 # ---------- 网络：参数名与权重 json 逐键一致（JS 侧手写前向直接吃） ----------
 class Net(torch.nn.Module):
