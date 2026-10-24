@@ -5,26 +5,30 @@
 // 用法：模组管理器输入 stickman.js 回车，刷新生效。
 (function () {
   // 单个火柴人的全部笔画（lineWidth 倍率与颜色由外层两遍调用决定：先粗深色描边，后白色本体）
-  function figurePaths(ctx, cx, cy, ps, t, phase) {
-    // 圆脑袋
+  // 几何：整个小人必须装进 头格+身格 共 2×ps 高内——脚尖(py+1.92ps)落在地面线上，不再扎进地里
+  function figurePaths(ctx, cx, py, ps, t, phase) {
+    // 圆脑袋（头格上部）
+    var hy = py + ps * 0.45;
     ctx.beginPath();
-    ctx.arc(cx, cy, ps * 0.42, 0, Math.PI * 2);
+    ctx.arc(cx, hy, ps * 0.38, 0, Math.PI * 2);
     ctx.stroke();
     // 躯干线（脖子到胯）
-    var hipY = cy + ps * 1.5;
+    var hipY = py + ps * 1.42;
     ctx.beginPath();
-    ctx.moveTo(cx, cy + ps * 0.42);
+    ctx.moveTo(cx, hy + ps * 0.38);
     ctx.lineTo(cx, hipY);
     ctx.stroke();
-    // 腿：走路摆动
-    var sw = Math.sin((t + phase) * 0.35) * ps * 0.6;
-    ctx.beginPath(); ctx.moveTo(cx, hipY); ctx.lineTo(cx - sw, hipY + ps * 1.0); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(cx, hipY); ctx.lineTo(cx + sw, hipY + ps * 1.0); ctx.stroke();
-    // 手臂：与腿反相摆动
-    var sw2 = Math.cos((t + phase) * 0.35) * ps * 0.55;
-    var shoulderY = cy + ps * 0.8;
-    ctx.beginPath(); ctx.moveTo(cx, shoulderY); ctx.lineTo(cx - sw2, shoulderY + ps * 0.65); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(cx, shoulderY); ctx.lineTo(cx + sw2, shoulderY + ps * 0.65); ctx.stroke();
+    // 腿：走路摆动，脚尖止于地面线(py+1.92ps)
+    var footY = py + ps * 1.92;
+    var sw = Math.sin((t + phase) * 0.35) * ps * 0.42;
+    ctx.beginPath(); ctx.moveTo(cx, hipY); ctx.lineTo(cx - sw, footY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx, hipY); ctx.lineTo(cx + sw, footY); ctx.stroke();
+    // 手臂：与腿反相摆动（收在两格内）
+    var sw2 = Math.cos((t + phase) * 0.35) * ps * 0.40;
+    var shoulderY = py + ps * 0.98;
+    var handY = py + ps * 1.5;
+    ctx.beginPath(); ctx.moveTo(cx, shoulderY); ctx.lineTo(cx - sw2, handY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx, shoulderY); ctx.lineTo(cx + sw2, handY); ctx.stroke();
   }
 
   function drawStickmen() {
@@ -43,7 +47,7 @@
       if (!below || below.element !== "body") continue;   // 只画完整的 头+身 人类
 
       var px = p.x * ps, py = p.y * ps;
-      var cx = px + ps / 2, cy = py + ps / 2;
+      var cx = px + ps / 2;
 
       // ① 擦掉底下的原像素（头+身），露出背景
       ctx.clearRect(px - 1, py - 1, ps + 2, ps + 2);
@@ -53,10 +57,10 @@
       var phase = p.x * 0.7;
       ctx.lineWidth = Math.max(1, ps * 0.30 * 1.7);
       ctx.strokeStyle = "#1a1a1a";
-      figurePaths(ctx, cx, cy, ps, t, phase);
+      figurePaths(ctx, cx, py, ps, t, phase);
       ctx.lineWidth = Math.max(1, ps * 0.30);
       ctx.strokeStyle = "#ffffff";
-      figurePaths(ctx, cx, cy, ps, t, phase);
+      figurePaths(ctx, cx, py, ps, t, phase);
     }
 
     // 第二遍：擦掉走位瞬间落单的 body 像素（消除换格残影）
