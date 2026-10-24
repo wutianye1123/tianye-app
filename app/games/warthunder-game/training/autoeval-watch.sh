@@ -19,11 +19,14 @@ while true; do
     LAST_CHECK=$NODE; ROUND=$((ROUND+1))
     GEN=$(python3 -c "import json;print(json.load(open('training/ppo7-weights-latest.json'))['gen'])" 2>/dev/null)
     cp training/ppo7-weights-latest.json training/rl7-weights.json
+    rm -rf /tmp/wt-eval-rl7   # 坏缓存会致评测窗静默启动失败（10-18 实测），每轮清
     echo "[autoeval] 第${ROUND}轮快评 @ ${STEPS} 步 (gen${GEN})…"
     ../../node_modules/.bin/electron training/eval-rl7.cjs 3 1 8123 2>/dev/null | grep "局#" > /tmp/autoeval-r${ROUND}.log
     AVG=$(grep -o 't=[0-9]*s' /tmp/autoeval-r${ROUND}.log | grep -o '[0-9]*' | awk '{s+=$1;n++}END{if(n)printf "%.0f",s/n;else print 9999}')
     echo "[autoeval] 第${ROUND}轮 @gen${GEN}：均值 ${AVG}s（明细：$(grep -o 't=[0-9]*s' /tmp/autoeval-r${ROUND}.log | tr '\n' ' ')）"
-    if [ "$AVG" -gt "$LIMIT" ]; then
+    if [ "$AVG" -ge 9999 ]; then
+      echo "[autoeval] ⚠️ 本轮无有效局（评测窗异常），不计超线"
+    elif [ "$AVG" -gt "$LIMIT" ]; then
       BAD=$((BAD+1))
       echo "[autoeval] ⚠️ 超线 ${BAD}/2"
       if [ "$BAD" -ge 2 ]; then
