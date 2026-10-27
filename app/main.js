@@ -871,8 +871,8 @@ function createWindow() {
     if (input.key === 'F12' && input.type === 'keyDown') {
       win.webContents.toggleDevTools();
     }
-    // 返回启动器：所有游戏统一 F1（Mac 按 fn+F1）；Sandboxels 页额外支持 F5
-    if (input.type === 'keyDown' && (input.key === 'F1' || (input.key === 'F5' && win.webContents.getURL().includes('Sandboxels')))) {
+    // 返回启动器（用户定稿）：统一 F2；Sandboxels 页例外用 F5（其内部 F2 是工具快捷键）
+    if (input.type === 'keyDown' && (input.key === 'F2' || (input.key === 'F5' && win.webContents.getURL().includes('Sandboxels')))) {
       const url = win.webContents.getURL();
       if (!url.includes('launcher.html')) {
         firstLoad = false;

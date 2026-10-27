@@ -508,10 +508,9 @@
       }
     };
 
-    // 返回键：所有游戏统一 F1（Mac 按 fn+F1）；Sandboxels 额外支持 F5（其内部 F2 是工具快捷键，不占用）。
-    // window 捕获阶段监听＝事件链最早点：压掉浏览器默认行为（F1 帮助/F5 刷新）和游戏自身按键处理
-    var backKeys = ['F1'];
-    if (/sandboxels/i.test(location.pathname)) backKeys.push('F5');
+    // 返回键（用户定稿）：Sandboxels 用 F5（其内部 F2 是工具快捷键），其余游戏统一 F2（Mac 按 fn+F2）。
+    // window 捕获阶段监听＝事件链最早点：压掉浏览器默认行为和游戏自身按键处理
+    var backKeys = /sandboxels/i.test(location.pathname) ? ['F5'] : ['F2'];
     window.addEventListener('keydown', function(e) {
       if (backKeys.indexOf(e.key) !== -1) {
         e.preventDefault();
