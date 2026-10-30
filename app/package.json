@@ -48,6 +48,10 @@
       "preload.js",
       "launcher.html",
       "launcher.css",
+      "favicon.ico",
+      "favicon-16.png",
+      "favicon-32.png",
+      "apple-touch-icon.png",
       "games/**/*",
       "!games/warthunder-game/training"
     ]
