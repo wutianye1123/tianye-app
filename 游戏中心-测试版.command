@@ -6,4 +6,5 @@ echo "退出正式版（如在运行）…"
 pkill -9 -f "游戏中心.app/Contents/MacOS" 2>/dev/null
 sleep 1
 echo "从源码启动测试版（关闭此窗口或 Cmd+Q 退出）…"
-cd app && npx electron .
+export GC_DEV=1
+cd app cd app && npx electron .cd app && npx electron . npx electron .

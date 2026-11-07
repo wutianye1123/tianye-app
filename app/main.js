@@ -863,6 +863,11 @@ function createWindow() {
   });
   win.loadURL('http://localhost:' + port + '/launcher.html');
   win.setMenu(null);
+  // 测试版标识：源码直跑(GC_DEV=1)时窗口标题带「·测试版」，和正式版一眼区分
+  if (process.env.GC_DEV) {
+    win.on('page-title-updated', (e) => e.preventDefault());
+    win.setTitle('游戏中心 · 测试版');
+  }
   // F11全屏，F12开发者工具
   win.webContents.on('before-input-event', (event, input) => {
     if (input.key === 'F11' && input.type === 'keyDown') {
