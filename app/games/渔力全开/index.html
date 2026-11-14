@@ -1,0 +1,1596 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>渔力全开</title>
+<style>
+  html,body{margin:0;padding:0;background:#06131f;overflow:hidden;height:100%;user-select:none;-webkit-user-select:none;cursor:crosshair}
+  canvas{display:block;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);image-rendering:auto}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+'use strict';
+/* ============================================================
+   渔力全开 · 类《How to Fish》物理钓鱼动作游戏
+   核心循环：抛竿 → 拽线搏斗 → 鱼上岸会蹦会逃 → 花式击杀 → 卖鱼
+            → 升级装备 → 完成岛屿目标 → 打 Boss → 下一座岛
+   v1.0  ·  纯 Canvas 手绘 · 无外部资源
+============================================================ */
+const W=1280, H=720;                 // 内部分辨率
+const WATER_X=460, DOCK_Y=560;       // 水线 x / 甲板地面 y
+const GRAV=1500;
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+let scale=1, offX=0, offY=0;
+function resize(){
+  cv.width=W; cv.height=H;
+  const s=Math.min(innerWidth/W, innerHeight/H);
+  scale=s; cv.style.width=(W*s)+'px'; cv.style.height=(H*s)+'px';
+}
+addEventListener('resize',resize); resize();
+
+/* ---------------- 工具 ---------------- */
+const rnd=(a=1,b)=> b===undefined? Math.random()*a : a+Math.random()*(b-a);
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const dist=(x1,y1,x2,y2)=>Math.hypot(x2-x1,y2-y1);
+const lerp=(a,b,t)=>a+(b-a)*t;
+const fmt=n=>Math.round(n).toLocaleString('zh-CN');
+
+/* ---------------- 音效（WebAudio 合成，M 静音） ---------------- */
+let AC=null;
+function ac(){ if(!AC){ try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } return AC; }
+function tone(f,d=.12,type='square',vol=.08,slide){
+  if(G.muted) return; const a=ac(); if(!a) return;
+  const o=a.createOscillator(), g=a.createGain();
+  o.type=type; o.frequency.setValueAtTime(f,a.currentTime);
+  if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(30,slide),a.currentTime+d);
+  g.gain.setValueAtTime(vol,a.currentTime);
+  g.gain.exponentialRampToValueAtTime(.0001,a.currentTime+d);
+  o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+d+.02);
+}
+function noiseS(d=.15,vol=.06,hp=400){
+  if(G.muted) return; const a=ac(); if(!a) return;
+  const len=Math.floor(a.sampleRate*d), buf=a.createBuffer(1,len,a.sampleRate), ch=buf.getChannelData(0);
+  for(let i=0;i<len;i++) ch[i]=(Math.random()*2-1)*(1-i/len);
+  const src=a.createBufferSource(); src.buffer=buf;
+  const f=a.createBiquadFilter(); f.type='highpass'; f.frequency.value=hp;
+  const g=a.createGain(); g.gain.value=vol;
+  src.connect(f); f.connect(g); g.connect(a.destination); src.start();
+}
+const SFX={
+  cast:()=>noiseS(.18,.05,900),
+  splash:()=>{noiseS(.25,.09,300);tone(220,.15,'sine',.05,80);},
+  bite:()=>{tone(880,.08,'square',.07);tone(1320,.1,'square',.05);},
+  reel:()=>tone(140,.05,'sawtooth',.02),
+  snap:()=>{tone(600,.25,'sawtooth',.08,60);noiseS(.2,.06,200);},
+  whack:()=>{tone(90,.1,'sine',.14,40);noiseS(.06,.05,100);},
+  gun:()=>{noiseS(.07,.1,700);tone(160,.06,'square',.07,60);},
+  coin:()=>{tone(660,.07,'square',.06);setTimeout(()=>tone(880,.07,'square',.06),70);setTimeout(()=>tone(1320,.12,'square',.06),140);},
+  hurt:()=>tone(200,.2,'sawtooth',.09,90),
+  jump:()=>tone(300,.15,'sine',.05,600),
+  boss:()=>{tone(55,.7,'sawtooth',.12,40);tone(82,.7,'sawtooth',.08,50);},
+  gull:()=>{tone(1200,.08,'square',.04,1600);setTimeout(()=>tone(1100,.08,'square',.04,1500),120);},
+  eat:()=>{tone(300,.08,'square',.05);setTimeout(()=>tone(260,.08,'square',.05),90);},
+  win:()=>{[523,659,784,1047].forEach((f,i)=>setTimeout(()=>tone(f,.18,'square',.07),i*140));}
+};
+
+/* ---------------- 数据表 ---------------- */
+const WEAPONS={
+  fist:    {name:'拳头',  icon:'👊', type:'melee', range:55, dmg:1, cd:.45, price:0},
+  knife:   {name:'小刀',  icon:'🔪', type:'melee', range:65, dmg:3, cd:.40, price:40},
+  baguette:{name:'法棍',  icon:'🥖', type:'melee', range:62, dmg:2, cd:.42, price:66, crit:.18, critMul:10},
+  pistol:  {name:'手枪',  icon:'🔫', type:'gun',   dmg:4, cd:.32, price:350, bs:950},
+  taser:   {name:'电击棒',icon:'⚡', type:'melee', range:74, dmg:6, cd:.50, price:500, chain:true},
+  tnt:     {name:'炸药桶',icon:'💣', type:'bomb',  cd:3.0, price:1000},
+  shotgun: {name:'霰弹枪',icon:'💥', type:'gun',   dmg:2, cd:.95, price:1200, bs:820, pellets:5, spread:.30, range:175}
+};
+const WORDER=['fist','knife','baguette','pistol','taser','tnt','shotgun'];
+const ITEMS={
+  hat:  {name:'渔夫草帽', icon:'🎩', price:120, desc:'+20 最大生命'},
+  clover:{name:'四叶草',  icon:'🍀', price:300, desc:'珍品概率 20%'},
+  horn: {name:'大喇叭',  icon:'📣', price:260, desc:'卖鱼收购价 +15%'},
+  vest: {name:'救生衣',  icon:'🦺', price:400, desc:'受到伤害 -25%'},
+  crown:{name:'咸鱼王冠',icon:'👑', price:666, desc:'倒地后满血复活'}
+};
+const RODS=[
+  {name:'木竿',    cast:560, line:60,  hookR:46, reel:36, price:0},
+  {name:'碳素竿',  cast:720, line:85,  hookR:64, reel:44, price:250},
+  {name:'专业蟹竿',cast:880, line:125, hookR:88, reel:54, price:900}
+];
+const BAITS=[
+  {name:'香肠饵', bite:1.0, price:0},
+  {name:'虾饵',   bite:1.6, price:200},
+  {name:'蟹饵',   bite:2.4, price:800}
+];
+const SPECIES=[
+  {id:'sardine',name:'沙丁鱼', islands:[1,2,3], val:12, hp:2, pull:12, size:15, depth:[600,645], speed:65, color:'#a8c8e8', school:4},
+  {id:'salted', name:'咸鱼',  islands:[1,2,3], val:5,  hp:1, pull:8,  size:18, depth:[600,640], speed:25, color:'#b7a98a', weak:true},
+  {id:'drunk',  name:'醉虾',  islands:[1,2],   val:18, hp:2, pull:10, size:14, depth:[605,650], speed:50, color:'#f0a8b8', drunk:true},
+  {id:'mackerel',name:'鲭鱼', islands:[1,2,3], val:25, hp:3, pull:18, size:20, depth:[600,660], speed:80, color:'#5f9ea0'},
+  {id:'bass',    name:'鲈鱼',  islands:[1,2,3], val:40, hp:4, pull:24, size:26, depth:[615,680], speed:55, color:'#7a9e7e'},
+  {id:'parrot',  name:'鹦嘴鱼',islands:[2,3],   val:65, hp:5, pull:28, size:28, depth:[620,685], speed:50, color:'#e76f8b'},
+  {id:'piranha', name:'食人鱼',islands:[2],     val:45, hp:4, pull:22, size:18, depth:[610,655], speed:85, color:'#d94f4f', chase:true},
+  {id:'sunfish', name:'翻车鱼',islands:[2,3],   val:55, hp:2, pull:20, size:48, depth:[630,690], speed:18, color:'#9db8c9'},
+  {id:'puffer',  name:'河豚',  islands:[2,3],   val:95, hp:6, pull:36, size:24, depth:[615,665], speed:40, color:'#d9c26a', landDmg:true},
+  {id:'eel',     name:'电鳗',  islands:[2,3],   val:70, hp:5, pull:26, size:30, depth:[630,690], speed:45, color:'#8a9e5f', zap:true},
+  {id:'stone',   name:'石鱼',  islands:[3],     val:140,hp:7, pull:30, size:24, depth:[648,695], speed:35, color:'#8a7f76', spike:true},
+  {id:'tuna',    name:'金枪鱼',islands:[3],     val:190,hp:8, pull:45, size:40, depth:[648,695], speed:95, color:'#4a6fa5'},
+  {id:'koi',     name:'黄金锦鲤',islands:[3],   val:260,hp:5, pull:40, size:26, depth:[650,695], speed:60, color:'#ffd700', gold:true, weight:.3}
+];
+const ISLANDS=[
+  {name:'青螺岛', sky:['#7ec8e3','#fdf3d8'], sea:['#2e86ab','#12405c'], goal:{money:400,fish:6},
+   boss:'puffer', bossName:'大河豚', reward:600, intro:'你酒后开船撞上了这座岛。\n想回家？先学会钓鱼。'},
+  {name:'礁岩岛', sky:['#ffb37b','#ffe3c2'], sea:['#2a6f97','#014f71'], goal:{money:1500,fish:10},
+   boss:'spider', bossName:'蜘蛛蟹', reward:1800, intro:'海图指向礁岩岛。\n这里的鱼更凶，螃蟹会上岸夹人。'},
+  {name:'熔岩岛', sky:['#c94b4b','#ffd56b'], sea:['#1d3557','#0b1d33'], goal:{money:3500,fish:0},
+   boss:'whale', bossName:'变异弓头鲸', reward:6000, intro:'回家的最后一块海图。\n喷岩浆的巨鲸守着这里。'}
+];
+const BOSS_DEF={
+  puffer:{pull:70, stam:160, hp:60, size:52},
+  spider:{hp:90, size:46},                        // 不上钩，自己爬上岸
+  whale:{pull:85, stam:200, hp:220, size:96}
+};
+
+/* ---------------- 全局状态 ---------------- */
+const G={
+  state:'title', ui:null, t:0, timePlayed:0,
+  island:1, money:0, earnedI:0, soldI:0,
+  rod:0, bait:0, weapons:['fist'], cur:'fist', items:{},
+  stats:{earned:0,sold:0,killed:0,air:0,boss:0},
+  won:false, freeMode:false, muted:false, shake:0,
+  bossOut:false, banner:null, gullT:22, crabT:16,
+  saveExists:false
+};
+const player={x:220,y:DOCK_Y,vx:0,vy:0,onGround:true,hp:100,maxHp:100,face:1,cd:0,swing:0,iv:0,knocked:0,carrying:[],healCd:0,walk:0};
+const rodS={state:'idle', power:0, bob:{x:0,y:0,vx:0,vy:0}, floatT:0, hook:null, reel:null, dudT:0};
+let fishes=[], fly=[], gfish=[], corpses=[], bullets=[], balls=[], crabs=[], parts=[], floats=[], bombs=[];
+let gull=null, boss=null;
+
+/* ---------------- 存档 ---------------- */
+const SAVE_KEY='ylqk_save_v1';
+function save(){
+  try{
+    localStorage.setItem(SAVE_KEY,JSON.stringify({
+      money:G.money,island:G.island,earnedI:G.earnedI,soldI:G.soldI,
+      rod:G.rod,bait:G.bait,weapons:G.weapons,cur:G.cur,items:G.items,
+      stats:G.stats,won:G.won,freeMode:G.freeMode,timePlayed:G.timePlayed
+    }));
+  }catch(e){}
+}
+function loadSave(){
+  try{
+    const s=JSON.parse(localStorage.getItem(SAVE_KEY));
+    if(!s) return null; return s;
+  }catch(e){ return null; }
+}
+function applySave(s){
+  G.money=s.money; G.island=s.island; G.earnedI=s.earnedI; G.soldI=s.soldI;
+  G.rod=s.rod; G.bait=s.bait; G.weapons=s.weapons; G.cur=s.cur; G.items=s.items||{};
+  G.stats=s.stats; G.won=s.won; G.freeMode=s.freeMode; G.timePlayed=s.timePlayed||0;
+  if(!G.weapons.includes('fist')) G.weapons.unshift('fist');
+  if(!G.weapons.includes(G.cur)) G.cur='fist';
+  if(G.items.hat) player.maxHp=120;
+}
+G.saveExists=!!loadSave();
+
+/* ---------------- 输入 ---------------- */
+const keys={};
+const mouse={x:W/2,y:H/2,down:false,rdown:false};
+function mpos(e){ const r=cv.getBoundingClientRect(); mouse.x=(e.clientX-r.left)/scale; mouse.y=(e.clientY-r.top)/scale; }
+addEventListener('mousemove',mpos);
+addEventListener('mousedown',e=>{ ac()&&AC.state==='suspended'&&AC.resume(); mpos(e);
+  if(e.button===0){ mouse.down=true; onLeft(); }
+  if(e.button===2){ mouse.rdown=true; onRight(true); }
+});
+addEventListener('mouseup',e=>{ mpos(e);
+  if(e.button===0) mouse.down=false;
+  if(e.button===2){ mouse.rdown=false; onRight(false); }
+});
+addEventListener('contextmenu',e=>e.preventDefault());
+addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase(); keys[k]=true;
+  if(k==='p'||k==='escape'){ if(G.state==='play'){ G.ui=G.ui==='pause'?null:'pause'; } }
+  if(k==='m'){ G.muted=!G.muted; addFloat(W/2,120,G.muted?'🔇 静音':'🔊 声音开','#fff'); }
+  if(G.state!=='play'||G.ui) return;
+  if(k==='b'){ G.ui='shop'; }
+  if('1234567'.includes(k)){ const id=WORDER[+k-1]; if(G.weapons.includes(id)){ G.cur=id; addFloat(player.x,player.y-90,'装备 '+WEAPONS[id].name,'#ffe08a'); } }
+  if(k==='e') interact();
+  if(k===' ') e.preventDefault();
+});
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+addEventListener('blur',()=>{ if(G.state==='play'&&G.ui===null) G.ui='pause'; });
+
+function onLeft(){
+  if(G.state!=='play') return;
+  if(G.ui==='shop'||G.ui==='pause') return;      // 按钮点击由 uiButtons 处理
+  if(rodS.state==='hooked') return;              // 收线用按住状态，不在这里触发
+  tryAttack();
+}
+function onRight(down){
+  if(G.state!=='play'||G.ui) return;
+  if(down){
+    if(rodS.state==='idle'){ rodS.state='charge'; rodS.power=0; }
+    else if(rodS.state==='float'){ rodS.state='idle'; splash(rodS.bob.x,DOCK_Y,4); }
+  }else{
+    if(rodS.state==='charge'){ doCast(); }
+  }
+}
+
+/* ---------------- 开场/交互 ---------------- */
+let uiButtons=[];
+function startGame(fresh){
+  if(fresh){
+    G.money=0;G.island=1;G.earnedI=0;G.soldI=0;G.rod=0;G.bait=0;
+    G.weapons=['fist'];G.cur='fist';G.items={};G.stats={earned:0,sold:0,killed:0,air:0,boss:0};
+    G.won=false;G.freeMode=false;G.timePlayed=0;G.bossOut=false;G.banner=null;
+    fishes=[];fly=[];gfish=[];corpses=[];bullets=[];balls=[];crabs=[];parts=[];floats=[];bombs=[];
+    gull=null;boss=null;player.hp=100;player.maxHp=100;player.carrying=[];player.knocked=0;
+    player.x=220;player.y=DOCK_Y;
+    G.banner={text:'🚩 第 1 岛 · 青螺岛\n目标：赚 ¥500、卖出 8 条鱼',t:4};
+  }
+  spawnPool();
+  G.state='play'; G.ui=null;
+}
+function interact(){
+  if(player.knocked>0) return;
+  if(player.x<165){ // 码头商店：卖鱼
+    if(player.carrying.length===0){ addFloat(100,DOCK_Y-120,'背包是空的，先去钓！','#9fb3c8'); return; }
+    let sum=0,n=0;
+    player.carrying.forEach(c=>{sum+=c.val;n++;});
+    if(G.items.horn){ sum=Math.round(sum*1.15); addFloat(110,DOCK_Y-150,'📣 「新鲜的好鱼！打折啦——不，涨价啦！」+15%','#ffe08a'); }
+    G.money+=sum;G.earnedI+=sum;G.soldI+=n;G.stats.earned+=sum;G.stats.sold+=n;
+    player.carrying=[];
+    SFX.coin(); addFloat(110,DOCK_Y-130,'+'+fmt(sum)+' 元 · 卖出 '+n+' 件','#ffd700');
+    for(let i=0;i<12;i++)parts.push({x:105,y:DOCK_Y-70,vx:rnd(-90,90),vy:rnd(-220,-60),life:rnd(.4,.8),color:'#ffd700',size:rnd(2,4),grav:500});
+    save();
+  } else if(player.x>168&&player.x<245&&player.healCd<=0){ // 烤架回血
+    if(G.money<30){ addFloat(200,DOCK_Y-120,'没钱买烤鱼（¥30）','#ff9f9f'); return; }
+    if(player.hp>=100){ addFloat(200,DOCK_Y-120,'血是满的','#9fb3c8'); return; }
+    G.money-=30; player.hp=Math.min(player.maxHp,player.hp+50); player.healCd=1;
+    SFX.eat(); addFloat(200,DOCK_Y-130,'🍖 烤鱼真香 +50 HP','#8fd694');
+  }
+}
+
+/* ---------------- 生成 ---------------- */
+function islandPool(){
+  return SPECIES.filter(s=>s.islands.includes(G.island));
+}
+function spawnFish(sp){
+  const f={sp, rare:sp.gold||Math.random()<(G.items.clover?0.20:0.12), x:rnd(650,1250), y:rnd(sp.depth[0],sp.depth[1]),
+    dir:Math.random()<.5?-1:1, wob:rnd(6.28), scared:0, biteCd:0, vx:0};
+  fishes.push(f);
+  if(sp.school) for(let i=1;i<sp.school;i++)
+    fishes.push({sp,rare:sp.gold||Math.random()<(G.items.clover?0.20:0.12),x:clamp(f.x+rnd(-70,70),620,1260),y:clamp(f.y+rnd(-40,40),sp.depth[0],sp.depth[1]),dir:f.dir,wob:rnd(6.28),scared:0,biteCd:0,vx:0});
+}
+// 挑「水里数量最少」的种类（前二随机），保证种类多样；稀有鱼按权重出现
+function pickDiverse(pool){
+  let p=pool.filter(sp=>!sp.weight||Math.random()<sp.weight);
+  if(!p.length) p=pool;
+  const counts={};
+  fishes.forEach(f=>counts[f.sp.id]=(counts[f.sp.id]||0)+1);
+  const sorted=[...p].sort((a,b)=>(counts[a.id]||0)-(counts[b.id]||0));
+  return sorted[Math.floor(rnd(Math.min(2,sorted.length)))];
+}
+function spawnPool(){
+  fishes=[];
+  const pool=islandPool().filter(sp=>!sp.weight||Math.random()<sp.weight*3); // 常见鱼打底，稀有鱼有机会
+  (pool.length?pool:islandPool()).forEach(sp=>spawnFish(sp));   // 每种先来一条打底
+  let guard=0;
+  while(fishes.length<9&&guard++<60){ spawnFish(pickDiverse(islandPool())); }
+}
+
+/* ---------------- 漂浮字 / 粒子 ---------------- */
+function addFloat(x,y,text,color){
+  // 防叠字：附近有正在飘的字就错开
+  let n=0;
+  for(const f of floats){ if(Math.abs(f.x-x)<80&&Math.abs(f.y-y)<36) n++; }
+  n=Math.min(n,3);
+  floats.push({x:x+(n?rnd(-46,46):0),y:y-n*26,text,color:color||'#fff',t:1.4});
+}
+function splash(x,y,n){
+  for(let i=0;i<(n||8);i++)parts.push({x,y,vx:rnd(-140,140),vy:rnd(-320,-90),life:rnd(.3,.7),color:'rgba(200,230,255,.9)',size:rnd(2,4),grav:900});
+}
+function stars(x,y,n,color){
+  for(let i=0;i<(n||10);i++)parts.push({x,y,vx:rnd(-200,200),vy:rnd(-260,-20),life:rnd(.3,.6),color:color||'#fff',size:rnd(2,5),grav:700});
+}
+
+/* ---------------- 玩家 ---------------- */
+function hurtPlayer(dmg,src){
+  if(player.iv>0||player.knocked>0) return;
+  if(G.items.vest){ dmg=Math.ceil(dmg*0.75); }
+  player.hp-=dmg; player.iv=.8; SFX.hurt(); G.shake=Math.max(G.shake,6);
+  addFloat(player.x,player.y-96,'-'+dmg+' HP','#ff7a7a');
+  if(player.hp<=0){
+    player.hp=0; player.knocked=2.2;
+    // 掉落渔获
+    player.carrying.forEach(c=>corpses.push({x:clamp(player.x+rnd(-40,40),40,WATER_X-30),y:DOCK_Y-8,val:c.val,label:c.label,gold:c.gold,bob:rnd(6.28)}));
+    player.carrying=[];
+    addFloat(player.x,player.y-110,'你被干倒了…','#ff5252');
+  }
+}
+function updatePlayer(dt){
+  player.iv=Math.max(0,player.iv-dt); player.healCd=Math.max(0,player.healCd-dt);
+  player.cd=Math.max(0,player.cd-dt); player.swing=Math.max(0,player.swing-dt);
+  if(player.knocked>0){
+    player.knocked-=dt;
+    if(player.knocked<=0){
+      if(G.items.crown){ player.hp=player.maxHp; addFloat(player.x,player.y-110,'👑 咸鱼翻身！满血复活！','#ffd700'); }
+      else player.hp=Math.max(60,player.maxHp*0.6);
+      player.x=120; addFloat(player.x,player.y-100,'醒了，接着干！','#8fd694');
+    }
+    return;
+  }
+  player.face = mouse.x>player.x ? 1 : -1;
+  const spd=265;
+  let mv=0;
+  if(keys['a']||keys['arrowleft']) mv-=1;
+  if(keys['d']||keys['arrowright']) mv+=1;
+  player.vx=mv*spd;
+  if((keys[' ']||keys['w']||keys['arrowup'])&&player.onGround){ player.vy=-570; player.onGround=false; SFX.jump(); }
+  player.vy+=GRAV*dt;
+  player.x=clamp(player.x+player.vx*dt,42,WATER_X-16);
+  player.y+=player.vy*dt;
+  if(player.y>=DOCK_Y){ player.y=DOCK_Y; player.vy=0; player.onGround=true; }
+  if(mv) player.walk+=dt*10; 
+  // 自动拾取尸体
+  for(let i=corpses.length-1;i>=0;i--){
+    const c=corpses[i];
+    if(dist(c.x,c.y,player.x,player.y-24)<36){
+      if(player.carrying.length<4){
+        corpses.splice(i,1); player.carrying.push(c);
+        tone(520+player.carrying.length*60,.07,'square',.05);
+      }else if(!player._fullMsg||G.t-player._fullMsg>1.2){
+        player._fullMsg=G.t; addFloat(player.x,player.y-100,'背包满了（4/4），先去码头卖！','#ffb74d');
+      }
+    }
+  }
+}
+function tryAttack(){
+  if(player.knocked>0||player.cd>0) return;
+  if(rodS.state==='charge'||rodS.state==='fly') return;
+  const wp=WEAPONS[G.cur];
+  player.cd=wp.cd; player.swing=.22; player.face=mouse.x>player.x?1:-1;
+  if(wp.type==='melee'){
+    SFX.whack();
+    for(const t of hittables()){
+      const dx=t.x-player.x, dy=t.y-(player.y-30);
+      if(dx*player.face>-10 && Math.abs(dx)<wp.range+ (t.r||0) && Math.abs(dy)<58){
+        let dmg=wp.dmg;
+        if(wp.crit&&Math.random()<wp.crit){ dmg*=wp.critMul; addFloat(t.x,t.y-40,'法棍暴击！意外地疼！×'+wp.critMul,'#ff7043'); }
+        damage(t,dmg,player.face,wp);
+        if(wp.chain&&t.kind==='gfish'){ // 电击棒连锁
+          gfish.forEach(g2=>{ if(g2!==t.ref&&dist(g2.x,g2.y,t.x,t.y)<95){ damage({kind:'gfish',ref:g2,x:g2.x,y:g2.y,r:10},3,0,wp); } });
+          for(let i=0;i<8;i++)parts.push({x:t.x,y:t.y,vx:rnd(-260,260),vy:rnd(-260,60),life:.25,color:'#fff59d',size:3,grav:300});
+        }
+      }
+    }
+  }else if(wp.type==='bomb'){
+    const ox=player.x+player.face*18, oy=player.y-46;
+    let ang=Math.atan2(mouse.y-oy,mouse.x-ox);
+    ang=clamp(ang,-1.4,-0.1);
+    bombs.push({x:ox,y:oy,vx:Math.cos(ang)*470,vy:Math.sin(ang)*470});
+    SFX.cast(); addFloat(player.x,player.y-100,'💣 接好咧——','#ffe08a');
+  }else{
+    SFX.gun();
+    const ox=player.x+player.face*18, oy=player.y-46;
+    const ang=Math.atan2(mouse.y-oy,mouse.x-ox);
+    const n=wp.pellets||1;
+    for(let i=0;i<n;i++){
+      const a=ang+(n>1?rnd(-wp.spread/2,wp.spread/2):0);
+      const life=wp.range? wp.range/wp.bs : 1.2;
+      bullets.push({x:ox,y:oy,vx:Math.cos(a)*wp.bs,vy:Math.sin(a)*wp.bs,life,dmg:wp.dmg,wp});
+    }
+    G.shake=Math.max(G.shake,2);
+  }
+}
+// 所有可被打的实体统一接口 {kind,x,y,r,hp...}
+function hittables(){
+  const arr=[];
+  gfish.forEach(g=>arr.push({kind:'gfish',ref:g,x:g.x,y:g.y,r:g.sp.size*.6}));
+  fly.forEach(f=>arr.push({kind:'fly',ref:f,x:f.x,y:f.y,r:f.sp.size*.6}));
+  crabs.forEach(c=>arr.push({kind:'crab',ref:c,x:c.x,y:c.y-10,r:16}));
+  if(gull&&gull.state!=='dead') arr.push({kind:'gull',ref:gull,x:gull.x,y:gull.y,r:20});
+  if(boss&&(boss.phase==='dock'||boss.phase==='beach')) arr.push({kind:'boss',ref:boss,x:boss.x,y:boss.y-(boss.phase==='beach'?boss.size*.5:boss.size*.5),r:boss.size*.7});
+  return arr;
+}
+function damage(t,dmg,dir,wp){
+  const o=t.ref;
+  if(t.kind==='gfish'){
+    // 电鳗：用普通近战打它会触电（电击棒绝缘）
+    if(o.sp.zap&&wp&&wp.type==='melee'&&wp.id!=='taser'){
+      hurtPlayer(4); addFloat(o.x,o.y-40,'⚡ 被电了！打电鳗要用枪或炸药！','#fff59d');
+    }
+    o.hp-=dmg; o.vy=Math.min(o.vy,-180); o.vx=(dir||rnd(-1,1))*120; stars(o.x,o.y,6,'#e3f2fd');
+    if(o.hp<=0) killGfish(o,true);
+  }else if(t.kind==='fly'){
+    o.hp-=dmg; stars(o.x,o.y,5,'#e3f2fd');
+    if(o.hp<=0){ // 空中击杀！
+      G.stats.air++; G.stats.killed++;
+      const mult=(o.rare?5:1)*3;
+      const val=o.sp.val*mult;
+      corpses.push({x:o.x,y:DOCK_Y-10,val,label:(o.rare?'✨珍品·':'')+o.sp.name+'(空中!)',gold:o.rare,bob:rnd(6.28)});
+      addFloat(o.x,o.y-30,'空中击杀 ×3'+(o.rare?' ✨×5':'')+'！','#ffd700');
+      fly.splice(fly.indexOf(o),1); SFX.coin();
+    }
+  }else if(t.kind==='crab'){
+    o.hp-=dmg; stars(o.x,o.y-8,6,'#ffb0b0');
+    if(o.hp<=0){ crabs.splice(crabs.indexOf(o),1);
+      corpses.push({x:o.x,y:DOCK_Y-8,val:45,label:'螃蟹',gold:false,bob:rnd(6.28)});
+      addFloat(o.x,o.y-40,'夹人的螃蟹变成了货 💰','#8fd694'); G.stats.killed++;
+    }
+  }else if(t.kind==='gull'){
+    o.hp-=dmg; stars(o.x,o.y,6,'#fff');
+    if(o.hp<=0){
+      if(o.carry){ corpses.push({x:clamp(o.x,40,WATER_X-30),y:DOCK_Y-8,val:o.carry.val,label:o.carry.label,gold:o.carry.gold,bob:rnd(6.28)}); }
+      corpses.push({x:clamp(o.x+20,40,WATER_X-30),y:DOCK_Y-8,val:25,label:'海鸥羽毛',gold:false,bob:rnd(6.28)});
+      addFloat(o.x,o.y,'海鸥被打了下来 🪶','#8fd694'); gull=null; G.gullT=32+rnd(18); G.stats.killed++;
+    }
+  }else if(t.kind==='boss'){
+    damageBoss(dmg);
+  }
+}
+function killGfish(o,byPlayer){
+  const idx=gfish.indexOf(o); if(idx<0) return;
+  gfish.splice(idx,1); G.stats.killed++;
+  const air=!o.onGround&&o.y<DOCK_Y-6;
+  if(air){ G.stats.air++; }
+  const mult=(o.rare?5:1)*(air?3:1);
+  corpses.push({x:o.x,y:DOCK_Y-8,val:o.sp.val*mult,label:(o.rare?'✨珍品·':'')+o.sp.name,gold:o.rare,bob:rnd(6.28)});
+  if(air) addFloat(o.x,o.y-30,'空中击杀 ×3'+(o.rare?' ✨×5':'')+'！','#ffd700');
+  else if(o.rare) addFloat(o.x,o.y-30,'✨ 珍品 ×5！','#ffd700');
+  else addFloat(o.x,o.y-30,o.sp.name+' +'+fmt(o.sp.val)+' 元','#9fe8ff');
+  SFX.coin();
+}
+
+/* ---------------- 鱼竿 ---------------- */
+function rodTip(){ return {x:player.x+player.face*26, y:player.y-78}; }
+function doCast(){
+  const rod=RODS[G.rod];
+  const tip=rodTip();
+  let ang=Math.atan2(mouse.y-tip.y,mouse.x-tip.x);
+  ang=clamp(ang,-1.5,-0.06);
+  const v=rod.cast*(0.55+0.75*rodS.power);
+  rodS.bob={x:tip.x,y:tip.y,vx:Math.cos(ang)*v,vy:Math.sin(ang)*v};
+  rodS.state='fly'; rodS.floatT=0;
+  SFX.cast();
+}
+function updateRod(dt){
+  const rod=RODS[G.rod];
+  if(rodS.state==='charge'){
+    rodS.power=Math.min(1,rodS.power+dt*1.15);
+  }else if(rodS.state==='fly'){
+    const b=rodS.bob;
+    b.vy+=900*dt; b.x+=b.vx*dt; b.y+=b.vy*dt;
+    if(b.y>=DOCK_Y-4){
+      if(b.x>WATER_X+15){ // 入水
+        rodS.state='float'; SFX.splash(); splash(b.x,DOCK_Y,8);
+      }else{ // 甩到甲板上了
+        rodS.state='idle'; addFloat(b.x,DOCK_Y-60,'钓到甲板上了…','#9fb3c8');
+      }
+    }else if(b.x>W+40||b.x<-40){ rodS.state='idle'; }
+  }else if(rodS.state==='float'){
+    rodS.floatT+=dt;
+    const b=rodS.bob;
+    b.y=DOCK_Y-2+Math.sin(G.t*3)*3;
+    // Boss 优先咬钩（蜘蛛蟹不咬钩，它自己爬上来）
+    if(boss&&boss.phase==='lurk'&&boss.kind!=='spider'){
+      if(dist(b.x,DOCK_Y,boss.x,boss.y)<70){ hookBoss(); return; }
+    }
+    if(rodS.floatT>0.6){
+      for(const f of fishes){
+        if(f.scared>0) continue;
+        const d=dist(b.x,DOCK_Y,f.x,f.y);
+        if(d<rod.hookR*1.8){ // 被吸引，游向浮漂
+          const a=Math.atan2(DOCK_Y-f.y+40,b.x-f.x);
+          f.x+=Math.cos(a)*f.sp.speed*.8*dt; f.y+=Math.sin(a)*f.sp.speed*.8*dt;
+        }
+        if(d<f.sp.size+26&&f.biteCd<=0){
+          f.biteCd=.5;
+          if(Math.random()<0.7*BAITS[G.bait].bite){ hookFish(f); return; }
+          else f.scared=1.6;
+        }
+      }
+    }
+  }else if(rodS.state==='hooked'){
+    const R=rodS.reel;
+    const pull=R.boss? R.pull*(R.stam<25?0.55:1) : R.fish.sp.pull*(R.stam<25?0.5:1);
+    if(mouse.down){
+      R.prog+=rod.reel*(R.stam<25?1.8:1)*dt;
+      R.tension+=(pull*1.15-rod.line*0.55)*dt;
+      if(Math.floor(G.t*6)!==Math.floor((G.t-dt)*6)&&R.tension>60) SFX.reel();
+    }else{
+      R.tension-=55*dt;
+      R.prog-=pull*0.12*dt;
+    }
+    R.tension=Math.max(0,R.tension);
+    R.prog=Math.max(0,R.prog);
+    R.stam-=(R.tension>65?30:9)*dt;
+    // 鱼被拖向岸边（视觉）
+    if(R.fish){ R.fish.x=lerp(R.fish.x,WATER_X+50,R.prog/900); R.fish.y=lerp(R.fish.y,DOCK_Y+30,R.prog/900); }
+    if(boss&&R.boss) boss.x=lerp(boss.x,WATER_X+120,R.prog/1200);
+    if(R.tension>=100){ // 断线
+      SFX.snap(); splash(WATER_X+80,DOCK_Y,10);
+      addFloat(W/2,300,'啪！线断了！','#ff7a7a');
+      if(R.boss&&boss){
+        boss.stamPersist=Math.min(BOSS_DEF[boss.kind].stam, R.stam+40); // 只恢复一点，疲惫保留
+        boss.phase='lurk'; boss.x=clamp(boss.x,720,1150); boss.y=boss.kind==='whale'?660:630;
+      }
+      if(R.fish){ R.fish.scared=2.5; }
+      rodS.state='idle'; rodS.hook=null; rodS.reel=null;
+    }else if(R.prog>=100){ // 拉上岸！
+      landCatch();
+    }
+  }
+}
+function hookFish(f){
+  fishes.splice(fishes.indexOf(f),1);
+  rodS.state='hooked'; rodS.hook=f;
+  rodS.reel={fish:f,boss:false,tension:20,prog:0,stam:100,pull:f.sp.pull};
+  SFX.bite(); splash(rodS.bob.x,DOCK_Y,6);
+  addFloat(f.x,f.y-40,'咬钩了！按住左键收线','#ffd700');
+  G.shake=Math.max(G.shake,3);
+}
+function hookBoss(){
+  rodS.state='hooked';
+  const full=BOSS_DEF[boss.kind].stam;
+  const stam=boss.stamPersist!==undefined?boss.stamPersist:full;   // 断线后疲惫保留
+  rodS.reel={fish:null,boss:true,tension:25,prog:0,stam,pull:BOSS_DEF[boss.kind].pull};
+  boss.phase='reel';
+  SFX.bite(); SFX.boss(); splash(rodS.bob.x,DOCK_Y,12);
+  addFloat(W/2,280,'挂住了 '+ISLANDS[G.island-1].bossName+'！','#ff9f43');
+  G.shake=Math.max(G.shake,8);
+}
+function landCatch(){
+  const R=rodS.reel;
+  if(R.boss){
+    if(boss.kind==='puffer'){
+      boss.phase='dock'; boss.hp=BOSS_DEF.puffer.hp; boss.maxHp=boss.hp;
+      boss.x=WATER_X-190; boss.y=DOCK_Y; boss.vx=0; boss.vy=0; boss.onGround=true;
+      boss.t=0; boss.tele=0; boss.flopT=2;
+      splash(WATER_X-100,DOCK_Y,16); SFX.splash(); G.shake=10;
+      addFloat(W/2,280,'大河豚上岸了！趁它跳回海里之前打晕它！','#ff9f43');
+    }else{ // whale 搁浅
+      boss.phase='beach'; boss.hp=BOSS_DEF.whale.hp; boss.maxHp=boss.hp;
+      boss.x=WATER_X+70; boss.y=DOCK_Y+40; boss.t=0;
+      splash(WATER_X+80,DOCK_Y,20); SFX.splash(); SFX.boss(); G.shake=12;
+      addFloat(W/2,280,'巨鲸搁浅了！小心它喷水球！','#ff9f43');
+    }
+  }else{
+    const f=R.fish;
+    const tx=clamp(WATER_X-60-rnd()*290,80,WATER_X-50);
+    const T=.85;
+    fly.push({sp:f.sp,rare:f.rare,hp:f.sp.hp,x:rodS.bob.x,y:DOCK_Y,vx:(tx-rodS.bob.x)/T,vy:(DOCK_Y-DOCK_Y-0.5*1400*T*T)/T-300,hitP:false});
+    const last=fly[fly.length-1];
+    last.vy=( (DOCK_Y-100) - DOCK_Y - 0.5*1400*T*T )/T + 140; // 修正：飞出后落到甲板
+    splash(rodS.bob.x,DOCK_Y,10); SFX.splash();
+    addFloat(WATER_X+60,300,'拖上岸了！快去打晕它！','#ffd700');
+  }
+  rodS.state='idle'; rodS.hook=null; rodS.reel=null;
+}
+
+/* ---------------- 水中鱼 ---------------- */
+function updateFishes(dt){
+  // 补鱼（优先补数量最少的种类，避免满屏一种鱼）
+  if(fishes.length<9&&Math.random()<dt*0.6){
+    spawnFish(pickDiverse(islandPool()));
+  }
+  for(const f of fishes){
+    f.biteCd=Math.max(0,f.biteCd-dt);
+    if(f.scared>0){
+      f.scared-=dt;
+      f.x+=f.sp.speed*1.8*dt*(f.x<W/2?1:-1)*0.4+120*dt;
+      f.y+=Math.sin(G.t*8)*20*dt;
+    }else{
+      f.wob+=dt*2;
+      if(f.sp.drunk){ // 醉虾：走位飘忽
+        f.x+=(f.dir*f.sp.speed*.7+Math.sin(f.wob*3)*46)*dt;
+        f.y+=Math.sin(f.wob*3.7)*44*dt;
+      }else{
+        f.x+=f.dir*f.sp.speed*dt;
+        f.y+=Math.sin(f.wob)*14*dt;
+      }
+      if(Math.random()<dt*0.3) f.dir*=-1;
+    }
+    f.x=clamp(f.x,620,1265); f.y=clamp(f.y,f.sp.depth[0],f.sp.depth[1]);
+    if(f.x<=621)f.dir=1; if(f.x>=1264)f.dir=-1;
+  }
+}
+/* ---------------- 飞行中的鱼 / 甲板上的鱼 ---------------- */
+function updateFly(dt){
+  for(let i=fly.length-1;i>=0;i--){
+    const f=fly[i];
+    f.vy+=1400*dt; f.x+=f.vx*dt; f.y+=f.vy*dt;
+    if(!f.hitP&&f.sp.landDmg&&dist(f.x,f.y,player.x,player.y-30)<40){ f.hitP=true; hurtPlayer(12); addFloat(f.x,f.y-20,'被河豚砸中了！','#ff7a7a'); }
+    if(f.y>=DOCK_Y){
+      gfish.push({sp:f.sp,rare:f.rare,x:clamp(f.x,60,WATER_X-20),y:DOCK_Y,vx:f.vx*.25,vy:-120,hp:f.sp.hp,onGround:false,flopT:rnd(.4,.9),spikeCd:0,anim:rnd(6.28)});
+      fly.splice(i,1); SFX.whack(); splash(f.x,DOCK_Y,3);
+    }
+  }
+}
+function updateGfish(dt){
+  for(let i=gfish.length-1;i>=0;i--){
+    const g=gfish[i];
+    g.anim+=dt*6;
+    g.vy+=1400*dt; g.x+=g.vx*dt; g.y+=g.vy*dt;
+    if(g.y>=DOCK_Y){
+      g.y=DOCK_Y; g.vy=0; 
+      if(!g.onGround){ g.onGround=true; splashless(g.x); }
+      g.vx*=Math.pow(.02,dt);
+      g.flopT-=dt;
+      if(g.flopT<=0){ // 蹦跳：食人鱼追人，咸鱼躺平，普通鱼逃向海里
+        g.onGround=false;
+        let toWater;
+        if(g.sp.chase) toWater=player.x>g.x?1:-1;       // 食人鱼：蹦向玩家！
+        else if(g.sp.weak) toWater=Math.random()<.4?1:-1; // 咸鱼：懒得动
+        else toWater=Math.random()<0.78?1:-1;
+        const vigor=g.sp.weak?0.45:1;
+        g.vy=-(300+rnd(180))*vigor; g.vx=toWater*(90+g.sp.size*3)*vigor;
+        g.flopT=(g.sp.weak?1.2:0.6)+rnd(g.sp.weak?1.2:0.9);
+        tone(200+rnd(100),.06,'sine',.03);
+      }
+    }else g.onGround=false;
+    g.x=clamp(g.x,46,WATER_X+30);
+    if(g.x>=WATER_X-6){ // 逃回海里
+      gfish.splice(i,1); splash(WATER_X,DOCK_Y,8);
+      addFloat(WATER_X-80,DOCK_Y-80,'一条'+(g.rare?'珍品':'')+g.sp.name+'蹦回海里了！','#ff9f9f');
+      continue;
+    }
+    // 石鱼扎人 / 食人鱼咬人
+    if(g.sp.spike){ g.spikeCd=Math.max(0,g.spikeCd-dt);
+      if(g.spikeCd<=0&&dist(g.x,g.y-10,player.x,player.y-24)<34){ g.spikeCd=1; hurtPlayer(5); addFloat(g.x,g.y-40,'被石鱼扎了！近战小心','#ff7a7a'); } }
+    if(g.sp.chase){ g.spikeCd=Math.max(0,g.spikeCd-dt);
+      if(g.spikeCd<=0&&dist(g.x,g.y-10,player.x,player.y-24)<30){ g.spikeCd=1; hurtPlayer(4); addFloat(g.x,g.y-40,'食人鱼咬人！快打它','#ff7a7a'); } }
+  }
+}
+function splashless(x){ for(let i=0;i<3;i++)parts.push({x,y:DOCK_Y,vx:rnd(-60,60),vy:rnd(-100,-30),life:.3,color:'#cfd8dc',size:2,grav:900}); }
+
+/* ---------------- 子弹 / 水球 ---------------- */
+function updateBullets(dt){
+  for(let i=bullets.length-1;i>=0;i--){
+    const b=bullets[i];
+    b.x+=b.vx*dt; b.y+=b.vy*dt; b.life-=dt;
+    let hit=false;
+    for(const t of hittables()){
+      if(dist(b.x,b.y,t.x,t.y)<(t.r||16)+4){ damage(t,b.dmg,b.vx>0?1:-1,b.wp); hit=true; break; }
+    }
+    if(hit||b.life<=0||b.x<-20||b.x>W+20||b.y<-20||b.y>H+20) bullets.splice(i,1);
+  }
+}
+function updateBalls(dt){
+  for(let i=balls.length-1;i>=0;i--){
+    const b=balls[i];
+    b.vy+=700*dt; b.x+=b.vx*dt; b.y+=b.vy*dt;
+    if(dist(b.x,b.y,player.x,player.y-30)<30){ hurtPlayer(15); splash(b.x,b.y,8); balls.splice(i,1); continue; }
+    if(b.y>=DOCK_Y-4){ splash(b.x,DOCK_Y,6); balls.splice(i,1); }
+  }
+}
+function updateBombs(dt){
+  for(let i=bombs.length-1;i>=0;i--){
+    const b=bombs[i];
+    b.vy+=1200*dt; b.x+=b.vx*dt; b.y+=b.vy*dt;
+    if(b.y>=DOCK_Y-6||b.x>WATER_X+4){ // 落地/落水：爆炸
+      bombs.splice(i,1);
+      G.shake=Math.max(G.shake,10); SFX.boss();
+      stars(b.x,Math.min(b.y,DOCK_Y-6),26,'#ffab40');
+      if(b.x>WATER_X){ splash(b.x,DOCK_Y,16); addFloat(b.x,DOCK_Y-60,'炸药喂鱼了…','#9fb3c8'); continue; }
+      // 范围伤害：甲板鱼/螃蟹/Boss/海鸥
+      for(const t of hittables()){
+        if(dist(b.x,Math.min(b.y,DOCK_Y-6),t.x,t.y)<135) damage(t,10,(t.x>b.x?1:-1),WEAPONS.tnt);
+      }
+      // 炸到自己（搞笑但公平）
+      if(dist(b.x,DOCK_Y,player.x,player.y-20)<105&&player.knocked<=0){ hurtPlayer(10); addFloat(player.x,player.y-100,'💥 炸到自己了！离远点扔！','#ff7043'); }
+    }
+  }
+}
+
+/* ---------------- 海鸥 / 螃蟹 ---------------- */
+function updateGull(dt){
+  if(!gull){
+    if(corpses.length>0&&G.island>=1){
+      G.gullT-=dt;
+      if(G.gullT<=0){ gull={x:1360,y:90,state:'in',t:0,target:null,carry:null,hp:3}; SFX.gull(); }
+    }
+    return;
+  }
+  const g=gull; g.t+=dt;
+  if(g.state==='in'){ g.x=lerp(g.x,290,dt*2); g.y=90+Math.sin(G.t*2)*12; if(g.x<330) g.state='hover'; }
+  else if(g.state==='hover'){
+    g.x=290+Math.sin(G.t*1.3)*50; g.y=88+Math.sin(G.t*2.4)*10;
+    if(g.t>2.5&&corpses.length>0){
+      let best=null,bd=1e9;
+      for(const c of corpses){const d=dist(g.x,g.y,c.x,c.y); if(d<bd){bd=d;best=c;}}
+      if(best){ g.target=best; g.state='dive'; SFX.gull(); }
+    }
+  }else if(g.state==='dive'){
+    const c=g.target;
+    if(!c||!corpses.includes(c)){ g.state='hover'; g.t=0; return; }
+    const a=Math.atan2(c.y-14-g.y,c.x-g.x);
+    g.x+=Math.cos(a)*360*dt; g.y+=Math.sin(a)*360*dt;
+    if(dist(g.x,g.y,c.x,c.y-14)<18){ corpses.splice(corpses.indexOf(c),1); g.carry=c; g.state='rise'; }
+  }else if(g.state==='rise'){
+    g.y-=210*dt; g.x+=30*dt;
+    if(g.y<70) g.state='flee';
+  }else if(g.state==='flee'){
+    g.x+=430*dt; g.y=60+Math.sin(G.t*3)*8;
+    if(g.x>1400){ addFloat(WATER_X-200,140,'海鸥叼走了你的渔获！下次动作快点！','#ff9f9f'); gull=null; G.gullT=30+rnd(20); }
+  }
+}
+function updateCrabs(dt){
+  if(G.island>=2&&crabs.length<2&&!boss){
+    G.crabT-=dt;
+    if(G.crabT<=0){ G.crabT=16+rnd(10); crabs.push({x:WATER_X-8,y:DOCK_Y,hp:6,pinchCd:0,anim:rnd(6.28)}); addFloat(WATER_X-60,DOCK_Y-120,'🦀 有螃蟹上岸了！','#ffb0b0'); }
+  }
+  for(let i=crabs.length-1;i>=0;i--){
+    const c=crabs[i];
+    c.anim+=dt*8; c.pinchCd=Math.max(0,c.pinchCd-dt);
+    const dir=player.x>c.x?-1:1;
+    c.x+=dir*55*dt;
+    c.x=clamp(c.x,50,WATER_X-10);
+    if(Math.abs(player.x-c.x)<38&&c.pinchCd<=0&&player.knocked<=0){
+      c.pinchCd=1.4; hurtPlayer(10); player.vx=dir*-1*200; 
+    }
+  }
+}
+
+/* ---------------- Boss ---------------- */
+function bossDef(){ return BOSS_DEF[ISLANDS[G.island-1].boss]; }
+function updateGoals(dt){
+  if(G.freeMode||G.bossOut||boss) return;
+  const goal=ISLANDS[G.island-1].goal;
+  if(G.earnedI>=goal.money&&G.soldI>=goal.fish){
+    G.bossOut=true;
+    const kind=ISLANDS[G.island-1].boss, name=ISLANDS[G.island-1].bossName;
+    SFX.boss();
+    if(kind==='spider'){
+      boss={kind,phase:'lurk',x:WATER_X+200,y:DOCK_Y+30,hp:BOSS_DEF.spider.hp,maxHp:BOSS_DEF.spider.hp,size:BOSS_DEF.spider.size,t:0,tele:0,dash:0};
+      G.banner={text:'⚔️ 岛屿目标完成！\n'+name+' 从海里爬过来了！',t:4};
+    }else{
+      boss={kind,phase:'lurk',x:950,y:kind==='whale'?660:630,hp:BOSS_DEF[kind].hp||0,maxHp:BOSS_DEF[kind].hp||1,size:BOSS_DEF[kind].size,t:0,tele:0};
+      G.banner={text:'⚔️ 岛屿目标完成！\n'+name+'出现了——抛竿挂住它！',t:4};
+    }
+    G.shake=8;
+  }
+}
+function damageBoss(dmg){
+  if(!boss||boss.hp<=0) return;
+  boss.hp-=dmg; stars(boss.x,boss.y-boss.size*.5,8,'#ffcc80'); SFX.whack();
+  if(boss.hp<=0) killBoss();
+}
+function killBoss(){
+  const isl=ISLANDS[G.island-1];
+  const reward=isl.reward;
+  G.money+=reward; G.stats.earned+=reward; G.stats.boss++;
+  splash(boss.x,DOCK_Y,24); stars(boss.x,boss.y-40,30,'#ffd700');
+  SFX.win(); G.shake=10;
+  addFloat(boss.x,boss.y-80,'+'+fmt(reward)+' 元战利品！','#ffd700');
+  boss=null; G.bossOut=false; G.gullT=Math.max(G.gullT,15);
+  save();
+  if(G.island>=3){ // 通关
+    G.won=true; save();
+    setTimeout(()=>{ if(G.state==='play'){ G.state='ending'; } },1400);
+  }else{
+    const next=ISLANDS[G.island];
+    G.banner={text:'🏆 击败了'+isl.bossName+'！\n前往第 '+(G.island+1)+' 岛 · '+next.name+'：'+next.intro.replace(/\n/g,' '),t:5};
+    G.island++; G.earnedI=0; G.soldI=0;
+    crabs=[]; balls=[];
+    spawnPool();
+    save();
+  }
+}
+function updateBoss(dt){
+  if(!boss) return;
+  const b=boss; b.t+=dt;
+  if(b.phase==='lurk'){
+    if(b.kind==='spider'){
+      b.x=lerp(b.x,WATER_X+40,dt*0.6);
+      if(b.t>5){ b.phase='dock'; b.x=WATER_X-40; b.y=DOCK_Y; b.onGround=true; b.dash=0; b.tele=0;
+        splash(WATER_X,DOCK_Y,12); SFX.boss(); G.shake=8;
+        addFloat(W/2,300,'蜘蛛蟹上岸了！小心它的冲刺夹！','#ff9f43'); }
+    }else{
+      // 在水里游弋，被浮漂吸引
+      if(rodS.state==='float'){
+        const a=Math.atan2(DOCK_Y-b.y+30,rodS.bob.x-b.x);
+        b.x+=Math.cos(a)*130*dt; b.y+=Math.sin(a)*130*dt;
+      }else{
+        b.x=950+Math.sin(G.t*.5)*180; b.y=(b.kind==='whale'?660:630)+Math.sin(G.t*.9)*18;
+      }
+    }
+  }else if(b.phase==='dock'){
+    if(b.kind==='puffer'){
+      b.onGround=b.y>=DOCK_Y;
+      if(b.onGround){
+        b.hopT=(b.hopT||3)-dt;
+        if(b.hopT<=0&&b.tele<=0){ b.tele=.8; }
+        if(b.tele>0){
+          b.tele-=dt;
+          if(b.tele<=0){
+            b.onGround=false;
+            b.vy=-640; b.vx=clamp((player.x-b.x)/0.95,-430,430);
+            b.hopT=6; SFX.boss();
+          }
+        }
+      }else{
+        b.vy+=1400*dt; b.x+=b.vx*dt; b.y+=b.vy*dt;
+        if(b.y>=DOCK_Y){
+          b.y=DOCK_Y;b.vy=0;b.vx=0;b.onGround=true;
+          G.shake=10; SFX.splash();
+          stars(b.x,DOCK_Y,16,'#e0e0e0');
+          if(player.onGround&&Math.abs(player.x-b.x)<150) hurtPlayer(25);
+        }
+      }
+      b.x=clamp(b.x,60,WATER_X-30);
+      // 慢慢逃向水边
+      if(b.onGround){ b.x+=9*dt; if(b.x>WATER_X-20){ 
+        b.phase='lurk'; b.x=900; splash(WATER_X,DOCK_Y,10);
+        addFloat(W/2,300,'大河豚蹦回海里了！再抛竿挂它！','#ff9f9f'); } }
+    }else if(b.kind==='spider'){
+      const wasTele=b.tele>0;
+      b.tele-=dt;
+      if(b.dash>0){
+        b.dash-=dt; b.x+=b.dashDir*430*dt;
+        if(player.knocked<=0&&Math.abs(player.x-b.x)<44&&player.onGround) hurtPlayer(20);
+      }else{
+        b.x+=(player.x>b.x?1:-1)*95*dt;
+        b.dashT=(b.dashT===undefined?3:b.dashT)-dt;
+        if(b.dashT<=0&&b.tele<=0){ b.tele=.6; b.dashT=3.2; b.dashDir=player.x>b.x?1:-1; }
+      }
+      if(wasTele&&b.tele<=0&&b.dash<=0){ b.dash=.45; SFX.boss(); }
+      b.x=clamp(b.x,55,WATER_X+40);
+    }
+  }else if(b.phase==='beach'){ // 巨鲸
+    b.spitT=(b.spitT===undefined?2.5:b.spitT)-dt;
+    if(b.spitT<=0){
+      b.spitT=3.2;
+      const ox=b.x-100, oy=505, T=1.05;
+      const tx=player.x, ty=DOCK_Y;
+      balls.push({x:ox,y:oy,vx:(tx-ox)/T,vy:(ty-oy-0.5*700*T*T)/T});
+      tone(180,.3,'sawtooth',.08,60); addFloat(ox,oy-20,'💧','#9fe8ff');
+    }
+  }
+}
+
+/* ---------------- 主更新 ---------------- */
+function update(dt){
+  G.t+=dt;
+  parts=parts.filter(p=>{p.life-=dt;p.vy+=p.grav*dt;p.x+=p.vx*dt;p.y+=p.vy*dt;return p.life>0;});
+  floats=floats.filter(f=>{f.t-=dt;f.y-=34*dt;return f.t>0;});
+  G.shake=Math.max(0,G.shake-dt*18);
+  if(G.banner){ G.banner.t-=dt; if(G.banner.t<=0) G.banner=null; }
+  if(G.state!=='play'||G.ui) return;
+  G.timePlayed+=dt;
+  updatePlayer(dt);
+  updateRod(dt);
+  updateFishes(dt);
+  updateFly(dt);
+  updateGfish(dt);
+  updateBullets(dt);
+  updateBalls(dt);
+  updateBombs(dt);
+  updateGull(dt);
+  updateCrabs(dt);
+  updateGoals(dt);
+  updateBoss(dt);
+}
+
+/* ============================================================
+   渲 染
+============================================================ */
+function draw(){
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,W,H);
+  if(G.state==='title'){ drawTitle(); return; }
+  if(G.state==='ending'){ drawWorld(); drawEnding(); return; }
+  drawWorld();
+  drawHUD();
+  if(G.ui==='shop') drawShop();
+  if(G.ui==='pause') drawPause();
+}
+function drawWorld(){
+  const isl=ISLANDS[G.island-1];
+  ctx.save();
+  if(G.shake>0) ctx.translate(rnd(-G.shake,G.shake)*.5,rnd(-G.shake,G.shake)*.5);
+  // 天空
+  const sky=ctx.createLinearGradient(0,0,0,DOCK_Y);
+  sky.addColorStop(0,isl.sky[0]); sky.addColorStop(1,isl.sky[1]);
+  ctx.fillStyle=sky; ctx.fillRect(-20,-20,W+40,DOCK_Y+20);
+  // 太阳/月
+  ctx.fillStyle=G.island===3?'#ff8c42':'#fff3b0';
+  ctx.beginPath(); ctx.arc(1080,G.island===2?130:100,G.island===3?46:38,0,7); ctx.fill();
+  // 云
+  ctx.fillStyle='rgba(255,255,255,.75)';
+  for(let i=0;i<3;i++){
+    const cx=((G.t*12+i*430)%(W+240))-120, cy=70+i*38+Math.sin(G.t*.4+i)*6;
+    ell(cx,cy,52,14); ell(cx+34,cy+6,38,11); ell(cx-30,cy+8,32,10);
+  }
+  // 远景岛
+  drawBgIsland();
+  // 海（后层）
+  const sea=ctx.createLinearGradient(0,DOCK_Y-40,0,H);
+  sea.addColorStop(0,isl.sea[0]); sea.addColorStop(1,isl.sea[1]);
+  ctx.fillStyle=sea; ctx.fillRect(WATER_X-6,DOCK_Y-14,W-WATER_X+10,H-DOCK_Y+20);
+  // 水中内容（裁剪）
+  ctx.save();
+  ctx.beginPath(); ctx.rect(WATER_X-2,DOCK_Y-6,W-WATER_X+4,H-DOCK_Y+10); ctx.clip();
+  for(const f of fishes) drawFish(f);
+  if(boss&&boss.phase==='lurk') drawBossLurk();
+  if(boss&&boss.phase==='reel') drawBossLurk();
+  // 水下光影
+  ctx.fillStyle='rgba(255,255,255,.06)';
+  for(let i=0;i<5;i++) ctx.fillRect(WATER_X+40+i*170+Math.sin(G.t+i)*18,DOCK_Y+20,26,200);
+  ctx.restore();
+  // 海面波纹
+  ctx.strokeStyle='rgba(255,255,255,.5)'; ctx.lineWidth=3;
+  ctx.beginPath();
+  for(let x=WATER_X-4;x<W+10;x+=8){
+    const y=DOCK_Y-8+Math.sin(x*.045+G.t*2.2)*3+Math.sin(x*.013-G.t)*2;
+    x===WATER_X-4?ctx.moveTo(x,y):ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+  // 甲板
+  drawDock();
+  // 烤架
+  drawGrill();
+  // 商店摊
+  drawStall();
+  // 尸体
+  for(const c of corpses) drawCorpse(c);
+  // 甲板生物
+  if(boss&&(boss.phase==='dock')) drawBossDock();
+  if(boss&&boss.phase==='beach') drawWhaleBeach();
+  for(const g of gfish) drawGfish(g);
+  for(const c of crabs) drawCrab(c);
+  // 玩家
+  drawPlayer();
+  // 飞行鱼
+  for(const f of fly) drawFlyFish(f);
+  // 子弹/水球
+  ctx.fillStyle='#ffe08a';
+  for(const b of bullets){ ctx.save();ctx.translate(b.x,b.y);ctx.rotate(Math.atan2(b.vy,b.vx));ctx.fillRect(-7,-2,14,4);ctx.restore(); }
+  ctx.fillStyle='#7fd4ff';
+  for(const b of balls){ ctx.beginPath();ctx.arc(b.x,b.y,15,0,7);ctx.fill(); }
+  // 炸药桶
+  for(const b of bombs){
+    ctx.save(); ctx.translate(b.x,b.y); ctx.rotate(G.t*6);
+    ctx.fillStyle='#8d6e63'; roundRect(-11,-14,22,28,4); ctx.fill();
+    ctx.fillStyle='#ff7043'; ctx.fillRect(-11,-14,22,6);
+    ctx.restore();
+  }
+  // 海鸥
+  if(gull) drawGull(gull);
+  // 鱼线
+  drawLine();
+  // 粒子
+  for(const p of parts){ ctx.globalAlpha=clamp(p.life*2.4,0,1); ctx.fillStyle=p.color; ctx.fillRect(p.x-p.size/2,p.y-p.size/2,p.size,p.size); }
+  ctx.globalAlpha=1;
+  // 漂浮字
+  ctx.textAlign='center'; ctx.font='bold 19px system-ui';
+  for(const f of floats){ ctx.globalAlpha=clamp(f.t,0,1); ctx.fillStyle=f.color; ctx.strokeStyle='rgba(0,0,0,.55)'; ctx.lineWidth=3;
+    ctx.strokeText(f.text,f.x,f.y); ctx.fillText(f.text,f.x,f.y); }
+  ctx.globalAlpha=1;
+  // 蓄力条+轨迹
+  if(rodS.state==='charge') drawCharge();
+  // 收线 UI
+  if(rodS.state==='hooked') drawReelUI();
+  // Boss 血条
+  if(boss&&boss.phase!=='lurk') drawBossBar();
+  // 横幅
+  if(G.banner) drawBanner();
+  ctx.restore();
+}
+function ell(x,y,rx,ry){ ctx.beginPath();ctx.ellipse(x,y,rx,ry,0,0,7);ctx.fill(); }
+function drawBgIsland(){
+  if(G.island===1){ ctx.fillStyle='#7fb069'; ell(1050,DOCK_Y-40,150,44); ctx.fillStyle='#5d9146'; ell(1090,DOCK_Y-58,80,30); }
+  else if(G.island===2){ ctx.fillStyle='#5c6b73';
+    ctx.beginPath();ctx.moveTo(950,DOCK_Y-20);ctx.lineTo(1030,DOCK_Y-110);ctx.lineTo(1110,DOCK_Y-20);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#48555c'; ell(1150,DOCK_Y-16,70,26); }
+  else { ctx.fillStyle='#4a3b3b';
+    ctx.beginPath();ctx.moveTo(900,DOCK_Y-10);ctx.lineTo(1050,DOCK_Y-190);ctx.lineTo(1200,DOCK_Y-10);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#ff6b35'; ell(1050,DOCK_Y-190,20,10);
+    ctx.fillStyle='rgba(255,107,53,.5)'; ell(1050,DOCK_Y-160,34,12); }
+}
+function drawDock(){
+  ctx.fillStyle='#8d6e63'; ctx.fillRect(0,DOCK_Y,WATER_X+8,26);
+  ctx.fillStyle='#6d4c41';
+  for(let x=0;x<WATER_X;x+=52) ctx.fillRect(x,DOCK_Y,4,26);
+  ctx.fillStyle='#5d4037'; ctx.fillRect(0,DOCK_Y+26,WATER_X+8,H-DOCK_Y-26);
+  // 支柱
+  ctx.fillStyle='#5d4037'; ctx.fillRect(WATER_X-14,DOCK_Y+20,16,H-DOCK_Y);
+  // 两个系船柱
+  ctx.fillStyle='#4e342e';
+  ctx.fillRect(WATER_X-46,DOCK_Y-26,12,28); ctx.fillRect(60,DOCK_Y-24,10,26);
+  // 灯
+  ctx.fillStyle='#4e342e'; ctx.fillRect(20,DOCK_Y-70,6,70);
+  ctx.fillStyle=G.island===3?'#ff7043':'#ffe08a'; ctx.beginPath();ctx.arc(23,DOCK_Y-76,9,0,7);ctx.fill();
+}
+function drawStall(){
+  const x=100;
+  // 摊位
+  ctx.fillStyle='#795548'; ctx.fillRect(x-52,DOCK_Y-64,104,10);
+  ctx.fillStyle='#5d4037'; ctx.fillRect(x-46,DOCK_Y-54,8,54); ctx.fillRect(x+38,DOCK_Y-54,8,54);
+  // 遮阳棚
+  ctx.fillStyle='#e57373';
+  ctx.beginPath();ctx.moveTo(x-62,DOCK_Y-96);ctx.lineTo(x+62,DOCK_Y-96);ctx.lineTo(x+54,DOCK_Y-76);ctx.lineTo(x-54,DOCK_Y-76);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#f8bbd0';
+  for(let i=-2;i<=2;i++) ctx.fillRect(x-54+i*22+(i%2?0:2)-8,DOCK_Y-96,10,20);
+  // 老板
+  const vy=DOCK_Y-52+Math.sin(G.t*2)*1.5;
+  ctx.fillStyle='#ffb74d'; ell(x,vy-34,11,13);            // 头
+  ctx.fillStyle='#5d4037'; ell(x,vy-44,13,5); ctx.fillRect(x-13,vy-44,26,4); // 帽
+  ctx.fillStyle='#fff'; ctx.fillRect(x-2,vy-32,2,2); ctx.fillRect(x+4,vy-32,2,2);
+  ctx.fillStyle='#7cb342'; ctx.fillRect(x-11,vy-22,22,22); // 围裙
+  ctx.fillStyle='#455a64'; ctx.fillRect(x-9,vy-18,5,12); ctx.fillRect(x+4,vy-18,5,12);
+  // 钱币
+  ctx.fillStyle='#ffd700'; ctx.beginPath();ctx.arc(x+30,vy-30,6,0,7);ctx.fill();
+  // 招牌（挂高、加宽，避开遮阳棚和老板）
+  ctx.fillStyle='rgba(0,0,0,.45)'; roundRect(x-110,DOCK_Y-178,220,48,6); ctx.fill();
+  ctx.font='bold 15px system-ui'; ctx.textAlign='center';
+  ctx.fillStyle='#ffe08a'; ctx.fillText('🛒 码头商店',x,DOCK_Y-159);
+  ctx.font='12px system-ui'; ctx.fillStyle='#cfd8dc'; ctx.fillText('站这儿按 E 卖鱼 · 按 B 买装备',x,DOCK_Y-140);
+}
+function drawGrill(){
+  const x=205;
+  ctx.fillStyle='#37474f'; ctx.fillRect(x-30,DOCK_Y-30,60,8);
+  ctx.fillStyle='#455a64'; ctx.fillRect(x-26,DOCK_Y-22,6,22); ctx.fillRect(x+20,DOCK_Y-22,6,22);
+  // 火苗
+  for(let i=-1;i<=1;i++){
+    const h=10+Math.sin(G.t*9+i*2)*5;
+    ctx.fillStyle=i===0?'#ffb74d':'#ff8a65';
+    ctx.beginPath();ctx.moveTo(x+i*14-6,DOCK_Y-30);ctx.lineTo(x+i*14,DOCK_Y-30-h-6);ctx.lineTo(x+i*14+6,DOCK_Y-30);ctx.closePath();ctx.fill();
+  }
+  ctx.fillStyle='#8d6e63'; ell(x,DOCK_Y-34,16,5);
+  ctx.font='bold 14px system-ui'; ctx.textAlign='center'; ctx.fillStyle='#ffcc80';
+  ctx.fillText('🍖 烤架 · E 吃烤鱼 ¥30',x,DOCK_Y-66);
+}
+function roundRect(x,y,w,h,r){ ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath(); }
+/* --- 鱼 --- */
+function fishBody(f,x,y,s,ang){
+  ctx.save(); ctx.translate(x,y); ctx.rotate(ang||0);
+  ctx.fillStyle=f.rare?'#ffd700':f.sp.color;
+  ell(0,0,s,s*.55);
+  // 尾巴
+  const wig=Math.sin(G.t*8+(f.wob||0))*s*.25;
+  ctx.beginPath();ctx.moveTo(-s*.9,0);ctx.lineTo(-s*1.5,-s*.4+wig);ctx.lineTo(-s*1.5,s*.4+wig);ctx.closePath();ctx.fill();
+  // 眼睛
+  ctx.fillStyle='#fff'; ctx.beginPath();ctx.arc(s*.5,-s*.12,s*.16,0,7);ctx.fill();
+  ctx.fillStyle='#222'; ctx.beginPath();ctx.arc(s*.55,-s*.12,s*.08,0,7);ctx.fill();
+  if(f.rare){ ctx.fillStyle='rgba(255,255,255,.9)';
+    for(let i=0;i<3;i++){const a=G.t*3+i*2.1;ctx.fillRect(Math.cos(a)*s*.8,Math.sin(a)*s*.5,3,3);} }
+  ctx.restore();
+}
+function drawFish(f){
+  const s=f.sp.size;
+  ctx.globalAlpha=.95;
+  fishBody(f,f.x,f.y,s,f.dir>0?Math.sin(f.wob)*.12:Math.PI-Math.sin(f.wob)*.12);
+  ctx.globalAlpha=1;
+}
+function drawFlyFish(f){ fishBody(f,f.x,f.y,f.sp.size,Math.atan2(f.vy,f.vx)*.5); }
+function drawGfish(g){
+  const s=g.sp.size, ang=g.onGround?(g.vx>0?.2:-.2):(g.vx>0?-.5:.5)+Math.sin(g.anim)*.3;
+  ctx.save(); ctx.translate(g.x,g.y-s*.4); ctx.rotate(ang);
+  ctx.fillStyle=g.rare?'#ffd700':g.sp.color;
+  ell(0,0,s,s*.55);
+  const wig=Math.sin(g.anim*3)*s*.3;
+  ctx.beginPath();ctx.moveTo(-s*.9,0);ctx.lineTo(-s*1.5,-s*.4+wig);ctx.lineTo(-s*1.5,s*.4+wig);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(s*.5,-s*.12,s*.16,0,7);ctx.fill();
+  ctx.fillStyle='#222';ctx.beginPath();ctx.arc(s*.55,-s*.12,s*.08,0,7);ctx.fill();
+  ctx.restore();
+  // 血条
+  if(g.hp<g.sp.hp){
+    const w=s*2;
+    ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(g.x-w/2,g.y-s-14,w,5);
+    ctx.fillStyle='#8fd694'; ctx.fillRect(g.x-w/2,g.y-s-14,w*g.hp/g.sp.hp,5);
+  }
+  if(g.rare){ ctx.font='12px system-ui';ctx.textAlign='center';ctx.fillStyle='#ffd700';ctx.fillText('✨',g.x,g.y-s-32); }
+}
+function drawCorpse(c){
+  c.bob+=.1;
+  const y=DOCK_Y-6+Math.sin(c.bob)*2;
+  ctx.font='13px system-ui'; ctx.textAlign='center';
+  ctx.fillStyle='rgba(0,0,0,.4)'; ell(c.x,DOCK_Y+2,14,4);
+  ctx.fillStyle=c.gold?'#ffd700':'#b0bec5';
+  ctx.save();ctx.translate(c.x,y);ctx.rotate(.4);ell(0,0,14,7);
+  ctx.beginPath();ctx.moveTo(12,0);ctx.lineTo(19,-6);ctx.lineTo(19,6);ctx.closePath();ctx.fill();ctx.restore();
+  ctx.fillStyle=c.gold?'#ffe08a':'#cfd8dc'; ctx.font='11px system-ui'; ctx.fillText('¥'+fmt(c.val),c.x,y-14);
+}
+function drawPlayer(){
+  const p=player;
+  ctx.save();
+  // 影子
+  ctx.fillStyle='rgba(0,0,0,.3)'; ell(p.x,DOCK_Y+4,16,5);
+  ctx.translate(p.x,p.y);
+  if(p.knocked>0){ ctx.rotate(-Math.PI/2); ctx.translate(0,10); }
+  if(p.iv>0&&Math.floor(G.t*14)%2===0) ctx.globalAlpha=.4;
+  const step=Math.sin(p.walk)*6;
+  // 腿
+  ctx.fillStyle='#3e5871';
+  ctx.fillRect(-8,-22,7,22+ (p.vx?step*.4:0)); ctx.fillRect(2,-22,7,22-(p.vx?step*.4:0));
+  // 身体
+  ctx.fillStyle='#4a7ba6'; roundRect(-11,-52,22,32,6); ctx.fill();
+  // 背包渔获球
+  if(p.carrying.length){
+    ctx.fillStyle='rgba(139,195,74,.8)';
+    for(let i=0;i<p.carrying.length;i++) ell(-16,-46+i*7,7,5);
+  }
+  // 头
+  ctx.fillStyle='#ffcc99'; ell(0,-62,11,11);
+  ctx.fillStyle='#263238'; ctx.fillRect(-9,-58,5,3); ctx.fillRect(3,-58,5,3); // 墨镜
+  // 帽子/王冠
+  if(G.items.crown){
+    ctx.fillStyle='#ffd700'; ctx.fillRect(-11,-79,22,5);
+    ctx.beginPath();ctx.moveTo(-11,-79);ctx.lineTo(-7,-87);ctx.lineTo(-3,-81);ctx.lineTo(0,-88);ctx.lineTo(3,-81);ctx.lineTo(7,-87);ctx.lineTo(11,-79);ctx.closePath();ctx.fill();
+  }else if(G.items.hat){
+    ctx.fillStyle='#d9b26a'; ell(0,-72,16,5); ctx.fillRect(-9,-80,18,9);
+    ctx.fillStyle='#8a6d3b'; ctx.fillRect(-9,-74,18,3);
+  }else{
+    ctx.fillStyle='#e57373'; ell(0,-72,13,5); ctx.fillRect(-8,-76,16,7);
+  }
+  // 救生衣
+  if(G.items.vest){ ctx.fillStyle='#ff8f00'; roundRect(-12,-52,24,12,3); ctx.fill(); }
+  // 手臂 + 鱼竿
+  const tip=rodTip();
+  ctx.strokeStyle='#8d6e63'; ctx.lineWidth=3;
+  ctx.beginPath();
+  const hx=p.face*10, hy=-46;
+  ctx.moveTo(hx,hy);
+  const rodAng = rodS.state==='charge'? -p.face*1.1 : Math.atan2(tip.y-p.y-hy,tip.x-p.x);
+  ctx.lineTo(hx+Math.cos(rodAng)*46,hy+Math.sin(rodAng)*46);
+  ctx.stroke();
+  // 挥击动画
+  if(p.swing>0){
+    ctx.strokeStyle='rgba(255,255,255,.8)'; ctx.lineWidth=4;
+    ctx.beginPath(); ctx.arc(p.face*14,-40,WEAPONS[G.cur].range*.75,p.face>0?-1.1:Math.PI-1.1+0.5,p.face>0?.5:Math.PI+ .6); ctx.stroke();
+  }
+  ctx.restore();
+  // 武器在手上
+  ctx.save(); ctx.translate(p.x+p.face*12,p.y-44);
+  if(G.cur==='knife'){ ctx.fillStyle='#cfd8dc'; ctx.fillRect(-2,-14,4,14); ctx.fillStyle='#8d6e63'; ctx.fillRect(-3,0,6,6); }
+  else if(G.cur==='pistol'||G.cur==='shotgun'){ ctx.fillStyle='#455a64'; ctx.fillRect(0,-6,G.cur==='pistol'?16:26,6); ctx.fillRect(0,0,6,8); }
+  ctx.restore();
+}
+function drawLine(){
+  if(rodS.state==='idle'||rodS.state==='charge') return;
+  const tip=rodTip();
+  ctx.strokeStyle='rgba(255,255,255,.65)'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(tip.x,tip.y);
+  if(rodS.state==='hooked'&&rodS.reel){
+    if(rodS.reel.fish) ctx.lineTo(rodS.reel.fish.x,rodS.reel.fish.y);
+    else if(boss) ctx.lineTo(boss.x,boss.y-30);
+  }else ctx.lineTo(rodS.bob.x,rodS.bob.y);
+  ctx.stroke();
+  // 浮漂
+  if(rodS.state==='float'||rodS.state==='fly'){
+    ctx.fillStyle='#e57373'; ctx.beginPath();ctx.arc(rodS.bob.x,rodS.bob.y,6,0,7);ctx.fill();
+    ctx.fillStyle='#fff'; ctx.fillRect(rodS.bob.x-1,rodS.bob.y-16,2,12);
+    if(rodS.state==='float'){ // 波纹
+      ctx.strokeStyle='rgba(255,255,255,.4)';
+      const r=8+(rodS.floatT*20)%26;
+      ctx.beginPath();ctx.ellipse(rodS.bob.x,DOCK_Y-2,r,r*.3,0,0,7);ctx.stroke();
+    }
+  }
+}
+function drawCharge(){
+  const p=player;
+  // 力度条
+  ctx.fillStyle='rgba(0,0,0,.5)'; roundRect(p.x-42,p.y-140,84,12,4); ctx.fill();
+  const g=ctx.createLinearGradient(p.x-40,0,p.x+40,0);
+  g.addColorStop(0,'#8fd694'); g.addColorStop(.6,'#ffe08a'); g.addColorStop(1,'#ff8a65');
+  ctx.fillStyle=g; roundRect(p.x-40,p.y-138,80*rodS.power,8,3); ctx.fill();
+  ctx.font='12px system-ui'; ctx.textAlign='center'; ctx.fillStyle='#fff';
+  ctx.fillText('蓄力中…松开右键抛竿',p.x,p.y-148);
+  // 轨迹预览
+  const rod=RODS[G.rod], tip=rodTip();
+  let ang=clamp(Math.atan2(mouse.y-tip.y,mouse.x-tip.x),-1.5,-.06);
+  const v=rod.cast*(.55+.75*rodS.power);
+  let x=tip.x,y=tip.y,vx=Math.cos(ang)*v,vy=Math.sin(ang)*v;
+  ctx.fillStyle='rgba(255,255,255,.5)';
+  for(let i=0;i<14;i++){
+    for(let k=0;k<3;k++){ vy+=900/3; x+=vx/3; y+=vy/3; }
+    if(y>DOCK_Y||x>W) break;
+    ctx.fillRect(x-1.5,y-1.5,3,3);
+  }
+}
+function drawReelUI(){
+  const R=rodS.reel; if(!R) return;
+  const cx=W/2, y0=H-96;
+  ctx.fillStyle='rgba(10,25,40,.78)'; roundRect(cx-220,y0-34,440,104,10); ctx.fill();
+  ctx.font='bold 14px system-ui'; ctx.textAlign='center'; ctx.fillStyle='#ffe08a';
+  const who=R.boss?ISLANDS[G.island-1].bossName:R.fish.sp.name+(R.fish.rare?'(✨珍品)':'');
+  ctx.fillText('搏斗中：'+who+'　—— 按住左键收线，松手放线防断',cx,y0-14);
+  bar('收线进度',R.prog/100,'#8fd694',y0+2);
+  bar('线张力',R.tension/100,R.tension>70?'#ff5252':'#ffe08a',y0+24);
+  bar('鱼的体力',clamp(R.stam,0,100)/100,'#64b5f6',y0+46);
+  function bar(label,t,color,y){
+    ctx.fillStyle='rgba(255,255,255,.15)'; ctx.fillRect(cx-150,y,300,10);
+    ctx.fillStyle=color; ctx.fillRect(cx-150,y,300*clamp(t,0,1),10);
+    ctx.font='12px system-ui'; ctx.textAlign='left'; ctx.fillStyle='#cfd8dc'; ctx.fillText(label,cx-150-64,y+10);
+  }
+}
+function drawBossBar(){
+  const b=boss;
+  ctx.fillStyle='rgba(0,0,0,.5)'; roundRect(W/2-220,54,440,22,8); ctx.fill();
+  ctx.fillStyle='#ff5252'; roundRect(W/2-216,58,432*clamp(b.hp/b.maxHp,0,1),14,5); ctx.fill();
+  ctx.font='bold 13px system-ui'; ctx.textAlign='center'; ctx.fillStyle='#fff';
+  ctx.fillText('⚔️ '+ISLANDS[G.island-1].bossName+'  '+Math.max(0,Math.ceil(b.hp))+' / '+b.maxHp,W/2,70);
+}
+function drawBanner(){
+  const a=clamp(G.banner.t,0,1);
+  ctx.globalAlpha=a;
+  ctx.fillStyle='rgba(0,0,0,.65)'; roundRect(W/2-330,110,660,86,12); ctx.fill();
+  ctx.font='bold 22px system-ui'; ctx.textAlign='center'; ctx.fillStyle='#ffe08a';
+  G.banner.text.split('\n').forEach((l,i)=>ctx.fillText(l,W/2,142+i*30));
+  ctx.globalAlpha=1;
+}
+/* --- Boss 造型 --- */
+function drawBossLurk(){
+  const b=boss;
+  ctx.fillStyle='rgba(6,20,32,.55)';
+  ell(b.x,b.y,b.size*1.6,b.size*.75);
+  ctx.fillStyle='rgba(6,20,32,.8)';
+  ell(b.x+Math.sin(G.t*2)*10,b.y-14,b.size*1.1,b.size*.5);
+  // 鳍
+  ctx.beginPath();ctx.moveTo(b.x-10,b.y-b.size*.5-10);ctx.lineTo(b.x+8,b.y-b.size*.5-42);ctx.lineTo(b.x+22,b.y-b.size*.5-10);ctx.closePath();ctx.fill();
+  if(b.phase==='lurk'&&Math.floor(G.t*2)%2===0){
+    ctx.font='13px system-ui';ctx.textAlign='center';ctx.fillStyle='#ffab91';
+    ctx.fillText('⚠️ '+ISLANDS[G.island-1].bossName,b.x,b.y-b.size-30);
+  }
+}
+function drawBossDock(){
+  const b=boss;
+  ctx.save(); ctx.translate(b.x,b.y);
+  if(b.kind==='puffer'){
+    const s=b.size*(b.tele>0?1.35:1)+Math.sin(G.t*3)*2;
+    ctx.fillStyle='rgba(0,0,0,.3)'; ell(0,4,s*.9,10);
+    ctx.fillStyle='#d9c26a'; ell(0,-s*.5,s,s*.9);
+    // 刺
+    ctx.strokeStyle='#b59a3f'; ctx.lineWidth=3;
+    for(let i=0;i<12;i++){const a=i/12*7;
+      ctx.beginPath();ctx.moveTo(Math.cos(a)*s*.9,-s*.5+Math.sin(a)*s*.8);ctx.lineTo(Math.cos(a)*(s+10),-s*.5+Math.sin(a)*(s*.88+10));ctx.stroke();}
+    ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(s*.4,-s*.7,7,0,7);ctx.fill();
+    ctx.fillStyle='#222';ctx.beginPath();ctx.arc(s*.45,-s*.7,3.5,0,7);ctx.fill();
+    ctx.fillStyle='#b59a3f'; ell(0,-s*.15,s*.5,6); // 嘴
+    if(b.tele>0){ ctx.font='bold 16px system-ui';ctx.textAlign='center';ctx.fillStyle='#ff5252';ctx.fillText('它要跳了！快躲！',0,-s-24); }
+  }else if(b.kind==='spider'){
+    const s=b.size;
+    ctx.fillStyle='rgba(0,0,0,.3)'; ell(0,4,s,8);
+    ctx.fillStyle='#c0392b'; ell(0,-s*.4,s*.95,s*.62);
+    ctx.fillStyle='#e74c3c'; ell(0,-s*.55,s*.6,s*.4);
+    // 腿
+    ctx.strokeStyle='#922b21'; ctx.lineWidth=5;
+    for(let i=-1;i<=1;i+=2)for(let j=0;j<3;j++){
+      const wig=Math.sin(G.t*7+j*2+i)*8;
+      ctx.beginPath();ctx.moveTo(i*s*.7,-s*.4+j*10);ctx.lineTo(i*(s+26),-s*.9+j*22+wig);ctx.stroke();
+    }
+    // 钳子
+    const clawUp=b.tele>0||b.dash>0;
+    ctx.fillStyle='#e74c3c';
+    ctx.save();ctx.translate(-s-16,-s*(clawUp?0.8:0));ctx.rotate(clawUp?-0.9:0); ell(0,0,16,10);ctx.restore();
+    ctx.save();ctx.translate(s+16,-s*(clawUp?0.8:0));ctx.rotate(clawUp?0.9:0); ell(0,0,16,10);ctx.restore();
+    ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(-s*.2,-s*.7,6,0,7);ctx.arc(s*.2,-s*.7,6,0,7);ctx.fill();
+    ctx.fillStyle='#222';ctx.beginPath();ctx.arc(-s*.18,-s*.7,2.5,0,7);ctx.arc(s*.22,-s*.7,2.5,0,7);ctx.fill();
+    if(b.tele>0){ ctx.font='bold 15px system-ui';ctx.textAlign='center';ctx.fillStyle='#ff5252';ctx.fillText('钳子抬起来了！跳起来躲！',0,-s-26); }
+  }
+  ctx.restore();
+}
+function drawWhaleBeach(){
+  const b=boss, s=b.size;
+  ctx.save(); ctx.translate(b.x,b.y);
+  ctx.fillStyle='rgba(0,0,0,.3)'; ell(-10,26,s*1.4,14);
+  // 大身体
+  ctx.fillStyle='#37474f';
+  ctx.beginPath();ctx.ellipse(0,-10,s*1.5,s*.85,-.15,0,7);ctx.fill();
+  // 尾巴（在水里）
+  ctx.beginPath();ctx.moveTo(s*1.2,-30);ctx.lineTo(s*1.7+Math.sin(G.t*2)*8,-70);ctx.lineTo(s*1.8,10);ctx.closePath();ctx.fill();
+  // 腹
+  ctx.fillStyle='#546e7a'; ell(0,20,s*1.2,s*.4);
+  // 熔岩纹
+  ctx.fillStyle='#ff7043';
+  for(let i=0;i<4;i++) ell(-s*.8+i*s*.55,-30-Math.sin(i*2+G.t)*6,7,4);
+  // 眼
+  ctx.fillStyle='#ff5252'; ctx.beginPath();ctx.arc(-s*.85,-30,8,0,7);ctx.fill();
+  ctx.fillStyle='#222'; ctx.beginPath();ctx.arc(-s*.85,-30,3.5,0,7);ctx.fill();
+  // 喷水口预警
+  if(b.spitT!==undefined&&b.spitT<0.7&&b.spitT>0){
+    ctx.font='bold 14px system-ui';ctx.textAlign='center';ctx.fillStyle='#7fd4ff';
+    ctx.fillText('💧 它要喷水了！',-s*.4,-s-24);
+  }
+  ctx.restore();
+}
+function drawCrab(c){
+  ctx.save(); ctx.translate(c.x,c.y);
+  ctx.fillStyle='rgba(0,0,0,.3)'; ell(0,3,16,4);
+  ctx.fillStyle='#e64a19'; ell(0,-12,14,9);
+  ctx.strokeStyle='#bf360c'; ctx.lineWidth=3;
+  for(let i=-1;i<=1;i+=2){for(let j=0;j<2;j++){
+    const wig=Math.sin(c.anim+j*2+i)*5;
+    ctx.beginPath();ctx.moveTo(i*10,-10+j*6);ctx.lineTo(i*22,-16+j*10+wig);ctx.stroke(); }}
+  ctx.fillStyle='#ff7043'; ell(-17,-16,6,4); ell(17,-16,6,4); // 钳
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(-5,-16,3,0,7);ctx.arc(5,-16,3,0,7);ctx.fill();
+  ctx.fillStyle='#222';ctx.beginPath();ctx.arc(-5,-16,1.4,0,7);ctx.arc(5,-16,1.4,0,7);ctx.fill();
+  ctx.restore();
+  // 血条
+  if(c.hp<6){ ctx.fillStyle='rgba(0,0,0,.5)';ctx.fillRect(c.x-14,c.y-34,28,4);
+    ctx.fillStyle='#8fd694';ctx.fillRect(c.x-14,c.y-34,28*c.hp/6,4); }
+}
+function drawGull(g){
+  ctx.save(); ctx.translate(g.x,g.y);
+  const flap=Math.sin(G.t*14)*10;
+  ctx.fillStyle='#eceff1';
+  ell(0,0,12,7);
+  ctx.beginPath();ctx.moveTo(-10,0);ctx.lineTo(-22,-4);ctx.lineTo(-12,5);ctx.closePath();ctx.fill(); // 尾
+  ctx.fillStyle='#ffca28'; ctx.beginPath();ctx.moveTo(10,-2);ctx.lineTo(20,0);ctx.lineTo(10,3);ctx.closePath();ctx.fill(); // 嘴
+  ctx.fillStyle='#222'; ctx.beginPath();ctx.arc(6,-3,2,0,7);ctx.fill();
+  // 翅膀
+  ctx.fillStyle='#cfd8dc';
+  ctx.beginPath();ctx.moveTo(-2,-2);ctx.quadraticCurveTo(-14,-14-flap,-26,-8-flap);ctx.quadraticCurveTo(-12,-2,0,2);ctx.closePath();ctx.fill();
+  if(g.carry){ ctx.save();ctx.translate(0,8);ctx.rotate(.4);ctx.fillStyle='#b0bec5';ell(0,0,12,6);ctx.restore();
+    ctx.font='11px system-ui';ctx.textAlign='center';ctx.fillStyle='#ffab91';ctx.fillText('我的鱼！',0,24); }
+  ctx.restore();
+}
+
+/* ---------------- HUD ---------------- */
+function drawHUD(){
+  // 左上：钱/背包/血
+  ctx.fillStyle='rgba(6,18,30,.72)'; roundRect(14,12,250,74,10); ctx.fill();
+  ctx.font='bold 20px system-ui'; ctx.textAlign='left';
+  ctx.fillStyle='#ffd700'; ctx.fillText('💰 '+fmt(G.money)+' 元',28,38);
+  ctx.fillStyle='#9fe8ff'; ctx.font='bold 16px system-ui';
+  ctx.fillText('🎒 渔获 '+player.carrying.length+'/4',28,62);
+  // 血条
+  ctx.fillStyle='rgba(255,255,255,.18)'; ctx.fillRect(150,50,100,12);
+  ctx.fillStyle=player.hp>player.maxHp*.4?'#8fd694':'#ff5252'; ctx.fillRect(150,50,100*clamp(player.hp/player.maxHp,0,1),12);
+  ctx.font='12px system-ui'; ctx.fillStyle='#fff'; ctx.fillText('❤',150,80);
+  ctx.fillText(Math.ceil(player.hp)+'/'+player.maxHp,172,80);
+  // 右上：岛屿目标
+  const isl=ISLANDS[G.island-1];
+  ctx.fillStyle='rgba(6,18,30,.72)'; roundRect(W-320,12,306,58,10); ctx.fill();
+  ctx.font='bold 16px system-ui'; ctx.textAlign='left';
+  ctx.fillStyle='#ffe08a'; ctx.fillText('🏝 第 '+G.island+' 岛 · '+isl.name,W-306,34);
+  if(G.freeMode||G.won){
+    ctx.fillStyle='#8fd694'; ctx.font='14px system-ui'; ctx.fillText('🏁 已通关 · 自由钓鱼模式',W-306,58);
+  }else{
+    ctx.font='14px system-ui';
+    ctx.fillStyle=G.earnedI>=isl.goal.money?'#8fd694':'#cfd8dc';
+    ctx.fillText('💰 '+fmt(G.earnedI)+'/'+fmt(isl.goal.money)+(isl.goal.fish?'　🐟 '+G.soldI+'/'+isl.goal.fish:''),W-306,58);
+  }
+  // 底部左：武器栏（1-7）
+  ctx.fillStyle='rgba(6,18,30,.72)'; roundRect(14,H-72,452,58,10); ctx.fill();
+  let bx=20;
+  WORDER.forEach((id,i)=>{
+    const own=G.weapons.includes(id);
+    ctx.globalAlpha=own?1:.3;
+    ctx.fillStyle=G.cur===id?'rgba(255,224,138,.25)':'rgba(255,255,255,.07)';
+    roundRect(bx,H-64,58,44,8); ctx.fill();
+    ctx.font='20px system-ui'; ctx.textAlign='center'; ctx.fillText(WEAPONS[id].icon,bx+29,H-40);
+    ctx.font='10px system-ui'; ctx.fillStyle='#cfd8dc'; ctx.fillText((i+1)+' '+WEAPONS[id].name,bx+29,H-26);
+    ctx.globalAlpha=1; bx+=62;
+  });
+  // 底部右：操作提示（收线面板在场时让位，避免叠字）
+  if(rodS.state!=='hooked'){
+    ctx.font='13px system-ui'; ctx.textAlign='right'; ctx.fillStyle='rgba(207,216,220,.85)';
+    ctx.fillText('A/D 走 · 空格 跳 · 左键 攻击 · 右键长按 抛竿 · B 商店 · E 交互 · P 暂停 · M 声音',W-16,H-30);
+  }
+  // 背包内容明细
+  if(player.carrying.length){
+    ctx.font='12px system-ui'; ctx.textAlign='left'; ctx.fillStyle='#9fb3c8';
+    let ty=H-90;
+    player.carrying.slice(-4).forEach((c,i)=>{ ctx.fillText('· '+c.label+' ¥'+fmt(c.val),20,ty-i*16); });
+  }
+}
+
+/* ---------------- 商店 ---------------- */
+function drawShop(){
+  uiButtons=[];
+  ctx.fillStyle='rgba(4,12,20,.82)'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(20,36,52,.95)'; roundRect(W/2-390,52,780,648,14); ctx.fill();
+  ctx.font='bold 24px system-ui'; ctx.textAlign='center'; ctx.fillStyle='#ffe08a';
+  ctx.fillText('🛒 码头商店（赚钱 → 升级 → 打更狠的鱼）',W/2,92);
+  ctx.font='14px system-ui'; ctx.fillStyle='#9fb3c8';
+  ctx.fillText('💰 你的钱：'+fmt(G.money)+' 元　　（点击购买 · 再按 B 关闭）',W/2,116);
+  const L=W/2-352, R=W/2+28, RW=660;   // 左右两栏与栏宽
+  function section(t,x,yy){ ctx.font='bold 14px system-ui';ctx.textAlign='left';ctx.fillStyle='#7fb3d5';ctx.fillText(t,x,yy); }
+  function rowAt(name,desc,price,own,using,x,yy){
+    ctx.textAlign='left';
+    ctx.fillStyle=using?'rgba(143,214,148,.12)':'rgba(255,255,255,.05)';
+    roundRect(x-2,yy-17,RW+4,36,8); ctx.fill();
+    ctx.font='bold 15px system-ui'; ctx.fillStyle='#eceff1'; ctx.fillText(name,x+10,yy+4);
+    ctx.font='12px system-ui'; ctx.fillStyle='#9fb3c8'; ctx.fillText(desc,x+150,yy+4);
+    ctx.font='bold 13px system-ui'; ctx.fillStyle=own?'#8fd694':(G.money>=price2num(price)?'#ffd700':'#ff8a65');
+    ctx.fillText(using&&own?'✔ 使用中':price,x+RW-158,yy+4);
+  }
+  function card(it,own,x,yy,w,h){
+    ctx.textAlign='center';
+    ctx.fillStyle=own?'rgba(143,214,148,.10)':'rgba(255,255,255,.05)';
+    roundRect(x,yy,w,h,8); ctx.fill();
+    ctx.font='22px system-ui'; ctx.fillText(it.icon,x+w/2,yy+28);
+    ctx.font='bold 13px system-ui'; ctx.fillStyle='#eceff1'; ctx.fillText(it.name,x+w/2,yy+46);
+    ctx.font='11px system-ui'; ctx.fillStyle='#9fb3c8'; ctx.fillText(it.desc,x+w/2,yy+62);
+    ctx.font='bold 12px system-ui'; ctx.fillStyle=own?'#8fd694':(G.money>=it.price?'#ffd700':'#ff8a65');
+    ctx.fillText(own?'✔ 已装备':fmt(it.price)+' 元',x+w/2,yy+76);
+  }
+  function buyBtn(id,price,yy,x){ uiButtons.push({id,x,y:yy-15,w:92,h:28,label:'购买',price,ok:G.money>=price}); }
+  // ── 左栏：武器（1-7） ──
+  let yl=146;
+  section('武器 · 数字键 1-7 切换',L,yl); yl+=24;
+  for(const id of WORDER){
+    const wp=WEAPONS[id]; const own=G.weapons.includes(id);
+    const desc=wp.type==='melee'? '伤害 '+wp.dmg+(wp.crit?' · 18%暴击×10':'')+(wp.chain?' · 电链传导':'')
+      : wp.type==='bomb' ? '扔出去爆炸 · 范围清场（小心自己）'
+      : (wp.pellets? wp.pellets+' 弹丸 · 每发 '+wp.dmg+' · 射程 '+wp.range : '子弹 · 伤害 '+wp.dmg);
+    rowAt(wp.icon+' '+wp.name, desc, own?'已拥有':fmt(wp.price)+' 元', own, own&&G.cur===id, L, yl);
+    if(!own) buyBtn('w_'+id, wp.price, yl, L+RW-96);
+    yl+=42;
+  }
+  // ── 右栏：鱼竿 + 饵料 ──
+  let yr=146;
+  section('鱼竿 · 更远 / 更结实 / 收线更快',R,yr); yr+=24;
+  for(let i=0;i<RODS.length;i++){
+    const r=RODS[i]; const own=G.rod>=i;
+    const next=G.rod+1===i;
+    rowAt('🎣 '+r.name, '线'+r.line+' · 吸引'+r.hookR+' · 收线'+r.reel, own?(G.rod===i?'使用中':'已拥有'):(next?fmt(r.price)+' 元':'先买上一根'), own, G.rod===i, R, yr);
+    if(next) buyBtn('r_'+i, r.price, yr, R+RW-96);
+    yr+=42;
+  }
+  yr+=8;
+  section('饵料 · 鱼咬钩更快',R,yr); yr+=24;
+  for(let i=0;i<BAITS.length;i++){
+    const b=BAITS[i]; const own=G.bait>=i;
+    const next=G.bait+1===i;
+    rowAt('🧀 '+b.name, '咬钩速度 ×'+b.bite.toFixed(1), own?(G.bait===i?'使用中':'已拥有'):(next?fmt(b.price)+' 元':'先买上一级'), own, G.bait===i, R, yr);
+    if(next) buyBtn('b_'+i, b.price, yr, R+RW-96);
+    yr+=42;
+  }
+  // ── 底部：渔夫装备 ──
+  section('渔夫装备 · 买一次永久生效',L,542);
+  let ix=L;
+  for(const [id,it] of Object.entries(ITEMS)){
+    const own=!!G.items[id];
+    card(it,own,ix,556,150,78);
+    if(!own) buyBtn('i_'+id, it.price, 556+56, ix+150-96);
+    ix+=158;
+  }
+  // 关闭
+  uiButtons.push({id:'close',x:W/2-70,y:660,w:140,h:40,label:'✔ 关闭（B）',ok:true});
+  uiButtons.forEach(drawBtn);
+}
+function price2num(s){ const m=/[\d,]+/.exec(s||''); return m?+m[0].replace(/,/g,''):1e9; }
+function drawBtn(b){
+  ctx.fillStyle=b.ok?'rgba(255,224,138,.2)':'rgba(120,120,120,.15)';
+  roundRect(b.x,b.y,b.w,b.h,8); ctx.fill();
+  ctx.strokeStyle=b.ok?'#ffe08a':'#78909c'; ctx.lineWidth=1.5; roundRect(b.x,b.y,b.w,b.h,8); ctx.stroke();
+  ctx.font='bold 15px system-ui'; ctx.textAlign='center';
+  ctx.fillStyle=b.ok?'#ffe08a':'#90a4ae'; ctx.fillText(b.label,b.x+b.w/2,b.y+b.h/2+5);
+}
+function shopClick(x,y){
+  for(const b of uiButtons){
+    if(x>b.x&&x<b.x+b.w&&y>b.y&&y<b.y+b.h){
+      if(b.id==='close'){ G.ui=null; return; }
+      if(!b.ok) { tone(160,.1,'square',.06); return; }
+      if(b.id.startsWith('w_')){ const id=b.id.slice(2); G.money-=WEAPONS[id].price; G.weapons.push(id); G.cur=id; }
+      else if(b.id.startsWith('r_')){ G.money-=RODS[+b.id.slice(2)].price; G.rod=+b.id.slice(2); }
+      else if(b.id.startsWith('b_')){ G.money-=BAITS[+b.id.slice(2)].price; G.bait=+b.id.slice(2); }
+      else if(b.id.startsWith('i_')){
+        const id=b.id.slice(2); G.money-=ITEMS[id].price; G.items[id]=true;
+        if(id==='hat'){ player.maxHp=120; player.hp=Math.min(120,player.hp+20); addFloat(player.x,player.y-100,'🎩 戴上草帽，血条变长！','#8fd694'); }
+        if(id==='crown') addFloat(player.x,player.y-100,'👑 咸鱼王冠：倒下就是满血！','#ffd700');
+      }
+      SFX.coin(); save();
+      return;
+    }
+  }
+}
+
+/* ---------------- 标题 / 暂停 / 结局 ---------------- */
+function drawTitle(){
+  // 背景：简化海景
+  const sky=ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,'#0d2b45'); sky.addColorStop(.7,'#1d5c8f'); sky.addColorStop(1,'#0a1e30');
+  ctx.fillStyle=sky; ctx.fillRect(0,0,W,H);
+  // 波浪
+  ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.lineWidth=2;
+  for(let r=0;r<6;r++){
+    ctx.beginPath();
+    const yy=430+r*46;
+    for(let x=0;x<=W;x+=10){ const y2=yy+Math.sin(x*.02+G.t*(1+r*.2)+r)*7; x===0?ctx.moveTo(x,y2):ctx.lineTo(x,y2); }
+    ctx.stroke();
+  }
+  // 大鱼游过
+  const fx=(G.t*40)%(W+400)-200;
+  ctx.globalAlpha=.5; fishBody({sp:{size:46,color:'#2e5f8a'},rare:false,wob:0},fx,220+Math.sin(G.t)*14,46,0); ctx.globalAlpha=1;
+  // 标题
+  ctx.textAlign='center';
+  ctx.font='bold 84px system-ui';
+  ctx.fillStyle='#ffe08a'; ctx.fillText('渔力全开',W/2,190);
+  ctx.font='bold 22px system-ui'; ctx.fillStyle='#9fe8ff';
+  ctx.fillText('类《How to Fish》物理钓鱼动作游戏',W/2,232);
+  ctx.font='15px system-ui'; ctx.fillStyle='#cfd8dc';
+  ctx.fillText('抛竿 → 拽线搏斗 → 鱼上岸会蹦会逃 → 花式击杀 → 卖钱升级 → 打 Boss → 换岛',W/2,266);
+  // 按钮们
+  uiButtons=[];
+  const sv=loadSave();
+  let by=330;
+  if(sv){ 
+    uiButtons.push({id:'continue',x:W/2-140,y:by,w:280,h:54,label:'▶ 继续游戏（第 '+sv.island+' 岛 · ¥'+fmt(sv.money)+'）',ok:true}); by+=66; }
+  uiButtons.push({id:'new',x:W/2-140,y:by,w:280,h:54,label:sv?'🔄 重新开始':'▶ 开始游戏',ok:true});
+  uiButtons.forEach(drawBtn);
+  // 操作说明
+  const help=[
+    '🚶 A/D 移动　🏃 空格 跳跃（Boss 冲过来时跳开！）　🖱 鼠标瞄准',
+    '🎣 按住右键蓄力抛竿，松手甩线；鱼咬钩后 按住左键收线、松手放线，张力满了会断线',
+    '👊 左键攻击上岸的鱼（数字键 1-7 换武器，还有法棍和炸药）——鱼在空中被击杀售价 ×3！',
+    '🦅 海鸥会偷你的鱼　🦀 螃蟹会上岸夹人　🐡 河豚砸人　🐟 石鱼扎手',
+    '💰 背着渔获去左边码头（按 E 卖出）→ 按 B 逛商店升级 → 完成目标打 Boss 去新岛'
+  ];
+  ctx.font='15px system-ui'; ctx.fillStyle='rgba(207,216,220,.9)';
+  help.forEach((l,i)=>ctx.fillText(l,W/2,470+i*30));
+  ctx.font='13px system-ui'; ctx.fillStyle='rgba(159,232,255,.5)';
+  ctx.fillText('v1.0 · 你的游戏中心 · 全程本地存档',W/2,H-24);
+}
+function drawPause(){
+  ctx.fillStyle='rgba(4,12,20,.7)'; ctx.fillRect(0,0,W,H);
+  ctx.font='bold 40px system-ui'; ctx.textAlign='center'; ctx.fillStyle='#ffe08a';
+  ctx.fillText('⏸ 暂停',W/2,240);
+  ctx.font='16px system-ui'; ctx.fillStyle='#cfd8dc';
+  ['A/D 走 · 空格 跳 · 左键 攻击/收线 · 右键长按 抛竿',
+   'B 商店 · E 卖鱼/吃烤鱼 · 1-7 切武器 · M 声音',
+   '空中击杀 ×3 · 珍品鱼 ×5 · 断线了别硬拉'].forEach((l,i)=>ctx.fillText(l,W/2,300+i*34));
+  uiButtons=[{id:'resume',x:W/2-90,y:430,w:180,h:50,label:'▶ 继续（P）',ok:true}];
+  drawBtn(uiButtons[0]);
+}
+function drawEnding(){
+  ctx.fillStyle='rgba(4,12,20,.8)'; ctx.fillRect(0,0,W,H);
+  ctx.textAlign='center';
+  ctx.font='bold 52px system-ui'; ctx.fillStyle='#ffe08a'; ctx.fillText('🏠 你修好了船，回家啦！',W/2,170);
+  ctx.font='18px system-ui'; ctx.fillStyle='#cfd8dc';
+  ctx.fillText('从空手捡贝壳，到击败变异巨鲸——三座岛，全是鱼换来的。',W/2,220);
+  const s=G.stats, mins=Math.floor(G.timePlayed/60);
+  const lines=[
+    '💰 累计赚钱 ¥'+fmt(s.earned+ (G.money>=0?0:0)),
+    '🐟 卖出 '+s.sold+' 件 · 击杀 '+s.killed+' 只',
+    '✨ 空中击杀 '+s.air+' 次　⚔️ Boss 击败 '+s.boss+' 只',
+    '⏱ 用时约 '+mins+' 分钟 · 现存 ¥'+fmt(G.money)
+  ];
+  ctx.font='20px system-ui'; ctx.fillStyle='#9fe8ff';
+  lines.forEach((l,i)=>ctx.fillText(l,W/2,280+i*40));
+  uiButtons=[
+    {id:'free',x:W/2-330,y:470,w:300,h:54,label:'🎣 继续自由钓鱼（第3岛）',ok:true},
+    {id:'title',x:W/2+30,y:470,w:300,h:54,label:'🏠 回到标题',ok:true}
+  ];
+  uiButtons.forEach(drawBtn);
+}
+/* UI 按钮点击（shop/pause/title/ending） */
+addEventListener('mousedown',e=>{
+  if(e.button!==0) return;
+  mpos(e);
+  if(G.state==='title'||G.state==='ending'||G.ui==='shop'||G.ui==='pause'){
+    if(!uiButtons.length) return;
+    for(const b of uiButtons){
+      if(mouse.x>b.x&&mouse.x<b.x+b.w&&mouse.y>b.y&&mouse.y<b.y+b.h){
+        if(G.state==='title'){
+          if(b.id==='new') startGame(true);
+          else if(b.id==='continue'){ applySave(loadSave()); startGame(false);
+            if(!G.banner&&!G.freeMode){const isl=ISLANDS[G.island-1];G.banner={text:'🏝 回到第 '+G.island+' 岛 · '+isl.name+'\n目标：赚 ¥'+fmt(isl.goal.money-G.earnedI)+'、再卖 '+(isl.goal.fish-G.soldI)+' 条',t:3.5};} }
+        }else if(G.state==='ending'){
+          if(b.id==='free'){ G.freeMode=true; save(); G.state='play'; }
+          else if(b.id==='title'){ G.state='title'; }
+        }else if(G.ui==='shop'){ shopClick(mouse.x,mouse.y); }
+        else if(G.ui==='pause'){ if(b.id==='resume') G.ui=null; }
+        return;
+      }
+    }
+  }
+});
+
+/* ---------------- 主循环 ---------------- */
+let last=performance.now();
+function loop(now){
+  const dt=Math.min(.033,(now-last)/1000); last=now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,1571 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>渔力全开 3D</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#06131f;font-family:system-ui,-apple-system,sans-serif;user-select:none;-webkit-user-select:none}
+  #c{position:fixed;inset:0;width:100%;height:100%;display:block;cursor:crosshair}
+  .ol{position:fixed;pointer-events:none;color:#fff}
+  /* 准星 */
+  #cross{left:50%;top:50%;transform:translate(-50%,-50%);width:18px;height:18px}
+  #cross:before,#cross:after{content:'';position:absolute;background:rgba(255,255,255,.85)}
+  #cross:before{left:8px;top:0;width:2px;height:18px}
+  #cross:after{left:0;top:8px;width:18px;height:2px}
+  /* 帽檐/王冠/救生衣 视觉 */
+  #brim{left:0;right:0;top:0;height:0;border-top:14px solid transparent;display:none}
+  #brim.hat{display:block;border-image:linear-gradient(#d9b26a,#b58f3f) 1;height:0;border-top-width:26px;border-radius:0 0 50% 50%/0 0 26px 26px}
+  #brim.crown{display:block;border-top-width:18px;border-image:linear-gradient(#ffe08a,#c9a227) 1}
+  #vestband{left:0;top:60%;width:26px;height:60px;background:linear-gradient(#ff8f00,#e65100);border-radius:4px;display:none;opacity:.9}
+  /* HUD */
+  #hud{inset:0;display:none}
+  .panel{background:rgba(6,18,30,.72);border-radius:10px;padding:8px 12px}
+  #stat{left:14px;top:12px;font-weight:bold}
+  #stat .money{color:#ffd700;font-size:20px}
+  #stat .bag{color:#9fe8ff;font-size:15px}
+  #stat .hpwrap{margin-top:4px;width:170px;height:13px;background:rgba(255,255,255,.18);border-radius:6px;overflow:hidden}
+  #stat .hp{height:100%;background:#8fd694;width:100%}
+  #goal{right:14px;top:12px;text-align:right}
+  #goal .isl{color:#ffe08a;font-weight:bold;font-size:16px}
+  #goal .p{color:#cfd8dc;font-size:14px;margin-top:2px}
+  #weapons{left:14px;bottom:14px;display:flex;gap:6px}
+  .wslot{width:58px;height:52px;background:rgba(255,255,255,.06);border-radius:8px;text-align:center;color:#78909c;font-size:10px;line-height:1.1;padding-top:4px;box-sizing:border-box}
+  .wslot.own{color:#cfd8dc}
+  .wslot.cur{background:rgba(255,224,138,.22);outline:1.5px solid #ffe08a}
+  .wslot .ic{font-size:18px;display:block}
+  #hint{right:14px;bottom:12px;color:rgba(207,216,220,.8);font-size:13px;text-align:right}
+  #bossbar{left:50%;top:56px;transform:translateX(-50%);width:440px;display:none}
+  #bossbar .n{text-align:center;font-weight:bold;color:#fff;font-size:14px;text-shadow:0 1px 2px #000}
+  #bossbar .w{height:14px;background:rgba(0,0,0,.5);border-radius:7px;overflow:hidden;margin-top:2px}
+  #bossbar .f{height:100%;background:#ff5252}
+  /* 收线 */
+  #reel{left:50%;bottom:26px;transform:translateX(-50%);width:460px;background:rgba(10,25,40,.8);border-radius:10px;padding:10px 16px;display:none}
+  #reel .t{font-weight:bold;color:#ffe08a;font-size:14px;text-align:center;margin-bottom:6px}
+  .bar{display:flex;align-items:center;gap:8px;margin:4px 0}
+  .bar .lb{width:64px;font-size:12px;color:#cfd8dc;text-align:right}
+  .bar .bw{flex:1;height:10px;background:rgba(255,255,255,.14);border-radius:5px;overflow:hidden}
+  .bar .bf{height:100%}
+  #b_prog .bf{background:#8fd694}#b_ten .bf{background:#ffe08a}#b_stam .bf{background:#64b5f6}
+  /* 蓄力 */
+  #charge{left:50%;bottom:110px;transform:translateX(-50%);width:200px;display:none;text-align:center}
+  #charge .w{height:12px;background:rgba(0,0,0,.5);border-radius:6px;overflow:hidden}
+  #charge .f{height:100%;background:linear-gradient(90deg,#8fd694,#ffe08a,#ff8a65)}
+  #charge .t{font-size:12px;color:#fff;text-shadow:0 1px 2px #000;margin-bottom:3px}
+  /* 横幅 */
+  #banner{left:50%;top:110px;transform:translateX(-50%);max-width:680px;background:rgba(0,0,0,.66);border-radius:12px;padding:14px 26px;font-weight:bold;font-size:20px;color:#ffe08a;text-align:center;white-space:pre-line;display:none}
+  /* 飘字 */
+  #floats{inset:0;overflow:hidden}
+  .fl{position:absolute;font-weight:bold;font-size:17px;text-shadow:0 1px 3px rgba(0,0,0,.7);transform:translate(-50%,-50%);white-space:nowrap}
+  /* 全屏界面 */
+  .screen{position:fixed;inset:0;background:rgba(4,12,20,.86);display:none;align-items:center;justify-content:center;flex-direction:column;color:#fff;z-index:10}
+  .screen h1{font-size:64px;color:#ffe08a;margin:0 0 6px}
+  .screen h2{font-size:20px;color:#9fe8ff;font-weight:normal;margin:0 0 22px}
+  .bigbtn{pointer-events:auto;cursor:pointer;background:rgba(255,224,138,.15);border:2px solid #ffe08a;color:#ffe08a;font-size:18px;font-weight:bold;padding:12px 40px;border-radius:10px;margin:6px}
+  .bigbtn:hover{background:rgba(255,224,138,.3)}
+  .help{font-size:14px;color:#cfd8dc;line-height:1.9;text-align:center;margin-top:20px}
+  #shop{background:rgba(4,12,20,.88)}
+  #shopbox{width:860px;max-width:94vw;background:rgba(20,36,52,.96);border-radius:14px;padding:18px 24px;color:#fff;pointer-events:auto}
+  #shopbox h2{margin:0;color:#ffe08a;font-size:22px}
+  #shopbox .money{color:#cfd8dc;font-size:14px;margin:6px 0 10px}
+  .cols{display:flex;gap:18px}
+  .col{flex:1}
+  .stitle{color:#7fb3d5;font-weight:bold;font-size:14px;margin:8px 0 4px}
+  .srow{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.05);border-radius:8px;padding:5px 10px;margin-bottom:5px;font-size:13px}
+  .srow .nm{font-weight:bold;width:96px}
+  .srow .ds{color:#9fb3c8;flex:1;font-size:12px}
+  .srow .pr{font-weight:bold;width:86px;text-align:right}
+  .srow.own .pr{color:#8fd694}
+  .buy{cursor:pointer;background:rgba(255,224,138,.18);border:1.5px solid #ffe08a;color:#ffe08a;border-radius:6px;padding:3px 12px;font-size:12px;font-weight:bold}
+  .buy.no{border-color:#78909c;color:#90a4ae;background:rgba(120,120,120,.12);cursor:default}
+  .buy.own{border:none;background:none;color:#8fd694;cursor:default}
+  .cards{display:flex;gap:8px;margin-top:6px}
+  .card{flex:1;background:rgba(255,255,255,.05);border-radius:8px;padding:8px;text-align:center;font-size:12px}
+  .card .ic{font-size:22px}
+  .card .nm{font-weight:bold;margin:3px 0}
+  .card .ds{color:#9fb3c8;font-size:11px}
+  .card .pr{margin-top:4px;font-weight:bold}
+  .card.own{background:rgba(143,214,148,.1)} .card.own .pr{color:#8fd694}
+  #shophint{text-align:center;color:#9fb3c8;font-size:12px;margin-top:10px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="brim" class="ol"></div>
+<div id="vestband" class="ol"></div>
+<div id="cross" class="ol"></div>
+<div id="floats" class="ol"></div>
+
+<div id="hud" class="ol">
+  <div id="stat" class="panel">
+    <div class="money">💰 <span id="h_money">0</span> 元</div>
+    <div class="bag">🎒 渔获 <span id="h_bag">0</span>/4</div>
+    <div class="hpwrap"><div class="hp" id="h_hp"></div></div>
+    <div style="font-size:12px;color:#fff">❤ <span id="h_hpn">100/100</span></div>
+  </div>
+  <div id="goal" class="panel">
+    <div class="isl" id="h_isl">🏝 第 1 岛 · 青螺岛</div>
+    <div class="p" id="h_goal"></div>
+  </div>
+  <div id="weapons"></div>
+  <div id="hint">WASD 走/开船 · 空格 跳 · 左键 攻击/收线 · 右键长按 抛竿<br>B 商店 · E 卖鱼/烤鱼/上下船 · 走下码头边缘可下海游泳 · 1-7 切武器 · P 暂停 · M 声音</div>
+  <div id="bossbar"><div class="n" id="h_bossn"></div><div class="w"><div class="f" id="h_bossf"></div></div></div>
+  <div id="reel">
+    <div class="t" id="r_who"></div>
+    <div class="bar" id="b_prog"><div class="lb">收线进度</div><div class="bw"><div class="bf" id="r_prog"></div></div></div>
+    <div class="bar" id="b_ten"><div class="lb">线张力</div><div class="bw"><div class="bf" id="r_ten"></div></div></div>
+    <div class="bar" id="b_stam"><div class="lb">鱼的体力</div><div class="bw"><div class="bf" id="r_stam"></div></div></div>
+    <div class="t" style="color:#cfd8dc;font-size:12px">按住左键收线 · 松手放线防断</div>
+  </div>
+  <div id="charge"><div class="t">蓄力中…松开右键抛竿</div><div class="w"><div class="f" id="ch_f"></div></div></div>
+</div>
+<div id="banner" class="ol"></div>
+
+<div id="title" class="screen">
+  <h1>渔力全开 3D</h1>
+  <h2>FISHING FRENZY 3D · 第一人称物理钓鱼</h2>
+  <button class="bigbtn" id="btn_new">▶ 开始游戏</button>
+  <button class="bigbtn" id="btn_cont" style="display:none">▶ 继续游戏</button>
+  <div class="help">
+    🎣 右键长按蓄力抛竿 → 鱼咬钩后按住左键收线（张力满了会断线）<br>
+    👊 左键攻击上岸的鱼 · 空中击杀 ×3 · 珍品 ×5 · 数字键 1-7 换武器（有法棍和炸药）<br>
+    💰 背鱼到码头摊位按 E 卖 → B 开商店 → 完成目标打 Boss → 换岛<br>
+    🚤 码头边按 E 上船出海，海鸥盘旋的渔场鱼更多更肥；走下码头就能下海游泳<br>
+    🦅 海鸥偷鱼 🦀 螃蟹夹人 🩸 食人鱼上岸追人 ⚡ 电鳗反电 · 三岛三 Boss，通关回家！
+  </div>
+</div>
+
+<div id="pause" class="screen">
+  <h1 style="font-size:40px">⏸ 暂停</h1>
+  <div class="help">WASD/空格 移动跳跃 · 鼠标 观察 · 左键 攻击/收线 · 右键 抛竿 · B 商店 · E 交互</div>
+  <button class="bigbtn" id="btn_resume">▶ 继续（P）</button>
+</div>
+
+<div id="ending" class="screen">
+  <h1 style="font-size:46px">🏠 你修好了船，回家啦！</h1>
+  <div class="help" id="end_stats"></div>
+  <button class="bigbtn" id="btn_free">🎣 继续自由钓鱼（第3岛）</button>
+  <button class="bigbtn" id="btn_title">🏠 回到标题</button>
+</div>
+
+<div id="shop" class="screen">
+  <div id="shopbox">
+    <h2>🛒 码头商店（赚钱 → 升级 → 打更狠的鱼）</h2>
+    <div class="money" id="shop_money"></div>
+    <div class="cols">
+      <div class="col" id="col_weapons"></div>
+      <div class="col" id="col_gear"></div>
+    </div>
+    <div class="stitle">渔夫装备 · 买一次永久生效</div>
+    <div class="cards" id="cards_items"></div>
+    <div id="shophint">点击「购买」 · 再按 B 关闭</div>
+  </div>
+</div>
+
+<script src="three.min.js"></script>
+<script>
+'use strict';
+/* ============ 渔力全开 3D · 第一人称物理钓鱼 ============
+   复用 2D 版全部数值设计，Three.js 渲染，DOM 层 UI。 */
+const PX2M=1/44;                    // 2D 像素 → 3D 米
+const rnd=(a=1,b)=> b===undefined? Math.random()*a : a+Math.random()*(b-a);
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const $=id=>document.getElementById(id);
+const fmt=n=>Math.round(n).toLocaleString('zh-CN');
+
+/* ---------- 音效（合成） ---------- */
+let AC=null; const ac=()=>{ if(!AC){ try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } return AC; };
+function tone(f,d=.12,type='square',vol=.07,slide){
+  if(G.muted)return; const a=ac(); if(!a)return;
+  const o=a.createOscillator(),g=a.createGain();
+  o.type=type;o.frequency.setValueAtTime(f,a.currentTime);
+  if(slide)o.frequency.exponentialRampToValueAtTime(Math.max(30,slide),a.currentTime+d);
+  g.gain.setValueAtTime(vol,a.currentTime);g.gain.exponentialRampToValueAtTime(.0001,a.currentTime+d);
+  o.connect(g);g.connect(a.destination);o.start();o.stop(a.currentTime+d+.02);
+}
+function noiseS(d=.15,vol=.05,hp=400){
+  if(G.muted)return; const a=ac(); if(!a)return;
+  const len=(a.sampleRate*d)|0,buf=a.createBuffer(1,len,a.sampleRate),ch=buf.getChannelData(0);
+  for(let i=0;i<len;i++)ch[i]=(Math.random()*2-1)*(1-i/len);
+  const s=a.createBufferSource();s.buffer=buf;
+  const f=a.createBiquadFilter();f.type='highpass';f.frequency.value=hp;
+  const g=a.createGain();g.gain.value=vol;
+  s.connect(f);f.connect(g);g.connect(a.destination);s.start();
+}
+const SFX={cast:()=>noiseS(.18,.05,900),splash:()=>{noiseS(.25,.08,300);tone(220,.15,'sine',.05,80);},
+  bite:()=>{tone(880,.08);tone(1320,.1,'square',.05);},reel:()=>tone(140,.05,'sawtooth',.02),
+  snap:()=>{tone(600,.25,'sawtooth',.08,60);noiseS(.2,.06,200);},whack:()=>{tone(90,.1,'sine',.13,40);noiseS(.06,.05,100);},
+  gun:()=>{noiseS(.07,.09,700);tone(160,.06,'square',.06,60);},
+  coin:()=>{tone(660,.07,'square',.06);setTimeout(()=>tone(880,.07,'square',.06),70);setTimeout(()=>tone(1320,.12,'square',.06),140);},
+  hurt:()=>tone(200,.2,'sawtooth',.09,90),jump:()=>tone(300,.15,'sine',.05,600),
+  boss:()=>{tone(55,.7,'sawtooth',.11,40);tone(82,.7,'sawtooth',.07,50);},
+  gull:()=>{tone(1200,.08,'square',.04,1600);setTimeout(()=>tone(1100,.08,'square',.04,1500),120);},
+  eat:()=>{tone(300,.08,'square',.05);setTimeout(()=>tone(260,.08,'square',.05),90);},
+  win:()=>{[523,659,784,1047].forEach((f,i)=>setTimeout(()=>tone(f,.18,'square',.07),i*140));}};
+
+/* ---------- 数据表（与 2D 版一致） ---------- */
+const WEAPONS={
+  fist:    {name:'拳头',  icon:'👊', type:'melee', range:55, dmg:1, cd:.45, price:0},
+  knife:   {name:'小刀',  icon:'🔪', type:'melee', range:65, dmg:3, cd:.40, price:40},
+  baguette:{name:'法棍',  icon:'🥖', type:'melee', range:62, dmg:2, cd:.42, price:66, crit:.18, critMul:10},
+  pistol:  {name:'手枪',  icon:'🔫', type:'gun',   dmg:4, cd:.32, price:350},
+  taser:   {name:'电击棒',icon:'⚡', type:'melee', range:74, dmg:6, cd:.50, price:500, chain:true},
+  tnt:     {name:'炸药桶',icon:'💣', type:'bomb',  cd:3.0, price:1000},
+  shotgun: {name:'霰弹枪',icon:'💥', type:'gun',   dmg:2, cd:.95, price:1200, pellets:5, spread:.09, range:175}
+};
+const WORDER=['fist','knife','baguette','pistol','taser','tnt','shotgun'];
+const ITEMS={
+  hat:  {name:'渔夫草帽',icon:'🎩',price:120,desc:'+20 最大生命'},
+  clover:{name:'四叶草', icon:'🍀',price:300,desc:'珍品概率 20%'},
+  horn: {name:'大喇叭', icon:'📣',price:260,desc:'卖鱼收购价 +15%'},
+  vest: {name:'救生衣', icon:'🦺',price:400,desc:'受到伤害 -25%'},
+  crown:{name:'咸鱼王冠',icon:'👑',price:666,desc:'倒地后满血复活'}
+};
+const RODS=[
+  {name:'木竿',cast:1,   line:60, hookR:46,reel:36,price:0},
+  {name:'碳素竿',cast:1.15,line:85,hookR:64,reel:44,price:250},
+  {name:'专业蟹竿',cast:1.3,line:125,hookR:88,reel:54,price:900}
+];
+const BAITS=[{name:'香肠饵',bite:1.0,price:0},{name:'虾饵',bite:1.6,price:200},{name:'蟹饵',bite:2.4,price:800}];
+const SPECIES=[
+  {id:'sardine',name:'沙丁鱼',islands:[1,2,3],val:12,hp:2,pull:12,size:15,depth:[-2.3,-1.2],speed:1.5,color:0xa8c8e8,school:4},
+  {id:'salted',name:'咸鱼',islands:[1,2,3],val:5,hp:1,pull:8,size:18,depth:[-2.2,-1.4],speed:.6,color:0xb7a98a,weak:true},
+  {id:'drunk',name:'醉虾',islands:[1,2],val:18,hp:2,pull:10,size:14,depth:[-2.2,-1.1],speed:1.2,color:0xf0a8b8,drunk:true},
+  {id:'mackerel',name:'鲭鱼',islands:[1,2,3],val:25,hp:3,pull:18,size:20,depth:[-2.4,-1.0],speed:1.8,color:0x5f9ea0},
+  {id:'bass',name:'鲈鱼',islands:[1,2,3],val:40,hp:4,pull:24,size:26,depth:[-2.4,-.8],speed:1.3,color:0x7a9e7e},
+  {id:'parrot',name:'鹦嘴鱼',islands:[2,3],val:65,hp:5,pull:28,size:28,depth:[-2.4,-.8],speed:1.1,color:0xe76f8b},
+  {id:'piranha',name:'食人鱼',islands:[2],val:45,hp:4,pull:22,size:18,depth:[-2.2,-1.0],speed:2.0,color:0xd94f4f,chase:true},
+  {id:'sunfish',name:'翻车鱼',islands:[2,3],val:55,hp:2,pull:20,size:48,depth:[-2.4,-.9],speed:.4,color:0x9db8c9},
+  {id:'puffer',name:'河豚',islands:[2,3],val:95,hp:6,pull:36,size:24,depth:[-2.3,-1.0],speed:.9,color:0xd9c26a,landDmg:true},
+  {id:'eel',name:'电鳗',islands:[2,3],val:70,hp:5,pull:26,size:30,depth:[-2.4,-.8],speed:1.0,color:0x8a9e5f,zap:true},
+  {id:'stone',name:'石鱼',islands:[3],val:140,hp:7,pull:30,size:24,depth:[-2.4,-.9],speed:.8,color:0x8a7f76,spike:true},
+  {id:'tuna',name:'金枪鱼',islands:[3],val:190,hp:8,pull:45,size:40,depth:[-2.4,-.9],speed:2.2,color:0x4a6fa5},
+  {id:'koi',name:'黄金锦鲤',islands:[3],val:260,hp:5,pull:40,size:26,depth:[-2.4,-.9],speed:1.4,color:0xffd700,gold:true,weight:.3}
+];
+const ISLANDS=[
+  {name:'青螺岛',sky:0x8fd3f4,sea:0x2e86ab,fog:0xbfe3f0,goal:{money:400,fish:6},boss:'puffer',bossName:'大河豚',reward:600,
+   intro:'你酒后开船撞上了这座岛。想回家？先学会钓鱼。'},
+  {name:'礁岩岛',sky:0xffb37b,sea:0x2a6f97,fog:0xffd9b0,goal:{money:1500,fish:10},boss:'spider',bossName:'蜘蛛蟹',reward:1800,
+   intro:'海图指向礁岩岛。这里的鱼更凶，螃蟹会上岸夹人。'},
+  {name:'熔岩岛',sky:0xc94b4b,sea:0x1d3557,fog:0xe08a7a,goal:{money:3500,fish:0},boss:'whale',bossName:'变异弓头鲸',reward:6000,
+   intro:'回家的最后一块海图。喷岩浆的巨鲸守着这里。'}
+];
+const BOSS_DEF={puffer:{pull:70,stam:160,hp:60,size:52},spider:{hp:90,size:46},whale:{pull:85,stam:200,hp:220,size:96}};
+
+/* ---------- 全局状态 ---------- */
+const SAVE_KEY='ylqk3d_v1';
+const G={state:'title',ui:null,t:0,timePlayed:0,island:1,money:0,earnedI:0,soldI:0,
+  rod:0,bait:0,weapons:['fist'],cur:'fist',items:{},
+  stats:{earned:0,sold:0,killed:0,air:0,boss:0},
+  won:false,freeMode:false,muted:false,shake:0,bossOut:false,banner:null,gullT:22,crabT:16};
+const player={pos:new THREE.Vector3(-4,1.6,0),vy:0,onGround:true,hp:100,maxHp:100,
+  yaw:-Math.PI/2,pitch:-.06,cd:0,swing:0,iv:0,knocked:0,carrying:[],healCd:0,_fullMsg:0,mode:'dock'};
+const rodS={state:'idle',power:0,bob:null,floatT:0,hook:null,reel:null};
+let fishes=[],fly=[],gfish=[],corpses=[],bombs=[],balls=[],crabs=[],tracers=[],gull=null,boss=null;
+const keys={}; const mouse={down:false,rdown:false};
+
+function save(){ try{ localStorage.setItem(SAVE_KEY,JSON.stringify({money:G.money,island:G.island,earnedI:G.earnedI,soldI:G.soldI,
+  rod:G.rod,bait:G.bait,weapons:G.weapons,cur:G.cur,items:G.items,stats:G.stats,won:G.won,freeMode:G.freeMode,timePlayed:G.timePlayed})); }catch(e){} }
+function loadSave(){ try{ return JSON.parse(localStorage.getItem(SAVE_KEY)); }catch(e){ return null; } }
+function applySave(s){
+  G.money=s.money;G.island=s.island;G.earnedI=s.earnedI;G.soldI=s.soldI;
+  G.rod=s.rod;G.bait=s.bait;G.weapons=s.weapons;G.cur=s.cur;G.items=s.items||{};
+  G.stats=s.stats;G.won=s.won;G.freeMode=s.freeMode;G.timePlayed=s.timePlayed||0;
+  if(!G.weapons.includes('fist'))G.weapons.unshift('fist');
+  if(!G.weapons.includes(G.cur))G.cur='fist';
+  if(G.items.hat)player.maxHp=120;
+}
+
+/* ---------- Three.js 场景 ---------- */
+const canvas=$('c');
+let renderer=null;
+try{ renderer=new THREE.WebGLRenderer({canvas:canvas,antialias:true}); }catch(e){ renderer=null; }
+if(renderer){
+  renderer.setSize(innerWidth,innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.06;
+  if(THREE.sRGBEncoding!==undefined)renderer.outputEncoding=THREE.sRGBEncoding;
+  if(THREE.SRGBColorSpace!==undefined)renderer.outputColorSpace=THREE.SRGBColorSpace;
+}
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(72,innerWidth/innerHeight,.05,220);
+camera.rotation.order='YXZ';
+addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); if(renderer)renderer.setSize(innerWidth,innerHeight); });
+const hemi=new THREE.HemisphereLight(0xffffff,0x334455,.85); scene.add(hemi);
+const sunL=new THREE.DirectionalLight(0xfff3b0,1.15); sunL.position.set(30,40,-20); sunL.castShadow=true;
+sunL.shadow.mapSize.set(2048,2048);
+Object.assign(sunL.shadow.camera,{left:-16,right:16,top:16,bottom:-16,near:5,far:110});
+sunL.shadow.bias=-0.0005;
+scene.add(sunL); scene.add(sunL.target);
+const lampLight=new THREE.PointLight(0xffd9a0,.75,8); scene.add(lampLight);
+const fireLight=new THREE.PointLight(0xff8a50,.7,6); scene.add(fireLight);
+const flash=new THREE.PointLight(0xffe08a,0,8); scene.add(flash); // 枪口焰
+
+/* 海面（CPU 波浪） */
+function waveH(x,z,t){ return .12*Math.sin(x*.55+t*1.7)+.08*Math.sin(z*.7+t*2.3)+.05*Math.sin((x+z)*.35+t*1.1); }
+const seaGeo=new THREE.PlaneGeometry(120,44,72,26); seaGeo.rotateX(-Math.PI/2);
+const seaMat=new THREE.MeshPhongMaterial({color:0x2e86ab,transparent:true,opacity:.82,shininess:80,specular:0x99ccff});
+const sea=new THREE.Mesh(seaGeo,seaMat); sea.position.set(48,0,0); sea.receiveShadow=true; scene.add(sea);
+const seaBase=seaGeo.attributes.position.array.slice();
+
+/* 码头与环境 */
+const env=new THREE.Group(); scene.add(env);
+function mat(c){ return new THREE.MeshLambertMaterial({color:c}); }
+function box(w,h,d,c,x,y,z,g){ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat(c)); m.position.set(x,y,z); (g||env).add(m); return m; }
+function cyl(r,h,c,x,y,z,g){ const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,10),mat(c)); m.position.set(x,y,z); (g||env).add(m); return m; }
+function textSign(txt,sub){
+  const cv=document.createElement('canvas'); cv.width=256; cv.height=128;
+  const c=cv.getContext('2d');
+  c.fillStyle='rgba(20,36,52,.95)'; c.fillRect(0,0,256,128);
+  c.strokeStyle='#ffe08a'; c.lineWidth=6; c.strokeRect(3,3,250,122);
+  c.fillStyle='#ffe08a'; c.font='bold 40px system-ui'; c.textAlign='center'; c.textBaseline='middle';
+  c.fillText(txt,128,sub?52:64);
+  if(sub){ c.fillStyle='#cfd8dc'; c.font='24px system-ui'; c.fillText(sub,128,96); }
+  const m=new THREE.Mesh(new THREE.PlaneGeometry(1.1,.55),
+    new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(cv),transparent:true}));
+  return m;
+}
+/* 云朵（全局一次） */
+const clouds=new THREE.Group(); scene.add(clouds);
+(function initClouds(){
+  for(let i=0;i<7;i++){
+    const cl=new THREE.Group();
+    const n=3+Math.floor(rnd(3));
+    for(let k=0;k<n;k++){
+      const s=rnd(1.2,2.6);
+      const b=new THREE.Mesh(new THREE.SphereGeometry(s,10,8),
+        new THREE.MeshLambertMaterial({color:0xffffff,transparent:true,opacity:.92}));
+      b.scale.y=.45; b.position.set(k*rnd(1.2,2)-n*.7,rnd(-.2,.3),rnd(-.6,.6));
+      cl.add(b);
+    }
+    cl.position.set(rnd(-45,55),rnd(13,22),rnd(-58,-38));
+    cl.userData.v=rnd(.15,.5);
+    clouds.add(cl);
+  }
+})();
+function buildEnv(){
+  while(env.children.length)env.remove(env.children[0]);
+  const isl=ISLANDS[G.island-1];
+  scene.background=new THREE.Color(isl.sky);
+  scene.fog=new THREE.Fog(isl.fog,35,140);
+  // 海水顶点渐变（岸边浅、远处深）
+  seaMat.color.setHex(0xffffff); seaMat.vertexColors=true;
+  const cols=new Float32Array(seaGeo.attributes.position.count*3);
+  const cSh=new THREE.Color(isl.sea).lerp(new THREE.Color(0xffffff),.30);
+  const cDp=new THREE.Color(isl.sea).lerp(new THREE.Color(0x001320),.55);
+  const tmp=new THREE.Color();
+  for(let i=0;i<seaGeo.attributes.position.count;i++){
+    const wx=seaBase[i*3]+sea.position.x;
+    const t=clamp((wx-1)/34,0,1);
+    tmp.lerpColors(cSh,cDp,Math.pow(t,.7));
+    cols[i*3]=tmp.r;cols[i*3+1]=tmp.g;cols[i*3+2]=tmp.b;
+  }
+  if(!seaGeo.attributes.color)seaGeo.setAttribute('color',new THREE.BufferAttribute(cols,3));
+  else{ seaGeo.attributes.color.array.set(cols); seaGeo.attributes.color.needsUpdate=true; }
+  // 甲板
+  for(let i=0;i<10;i++){ const p=box(1,.18,6.4,i%2?0x8d6e63:0x7c5f54,-9.5+i,.1,0); p.receiveShadow=true; }
+  box(10,.6,6.8,0x5d4037,-5,-.25,0);
+  cyl(.14,1.8,0x4e342e,-.2,-.7,-3); cyl(.14,1.8,0x4e342e,-.2,-.7,3);
+  // 后栏杆
+  for(let z=-3;z<=3.01;z+=1.5) cyl(.05,.95,0x6d4c41,-9.85,.55,z);
+  box(.07,.07,6.2,0x8d6e63,-9.85,.92,0); box(.07,.07,6.2,0x8d6e63,-9.85,.6,0);
+  // 货箱 / 木桶 / 绳圈
+  const c1=box(.8,.8,.8,0x9c6b3f,-2.6,.5,-2.2); c1.castShadow=true;
+  const c2=box(.55,.55,.55,0xb08454,-2.5,1.18,-2.3); c2.rotation.y=.4; c2.castShadow=true;
+  const c3=box(.7,.7,.7,0x9c6b3f,-3.5,.45,2.35); c3.castShadow=true;
+  const barrel=cyl(.34,.85,0x8d5a2b,-1.6,.46,2.5); barrel.castShadow=true;
+  cyl(.36,.06,0x5d4037,-1.6,.66,2.5); cyl(.36,.06,0x5d4037,-1.6,.26,2.5);
+  const rope=new THREE.Mesh(new THREE.TorusGeometry(.28,.07,8,18),mat(0xd9b26a));
+  rope.rotation.x=Math.PI/2; rope.position.set(-4.6,.16,2.3); env.add(rope);
+  // 系船柱+灯
+  cyl(.14,.5,0x4e342e,-9.2,.4,-2.8); cyl(.14,.5,0x4e342e,-.6,.4,2.8);
+  cyl(.06,1.5,0x4e342e,-9.4,.85,2.9);
+  const lampM=new THREE.Mesh(new THREE.SphereGeometry(.15,10,8),new THREE.MeshBasicMaterial({color:G.island===3?0xff7043:0xffe08a}));
+  lampM.position.set(-9.4,1.68,2.9); env.add(lampM);
+  lampLight.position.set(-9.4,1.75,2.9); lampLight.color.setHex(G.island===3?0xff8a5e:0xffd9a0);
+  // ===== 商店摊 2.0 =====
+  const S=new THREE.Group(); S.position.set(-8.6,0,0); env.add(S);
+  const counter=box(2.3,.14,1.7,0x795548,0,.62,0,S); counter.castShadow=true;
+  box(2.3,.5,1.7,0x5d4037,0,.32,0,S);
+  cyl(.06,1.7,0x5d4037,-1,-.1,-.7,S); cyl(.06,1.7,0x5d4037,-1,-.1,.7,S);
+  cyl(.06,1.7,0x5d4037,1,-.1,-.7,S); cyl(.06,1.7,0x5d4037,1,-.1,.7,S);
+  for(let i=0;i<6;i++) box(.44,.08,2.1,i%2?0xf8bbd0:0xe57373,-1.1+i*.44,1.95,0,S); // 条纹棚
+  // 老板
+  const V=new THREE.Group(); V.position.set(0,0,.35); S.add(V);
+  cyl(.09,.5,0x3e5871,-.13,.25,.1,V); cyl(.09,.5,0x3e5871,.13,.25,.1,V);
+  cyl(.24,.62,0x4a7ba6,0,.75,0,V);
+  box(.34,.4,.1,0x7cb342,0,.7,-.22,V);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.2,10,8),mat(0xffcc99)); head.position.set(0,1.25,0); head.castShadow=true; V.add(head);
+  cyl(.24,.05,0xd9b26a,0,1.4,0,V);
+  cyl(.28,.03,0xd9b26a,0,1.44,0,V);
+  cyl(.06,.34,0x4a7ba6,-.28,.8,0,V); cyl(.06,.34,0x4a7ba6,.28,.8,0,V);
+  // 柜台展示鱼 + 金币
+  for(let k=0;k<3;k++){ const fm=makeCorpseMesh(false); fm.scale.setScalar(.8);
+    fm.position.set(-.6+k*.55,.75,-.25); fm.rotation.y=rnd(-.6,.6); S.add(fm); }
+  const coin=new THREE.Mesh(new THREE.SphereGeometry(.08,8,6),new THREE.MeshBasicMaterial({color:0xffd700}));
+  coin.position.set(.75,.75,.1); S.add(coin);
+  const s1=textSign('码头商店','站这按 E 卖鱼 · B 买装备');
+  s1.position.set(0,1.55,.75); S.add(s1);
+  // ===== 烤架 2.0 =====
+  const G2=new THREE.Group(); G2.position.set(-6.4,0,0); env.add(G2);
+  box(.95,.12,.65,0x37474f,0,.52,0,G2); cyl(.05,.5,0x455a64,-.35,.28,-.18,G2); cyl(.05,.5,0x455a64,.35,.28,.18,G2);
+  const skewer=new THREE.Mesh(new THREE.CylinderGeometry(.02,.02,.8,6),mat(0x9e9e9e));
+  skewer.rotation.z=Math.PI/2; skewer.position.set(0,.68,0); G2.add(skewer);
+  const sf=makeCorpseMesh(false); sf.scale.setScalar(.9); sf.rotation.y=Math.PI/2; sf.position.set(.1,.7,0); G2.add(sf);
+  grillFire=new THREE.Mesh(new THREE.ConeGeometry(.2,.5,8),new THREE.MeshBasicMaterial({color:0xff8a65}));
+  grillFire.position.set(-.1,.78,.1); G2.add(grillFire);
+  const grillFire2=new THREE.Mesh(new THREE.ConeGeometry(.13,.35,7),new THREE.MeshBasicMaterial({color:0xffb74d}));
+  grillFire2.position.set(.05,.72,-.12); G2.add(grillFire2);
+  fireLight.position.set(-6.4,.9,0);
+  const s2=textSign('烤鱼 ¥30','按 E 吃，回 50 血');
+  s2.position.set(0,1.35,.25); G2.add(s2);
+  // 远景岛
+  if(G.island===1){ cyl(7,3,0x7fb069,26,-1.5,-8,env); cyl(3,2.5,0x5d9146,28,0,-9,env); }
+  else if(G.island===2){ const r1=new THREE.Mesh(new THREE.ConeGeometry(5,7,6),mat(0x5c6b73)); r1.position.set(26,1.5,-8); env.add(r1); }
+  else{ const v=new THREE.Mesh(new THREE.ConeGeometry(8,12,7),mat(0x4a3b3b)); v.position.set(28,2,-10); env.add(v);
+        const lava=new THREE.Mesh(new THREE.SphereGeometry(1.4,10,8),new THREE.MeshBasicMaterial({color:0xff6b35})); lava.position.set(28,8.4,-10); env.add(lava); }
+  // 太阳 + 光晕
+  const s=new THREE.Mesh(new THREE.SphereGeometry(2.4,12,10),new THREE.MeshBasicMaterial({color:G.island===3?0xff8c42:0xfff3b0}));
+  s.position.set(40,22,-30); env.add(s);
+  const g1=new THREE.Mesh(new THREE.SphereGeometry(3.6,12,10),new THREE.MeshBasicMaterial({color:G.island===3?0xff8c42:0xfff3b0,transparent:true,opacity:.22}));
+  g1.position.copy(s.position); env.add(g1);
+  const g2=g1.clone(); g2.scale.setScalar(1.7); g2.material=g1.material.clone(); g2.material.opacity=.1; env.add(g2);
+  buildSpots();
+}
+let grillFire=null;
+
+/* ---- 生物网格 2.0 ---- */
+function makeFishMesh(sp,rare){
+  const g=new THREE.Group();
+  const s=sp.size*PX2M*1.6;
+  const c=rare?0xffd700:sp.color;
+  const bodyM=new THREE.MeshPhongMaterial({color:c,shininess:70,specular:0x666666});
+  const body=new THREE.Mesh(new THREE.SphereGeometry(s,14,10),bodyM);
+  body.scale.set(1.65,1,.85); body.castShadow=true; g.add(body);
+  // 白肚皮
+  const belly=new THREE.Mesh(new THREE.SphereGeometry(s*.9,12,8),new THREE.MeshPhongMaterial({color:0xf5f2e9,shininess:25}));
+  belly.scale.set(1.45,.5,.68); belly.position.y=-s*.35; g.add(belly);
+  // 背鳍
+  const dor=new THREE.Mesh(new THREE.ConeGeometry(s*.42,s*.75,5),bodyM);
+  dor.scale.z=.3; dor.position.set(-s*.15,s*.92,0); dor.rotation.z=-.35; g.add(dor);
+  // 尾鳍（摆动动画引用）
+  const tail=new THREE.Mesh(new THREE.ConeGeometry(s*.72,s*1.25,6),bodyM);
+  tail.rotation.z=Math.PI/2; tail.scale.z=.35; tail.position.x=-s*2.0; g.add(tail);
+  g.userData.tail=tail;
+  // 胸鳍×2
+  const pf=new THREE.Mesh(new THREE.ConeGeometry(s*.28,s*.6,5),bodyM);
+  pf.scale.set(1,.35,1); pf.rotation.x=Math.PI/2.2; pf.position.set(s*.25,-s*.12,s*.78); g.add(pf);
+  const pf2=pf.clone(); pf2.position.z=-s*.78; pf2.rotation.x=-Math.PI/2.2; g.add(pf2);
+  // 眼睛×2
+  for(const zn of [1,-1]){
+    const w2=new THREE.Mesh(new THREE.SphereGeometry(s*.16,8,6),new THREE.MeshBasicMaterial({color:0xffffff}));
+    w2.position.set(s*1.12,s*.24,zn*s*.4); g.add(w2);
+    const b2=new THREE.Mesh(new THREE.SphereGeometry(s*.085,6,5),new THREE.MeshBasicMaterial({color:0x111111}));
+    b2.position.set(s*1.19,s*.24,zn*s*.43); g.add(b2);
+  }
+  // 花纹条纹
+  if(['mackerel','bass','tuna'].includes(sp.id)){
+    const sm=new THREE.MeshPhongMaterial({color:new THREE.Color(c).multiplyScalar(.55),shininess:50});
+    [-.35,.15,.6].forEach(k=>{
+      const ring=new THREE.Mesh(new THREE.TorusGeometry(s*.82,s*.055,6,18),sm);
+      ring.rotation.y=Math.PI/2; ring.position.x=s*k; ring.scale.set(1,.95,.85); g.add(ring);
+    });
+  }
+  if(rare||sp.gold){
+    const spark=new THREE.Mesh(new THREE.SphereGeometry(.05,6,5),new THREE.MeshBasicMaterial({color:0xffffff}));
+    spark.position.set(0,s*1.15,0); g.add(spark); g.userData.spark=spark;
+  }
+  return g;
+}
+function makeCrabMesh(){
+  const g=new THREE.Group();
+  const b=new THREE.Mesh(new THREE.SphereGeometry(.28,10,8),mat(0xe64a19)); b.scale.set(1.3,.7,1); b.position.y=.2; g.add(b);
+  for(let i=-1;i<=1;i+=2)for(let j=0;j<2;j++){
+    const l=new THREE.Mesh(new THREE.CylinderGeometry(.03,.02,.5,5),mat(0xbf360c));
+    l.position.set(i*.3,.18,(j-.5)*.35); l.rotation.z=i*.7; g.add(l);
+  }
+  const cl=new THREE.Mesh(new THREE.SphereGeometry(.11,8,6),mat(0xff7043)); cl.position.set(.42,.26,.1); g.add(cl);
+  const cl2=cl.clone(); cl2.position.x=-.42; g.add(cl2);
+  return g;
+}
+function makeGullMesh(){
+  const g=new THREE.Group();
+  const b=new THREE.Mesh(new THREE.SphereGeometry(.22,8,7),mat(0xeceff1)); b.scale.set(1.6,1,.8); g.add(b);
+  const beak=new THREE.Mesh(new THREE.ConeGeometry(.06,.2,5),mat(0xffca28)); beak.rotation.z=-Math.PI/2; beak.position.x=.3; g.add(beak);
+  const w1=new THREE.Mesh(new THREE.BoxGeometry(.3,.02,.5),mat(0xcfd8dc)); w1.position.set(0,0,.3); g.add(w1);
+  const w2=w1.clone(); w2.position.z=-.3; g.add(w2);
+  g.userData.wings=[w1,w2];
+  return g;
+}
+function makeBossMesh(kind,size){
+  const s=size*PX2M*2.4, g=new THREE.Group();
+  if(kind==='puffer'){
+    const b=new THREE.Mesh(new THREE.SphereGeometry(s,16,14),new THREE.MeshPhongMaterial({color:0xd9c26a,shininess:40}));
+    b.castShadow=true; g.add(b); g.userData.body=b;
+    for(let i=0;i<16;i++){ const sp=new THREE.Mesh(new THREE.ConeGeometry(s*.08,s*.28,5),mat(0xb59a3f));
+      const a=rnd(6.28),b2=rnd(3.14); sp.position.set(Math.sin(b2)*Math.cos(a)*s,Math.cos(b2)*s,Math.sin(b2)*Math.sin(a)*s);
+      sp.lookAt(0,0,0); g.add(sp); }
+    // 大眼睛 + 嘴
+    for(const zn of [1,-1]){
+      const w2=new THREE.Mesh(new THREE.SphereGeometry(s*.22,10,8),new THREE.MeshBasicMaterial({color:0xffffff}));
+      w2.position.set(s*.75,s*.35,zn*s*.55); g.add(w2);
+      const p2=new THREE.Mesh(new THREE.SphereGeometry(s*.11,8,6),new THREE.MeshBasicMaterial({color:0x111111}));
+      p2.position.set(s*.88,s*.35,zn*s*.62); g.add(p2);
+    }
+    const mo=new THREE.Mesh(new THREE.SphereGeometry(s*.22,10,8),new THREE.MeshBasicMaterial({color:0x8a5a3b}));
+    mo.scale.set(1.3,.55,.8); mo.position.set(s*.92,-s*.18,0); g.add(mo);
+    const fin=new THREE.Mesh(new THREE.ConeGeometry(s*.3,s*.55,5),mat(0xb59a3f));
+    fin.position.set(-s*1.05,0,0); fin.rotation.z=Math.PI/2; g.add(fin);
+  }else if(kind==='spider'){
+    const b=new THREE.Mesh(new THREE.SphereGeometry(s*.8,12,10),mat(0xc0392b)); b.scale.set(1.4,.7,1.1);
+    b.position.y=s*.5; b.castShadow=true; g.add(b); g.userData.body=b;
+    for(let i=-1;i<=1;i+=2)for(let j=0;j<4;j++){
+      const l=new THREE.Mesh(new THREE.CylinderGeometry(.05,.03,s*1.5,5),mat(0x922b21));
+      l.position.set(i*s*.75,s*.45,(j-1.5)*s*.3); l.rotation.z=i*.95; g.add(l);
+    }
+    const c1=new THREE.Mesh(new THREE.SphereGeometry(s*.3,8,6),mat(0xe74c3c)); c1.position.set(s*1.1,s*.7,.25); g.add(c1);
+    const c2=c1.clone(); c2.position.z=-.25; g.add(c2);
+    // 眼柄×2
+    for(const zn of [.3,-.3]){
+      const st=new THREE.Mesh(new THREE.CylinderGeometry(.03,.03,s*.4,5),mat(0x922b21));
+      st.position.set(s*1.15,s*.85,zn*s*.6); st.rotation.z=-.5; g.add(st);
+      const w2=new THREE.Mesh(new THREE.SphereGeometry(s*.1,8,6),new THREE.MeshBasicMaterial({color:0xffffff}));
+      w2.position.set(s*1.3,s*1,zn*s*.6); g.add(w2);
+      const p2=new THREE.Mesh(new THREE.SphereGeometry(s*.05,6,5),new THREE.MeshBasicMaterial({color:0x111111}));
+      p2.position.set(s*1.36,s*1,zn*s*.6); g.add(p2);
+    }
+  }else{ // whale
+    const b=new THREE.Mesh(new THREE.SphereGeometry(s,18,14),new THREE.MeshPhongMaterial({color:0x37474f,shininess:30}));
+    b.scale.set(1.9,1,1); b.castShadow=true; g.add(b); g.userData.body=b;
+    const belly=new THREE.Mesh(new THREE.SphereGeometry(s*.94,16,12),new THREE.MeshPhongMaterial({color:0x78909c,shininess:20}));
+    belly.scale.set(1.75,.62,.92); belly.position.y=-s*.3; g.add(belly);
+    const t=new THREE.Mesh(new THREE.ConeGeometry(s*.5,s*1.2,6),mat(0x37474f)); t.rotation.z=Math.PI/2; t.position.x=s*2.2; g.add(t);
+    for(const zn of [1,-1]){
+      const pf=new THREE.Mesh(new THREE.ConeGeometry(s*.3,s*.9,6),mat(0x2c3b41));
+      pf.scale.z=.4; pf.rotation.x=zn*Math.PI/2.4; pf.position.set(s*.3,-s*.35,zn*s*.85); g.add(pf);
+    }
+    for(let i=0;i<5;i++){ const lv=new THREE.Mesh(new THREE.SphereGeometry(s*.08,6,5),new THREE.MeshBasicMaterial({color:0xff7043}));
+      lv.position.set(-s*.5+i*s*.4,s*.58,s*.25); g.add(lv); }
+    for(const zn of [1,-1]){
+      const eye=new THREE.Mesh(new THREE.SphereGeometry(s*.08,6,5),new THREE.MeshBasicMaterial({color:0xff5252}));
+      eye.position.set(s*1.35,s*.15,zn*s*.48); g.add(eye);
+    }
+  }
+  return g;
+}
+function makeCorpseMesh(gold){
+  const g=new THREE.Group();
+  const m=new THREE.Mesh(new THREE.SphereGeometry(.16,10,8),mat(gold?0xffd700:0xb0bec5));
+  m.scale.set(1.7,.55,.75); m.castShadow=true; g.add(m);
+  const tail=new THREE.Mesh(new THREE.ConeGeometry(.11,.2,5),mat(gold?0xffd700:0x90a4ae));
+  tail.rotation.z=Math.PI/2; tail.scale.z=.4; tail.position.x=-.3; g.add(tail);
+  const eye=new THREE.Mesh(new THREE.SphereGeometry(.03,6,5),new THREE.MeshBasicMaterial({color:0x111111}));
+  eye.position.set(.18,.03,.1); g.add(eye);
+  return g;
+}
+/* ---- 手持武器视图模型 ---- */
+const hand=new THREE.Group(); camera.add(hand); scene.add(camera);
+hand.position.set(.32,-.3,-.55);
+let handKind=null;
+function buildHand(id){
+  while(hand.children.length)hand.remove(hand.children[0]);
+  const wp=WEAPONS[id]; handKind=id;
+  const arm=new THREE.Mesh(new THREE.CylinderGeometry(.05,.06,.34,8),mat(0xffcc99));
+  arm.rotation.x=Math.PI/2.3; arm.position.set(0,-.08,.16); hand.add(arm);
+  if(id==='knife'){ const b=new THREE.Mesh(new THREE.BoxGeometry(.03,.05,.26),mat(0xcfd8dc)); b.position.set(0,.06,-.1); hand.add(b); }
+  else if(id==='baguette'){ const b=new THREE.Mesh(new THREE.CylinderGeometry(.035,.045,.62,8),mat(0xd9a05b)); b.rotation.x=Math.PI/2; b.position.set(0,.05,-.28); hand.add(b); }
+  else if(id==='pistol'){ const b=new THREE.Mesh(new THREE.BoxGeometry(.05,.08,.2),mat(0x455a64)); b.position.set(0,.05,-.1); hand.add(b);
+    const g2=new THREE.Mesh(new THREE.BoxGeometry(.04,.1,.05),mat(0x37474f)); g2.position.set(0,-.02,0); hand.add(g2); }
+  else if(id==='taser'){ const b=new THREE.Mesh(new THREE.CylinderGeometry(.025,.03,.4,8),mat(0x263238)); b.rotation.x=Math.PI/2; b.position.set(0,.05,-.2); hand.add(b);
+    const tip=new THREE.Mesh(new THREE.SphereGeometry(.04,8,6),new THREE.MeshBasicMaterial({color:0xfff59d})); tip.position.set(0,.05,-.42); hand.add(tip); }
+  else if(id==='shotgun'){ const b=new THREE.Mesh(new THREE.BoxGeometry(.05,.06,.5),mat(0x5d4037)); b.position.set(0,.05,-.25); hand.add(b);
+    const b2=new THREE.Mesh(new THREE.BoxGeometry(.04,.04,.3),mat(0x455a64)); b2.position.set(0,.09,-.3); hand.add(b2); }
+  else if(id==='tnt'){ const b=new THREE.Mesh(new THREE.BoxGeometry(.14,.18,.14),mat(0x8d6e63)); b.position.set(0,.06,-.1); hand.add(b);
+    const f=new THREE.Mesh(new THREE.BoxGeometry(.14,.04,.14),mat(0xff7043)); f.position.set(0,.16,-.1); hand.add(f); }
+}
+
+/* ---------- 飘字（DOM 投影） ---------- */
+const floatEls=[];
+function addFloat(txt,pos,color){
+  const el=document.createElement('div'); el.className='fl'; el.textContent=txt; el.style.color=color||'#fff';
+  $('floats').appendChild(el);
+  floatEls.push({el,pos:pos.clone(),t:1.5});
+}
+function splashAt(x,z,n){
+  for(let i=0;i<(n||8);i++) addFloat('·',new THREE.Vector3(x+rnd(-.3,.3),.3,z+rnd(-.3,.3)),'rgba(200,230,255,.9)');
+}
+
+/* ---------- 输入 ---------- */
+canvas.addEventListener('click',()=>{ ac()&&AC.state==='suspended'&&AC.resume();
+  if(G.state==='play'&&!G.ui&&document.pointerLockElement!==canvas){ try{canvas.requestPointerLock();}catch(e){} }
+});
+document.addEventListener('pointerlockchange',()=>{});
+addEventListener('mousemove',e=>{
+  if(document.pointerLockElement===canvas){
+    player.yaw-=e.movementX*.0024; player.pitch=clamp(player.pitch-e.movementY*.0022,-1.35,1.35);
+  }
+});
+addEventListener('mousedown',e=>{
+  ac()&&AC.state==='suspended'&&AC.resume();
+  if(e.button===0){ mouse.down=true; onLeft(); }
+  if(e.button===2){ mouse.rdown=true; onRight(true); }
+});
+addEventListener('mouseup',e=>{ if(e.button===0)mouse.down=false; if(e.button===2){ mouse.rdown=false; onRight(false);} });
+addEventListener('contextmenu',e=>e.preventDefault());
+addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase(); keys[k]=true;
+  if(k==='p'||k==='escape'){ if(G.state==='play')G.ui=G.ui==='pause'?null:'pause'; syncScreens(); }
+  if(k==='m'){ G.muted=!G.muted; }
+  if(G.state!=='play'||G.ui)return;
+  if(k==='b'){ G.ui=G.ui==='shop'?null:'shop'; syncScreens(); if(G.ui==='shop')renderShop(); }
+  if('1234567'.includes(k)){ const id=WORDER[+k-1]; if(G.weapons.includes(id)){ G.cur=id; buildHand(id); } }
+  if(k==='e')interact();
+  if(k===' ')e.preventDefault();
+});
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+addEventListener('blur',()=>{ if(G.state==='play'&&!G.ui)G.ui='pause',syncScreens(); });
+
+function fwdDir(){ return new THREE.Vector3(-Math.sin(player.yaw)*Math.cos(player.pitch),Math.sin(player.pitch),-Math.cos(player.yaw)*Math.cos(player.pitch)); }
+function onLeft(){
+  if(G.state!=='play'||G.ui)return;
+  if(rodS.state==='hooked')return;
+  tryAttack();
+}
+function onRight(down){
+  if(G.state!=='play'||G.ui)return;
+  if(down){
+    if(rodS.state==='idle'){ rodS.state='charge'; rodS.power=0; }
+    else if(rodS.state==='float'){ retractBobber(); }
+  }else if(rodS.state==='charge')doCast();
+}
+
+/* ---------- 流程 ---------- */
+function startGame(fresh){
+  if(fresh){
+    G.money=0;G.island=1;G.earnedI=0;G.soldI=0;G.rod=0;G.bait=0;
+    G.weapons=['fist'];G.cur='fist';G.items={};G.stats={earned:0,sold:0,killed:0,air:0,boss:0};
+    G.won=false;G.freeMode=false;G.timePlayed=0;G.bossOut=false;G.banner=null;
+    fishes=[];fly=[];gfish=[];corpses=[];bombs=[];balls=[];crabs=[];tracers=[];
+    gull=null;boss=null;player.hp=100;player.maxHp=100;player.carrying=[];player.knocked=0;player.mode='dock';
+    boat.pos.set(1.6,0,2.6); boat.heading=0; boat.speed=0; boat.last.copy(boat.pos);
+    player.pos.set(-4,1.6,0);
+    showBanner('🚩 第 1 岛 · 青螺岛\n目标：赚 ¥400、卖出 6 条鱼\n🚤 码头边按 E 上船 · 海鸥盘旋处是渔场',4.5);
+  }
+  buildEnv(); buildHand(G.cur); spawnPool();
+  G.state='play'; G.ui=null; syncScreens();
+  if(!fresh&&!G.banner&&!G.freeMode){ const isl=ISLANDS[G.island-1];
+    showBanner('🏝 回到第 '+G.island+' 岛 · '+isl.name+'\n还差 ¥'+fmt(Math.max(0,isl.goal.money-G.earnedI))+' / '+(isl.goal.fish?Math.max(0,isl.goal.fish-G.soldI)+' 条':''),3.5); }
+}
+function interact(){
+  if(player.knocked>0)return;
+  // 船上：E 下船
+  if(player.mode==='boat'){
+    if(boat.pos.x<2.0){
+      player.mode='dock'; player.pos.set(-.9,1.6,clamp(boat.pos.z,-2.8,2.8));
+      addFloat('回到码头',player.pos.clone(),'#8fd694');
+    }else{
+      player.mode='swim';
+      player.pos.set(boat.pos.x-Math.cos(boat.heading)*1.4,.5,boat.pos.z+Math.sin(boat.heading)*1.4);
+      SFX.splash(); splashAt(player.pos.x,player.pos.z,8);
+      addFloat('下海啦！E 可爬码头或回船',player.pos.clone(),'#9fe8ff');
+    }
+    return;
+  }
+  // 游泳：E 上岸/上船
+  if(player.mode==='swim'){
+    if(player.pos.x<2.2){
+      player.mode='dock'; player.pos.set(-.9,1.6,clamp(player.pos.z,-2.8,2.8));
+      addFloat('爬上码头',player.pos.clone(),'#8fd694'); SFX.jump();
+    }else if(Math.hypot(player.pos.x-boat.pos.x,player.pos.z-boat.pos.z)<2.2){
+      player.mode='boat'; addFloat('上船！WASD 开船 · E 下船',player.pos.clone(),'#ffe08a');
+    }else addFloat('离得太远，码头或船边才能上去',player.pos.clone(),'#9fb3c8');
+    return;
+  }
+  // 码头：卖鱼 / 烤鱼 / 上船
+  if(player.pos.x<-7.6){
+    if(!player.carrying.length){ addFloat('背包是空的，先去钓！',new THREE.Vector3(-8.6,1.6,0),'#9fb3c8'); return; }
+    let sum=0,n=0; player.carrying.forEach(c=>{sum+=c.val;n++;});
+    if(G.items.horn){ sum=Math.round(sum*1.15); addFloat('📣 「新鲜的好鱼！」+15%',new THREE.Vector3(-8.6,2,0),'#ffe08a'); }
+    G.money+=sum;G.earnedI+=sum;G.soldI+=n;G.stats.earned+=sum;G.stats.sold+=n;
+    player.carrying=[]; SFX.coin();
+    addFloat('+'+fmt(sum)+' 元 · 卖出 '+n+' 件',new THREE.Vector3(-8.6,1.8,0),'#ffd700');
+    save();
+  }else if(player.pos.x<-5.9&&player.pos.x>-7&&player.healCd<=0){
+    if(G.money<30){ addFloat('没钱买烤鱼（¥30）',new THREE.Vector3(-6.4,1.6,0),'#ff9f9f'); return; }
+    if(player.hp>=player.maxHp){ addFloat('血是满的',new THREE.Vector3(-6.4,1.6,0),'#9fb3c8'); return; }
+    G.money-=30; player.hp=Math.min(player.maxHp,player.hp+50); player.healCd=1; SFX.eat();
+    addFloat('🍖 烤鱼真香 +50 HP',new THREE.Vector3(-6.4,1.8,0),'#8fd694');
+  }else if(Math.hypot(player.pos.x-boat.pos.x,player.pos.z-boat.pos.z)<2.5&&boat.pos.x<2.8){
+    player.mode='boat';
+    addFloat('上船！WASD 开船 · 船上也能钓鱼开枪 · E 下船',player.pos.clone(),'#ffe08a');
+  }
+}
+let bannerT=null;
+function showBanner(txt,t){ $('banner').textContent=txt; $('banner').style.display='block';
+  if(bannerT)clearTimeout(bannerT); bannerT=setTimeout(()=>$('banner').style.display='none',t*1000); }
+
+/* ---------- 鱼群 ---------- */
+function islandPool(){ return SPECIES.filter(s=>s.islands.includes(G.island)); }
+function spawnFish(sp){
+  // 55% 刷在渔场附近（渔场的鱼更容易出珍品）
+  let x,z,lucky=false;
+  if(Math.random()<.55&&spots.length){
+    const s=spots[Math.floor(rnd(spots.length))];
+    x=s.x+rnd(-3.2,3.2); z=s.z+rnd(-3.2,3.2); lucky=true;
+  }else{ x=rnd(3,30); z=rnd(-9,9); }
+  x=clamp(x,1.8,33); z=clamp(z,-10,10);
+  const rc=(G.items.clover?.20:.12)*(lucky?1.8:1);
+  const rare=sp.gold||Math.random()<rc;
+  const m=makeFishMesh(sp,rare); scene.add(m);
+  const f={sp,rare,mesh:m,x,y:rnd(sp.depth[0],sp.depth[1]),z,dir:Math.random()<.5?1:-1,wob:rnd(6.28),scared:0,biteCd:0};
+  fishes.push(f);
+  if(sp.school)for(let i=1;i<sp.school;i++){
+    const r2=sp.gold||Math.random()<rc;
+    const m2=makeFishMesh(sp,r2); scene.add(m2);
+    fishes.push({sp,rare:r2,mesh:m2,x:clamp(f.x+rnd(-2,2),2,32),y:clamp(f.y+rnd(-.5,.5),sp.depth[0],sp.depth[1]),z:clamp(f.z+rnd(-1.5,1.5),-9,9),dir:f.dir,wob:rnd(6.28),scared:0,biteCd:0});
+  }
+}
+function pickDiverse(pool){
+  let p=pool.filter(sp=>!sp.weight||Math.random()<sp.weight); if(!p.length)p=pool;
+  const counts={}; fishes.forEach(f=>counts[f.sp.id]=(counts[f.sp.id]||0)+1);
+  const sorted=[...p].sort((a,b)=>(counts[a.id]||0)-(counts[b.id]||0));
+  return sorted[Math.floor(rnd(Math.min(2,sorted.length)))];
+}
+function spawnPool(){
+  fishes.forEach(f=>scene.remove(f.mesh)); fishes=[];
+  const pool=islandPool().filter(sp=>!sp.weight||Math.random()<sp.weight*3);
+  (pool.length?pool:islandPool()).forEach(sp=>spawnFish(sp));
+  let guard=0; while(fishes.length<9&&guard++<60)spawnFish(pickDiverse(islandPool()));
+}
+
+/* ---------- 伤害/击杀 ---------- */
+function hurtPlayer(dmg){
+  if(player.iv>0||player.knocked>0)return;
+  if(G.items.vest)dmg=Math.ceil(dmg*.75);
+  player.hp-=dmg;player.iv=.8;SFX.hurt();G.shake=Math.max(G.shake,.35);
+  if(player.hp<=0){
+    player.hp=0;player.knocked=2.2;
+    player.carrying.forEach(c=>{ const m=makeCorpseMesh(c.gold); const p=new THREE.Vector3(clamp(player.pos.x+rnd(-1,1),-9,-1),.12,clamp(player.pos.z+rnd(-1,1),-2.6,2.6));
+      scene.add(m); m.position.copy(p); corpses.push({val:c.val,label:c.label,gold:c.gold,mesh:m,pos:p}); });
+    player.carrying=[];
+    addFloat('你被干倒了…',player.pos.clone(),'#ff5252');
+  }
+}
+function hittables(){
+  const arr=[];
+  gfish.forEach(g=>arr.push({kind:'gfish',ref:g,pos:new THREE.Vector3(g.x,g.y,g.z),r:g.sp.size*PX2M+0.18}));
+  crabs.forEach(c=>arr.push({kind:'crab',ref:c,pos:new THREE.Vector3(c.x,.3,c.z),r:.4}));
+  if(gull&&gull.state!=='dead')arr.push({kind:'gull',ref:gull,pos:gull.pos.clone(),r:.45});
+  if(boss&&(boss.phase==='dock'||boss.phase==='beach'))arr.push({kind:'boss',ref:boss,pos:boss.pos.clone().add(new THREE.Vector3(0,boss.size*PX2M,0)),r:boss.size*PX2M*1.4});
+  return arr;
+}
+function damage(t,dmg,dir,wp){
+  const o=t.ref;
+  if(t.kind==='gfish'){
+    if(o.sp.zap&&wp&&wp.type==='melee'&&wp.id!=='taser'){ hurtPlayer(4); addFloat('⚡ 被电了！用枪打电鳗！',new THREE.Vector3(o.x,o.y+1,o.z),'#fff59d'); }
+    o.hp-=dmg;o.vy=Math.min(o.vy,2);o.vx=(dir||rnd(-1,1))*(o.base==='boat'?.5:1.4);
+    addFloat('-'+dmg,new THREE.Vector3(o.x,o.y+.8,o.z),'#e3f2fd');
+    if(o.hp<=0)killGfish(o);
+  }else if(t.kind==='crab'){
+    o.hp-=dmg; addFloat('-'+dmg,t.pos.clone(),'#ffb0b0');
+    if(o.hp<=0){ scene.remove(o.mesh); crabs.splice(crabs.indexOf(o),1); dropCorpse(o.x,o.z,45,'螃蟹',false); G.stats.killed++; addFloat('夹人的螃蟹变成了货 💰',t.pos.clone().add(new THREE.Vector3(0,1,0)),'#8fd694'); }
+  }else if(t.kind==='gull'){
+    o.hp-=dmg; addFloat('-'+dmg,o.pos.clone(),'#fff');
+    if(o.hp<=0){
+      if(o.carry){ const p=new THREE.Vector3(clamp(o.pos.x,-9,-1),.12,clamp(o.pos.z,-2.6,2.6)); dropCorpseAt(p,o.carry.val,o.carry.label,o.carry.gold); }
+      dropCorpse(o.pos.x,o.pos.z,25,'海鸥羽毛',false);
+      addFloat('海鸥被打了下来 🪶',o.pos.clone(),'#8fd694');
+      scene.remove(o.mesh); gull=null; G.gullT=32+rnd(18); G.stats.killed++;
+    }
+  }else if(t.kind==='boss')damageBoss(dmg);
+}
+function dropCorpse(x,z,val,label,gold,base){
+  if(base==='boat'){ // 落在船甲板上
+    const p=new THREE.Vector3(clamp(x,boat.pos.x-1.15,boat.pos.x+1.15),boat.pos.y+.5,clamp(z,boat.pos.z-1.15,boat.pos.z+1.15));
+    dropCorpseAt(p,val,label,gold);
+  }else{
+    const p=new THREE.Vector3(clamp(x,-9.5,-.5),.12,clamp(z,-2.6,2.6));
+    dropCorpseAt(p,val,label,gold);
+  }
+}
+function dropCorpseAt(p,val,label,gold){
+  const m=makeCorpseMesh(gold); scene.add(m); m.position.copy(p);
+  corpses.push({val,label,gold,mesh:m,pos:p});
+}
+function killGfish(o){
+  const idx=gfish.indexOf(o); if(idx<0)return;
+  gfish.splice(idx,1); G.stats.killed++;
+  const air=o.y>.25;
+  if(air)G.stats.air++;
+  const mult=(o.rare?5:1)*(air?3:1);
+  dropCorpse(o.x,o.z,o.sp.val*mult,(o.rare?'✨珍品·':'')+o.sp.name,o.rare,o.base);
+  scene.remove(o.mesh);
+  const p=new THREE.Vector3(o.x,o.y+1,o.z);
+  if(air)addFloat('空中击杀 ×3'+(o.rare?' ✨×5':'')+'！',p,'#ffd700');
+  else if(o.rare)addFloat('✨ 珍品 ×5！',p,'#ffd700');
+  else addFloat(o.sp.name+' +'+fmt(o.sp.val)+' 元',p,'#9fe8ff');
+  SFX.coin();
+}
+function tryAttack(){
+  if(player.knocked>0||player.cd>0)return;
+  if(rodS.state==='charge'||rodS.state==='fly')return;
+  const wp=WEAPONS[G.cur];
+  player.cd=wp.cd; player.swing=.22;
+  const fwd=fwdDir();
+  if(wp.type==='melee'){
+    SFX.whack();
+    for(const t of hittables()){
+      const to=t.pos.clone().sub(player.pos); const d=to.length();
+      to.normalize();
+      if(d<wp.range*PX2M+.6+t.r && to.dot(fwd)>.45 && Math.abs(t.pos.y-player.pos.y)<1.6){
+        let dmg=wp.dmg;
+        if(wp.crit&&Math.random()<wp.crit){ dmg*=wp.critMul; addFloat('法棍暴击！意外地疼！×'+wp.critMul,t.pos.clone().add(new THREE.Vector3(0,.6,0)),'#ff7043'); }
+        damage(t,dmg,fwd.x>0?1:-1,wp);
+        if(wp.chain&&t.kind==='gfish'){
+          gfish.forEach(g2=>{ if(g2!==t.ref&&Math.hypot(g2.x-t.pos.x,g2.z-t.pos.z)<2.2)
+            damage({kind:'gfish',ref:g2,pos:new THREE.Vector3(g2.x,g2.y,g2.z),r:.3},3,0,wp); });
+          for(let i=0;i<6;i++)addFloat('⚡',t.pos.clone().add(new THREE.Vector3(rnd(-.5,.5),rnd(0,.8),rnd(-.5,.5))),'#fff59d');
+        }
+      }
+    }
+  }else if(wp.type==='bomb'){
+    const v=fwdDir().multiplyScalar(9); v.y+=3.5;
+    bombs.push({pos:player.pos.clone().add(fwd.clone().multiplyScalar(.6)),v:v.clone(),mesh:(()=>{const m=new THREE.Mesh(new THREE.BoxGeometry(.22,.28,.22),mat(0x8d6e63));scene.add(m);return m;})()});
+    SFX.cast(); addFloat('💣 接好咧——',player.pos.clone().add(fwd.clone().multiplyScalar(2)),'#ffe08a');
+  }else{
+    SFX.gun(); G.shake=Math.max(G.shake,.12);
+    flash.position.copy(player.pos).add(fwd.clone().multiplyScalar(1)); flash.intensity=2.5;
+    const n=wp.pellets||1, maxD=wp.range?wp.range*PX2M:80;
+    const muzzle=player.pos.clone();
+    for(let i=0;i<n;i++){
+      const dir=fwd.clone(); if(n>1){ dir.x+=rnd(-wp.spread,wp.spread); dir.y+=rnd(-wp.spread,wp.spread); dir.z+=rnd(-wp.spread,wp.spread); dir.normalize(); }
+      // 手动射线求交（目标少，够快）
+      let best=null,bt=maxD;
+      for(const t of hittables()){
+        const to=t.pos.clone().sub(muzzle); const tt=to.dot(dir);
+        if(tt>0&&tt<bt){ const per=to.sub(dir.clone().multiplyScalar(tt)).length(); if(per<t.r){ best=t; bt=tt; } }
+      }
+      // 飞行中的鱼也能打
+      for(const f of fly){
+        const to=new THREE.Vector3(f.x,f.y,f.z).sub(muzzle); const tt=to.dot(dir);
+        if(tt>0&&tt<bt){ const per=to.sub(dir.clone().multiplyScalar(tt)).length(); if(per<f.sp.size*PX2M+.2){ best={kind:'fly',ref:f,pos:new THREE.Vector3(f.x,f.y,f.z),r:.3}; bt=tt; } }
+      }
+      const hitP=muzzle.clone().add(dir.clone().multiplyScalar(best?bt:maxD));
+      tracers.push({a:muzzle.clone().add(dir.clone().multiplyScalar(.8)),b:hitP,t:.06});
+      if(best){ if(best.kind==='fly')damageFly(best.ref,wp.dmg); else damage(best,wp.dmg,dir.x>0?1:-1,wp); }
+    }
+  }
+}
+function damageFly(f,dmg){
+  f.hp-=dmg;
+  if(f.hp<=0){
+    G.stats.air++;G.stats.killed++;
+    const mult=(f.rare?5:1)*3;
+    dropCorpse(f.x,f.z,f.sp.val*mult,(f.rare?'✨珍品·':'')+f.sp.name+'(空中!)',f.rare,f.base);
+    addFloat('空中击杀 ×3'+(f.rare?' ✨×5':'')+'！',new THREE.Vector3(f.x,f.y+1,f.z),'#ffd700');
+    scene.remove(f.mesh); fly.splice(fly.indexOf(f),1); SFX.coin();
+  }
+}
+
+/* ---------- 小船 & 渔场 ---------- */
+const boat={pos:new THREE.Vector3(1.6,0,2.6),heading:0,speed:0,mesh:null,last:new THREE.Vector3(1.6,0,2.6)};
+const SPOT_POS={1:[[10,-6],[20,4],[30,-3]],2:[[9,5],[19,-7],[29,2]],3:[[8,-4],[22,5],[32,-6]]};
+let spots=[];
+function makeBoatMesh(){
+  const g=new THREE.Group();
+  const hull=box(1.9,.5,.9,0x8d6e63,0,0,0,g); hull.castShadow=true;
+  const bow=new THREE.Mesh(new THREE.ConeGeometry(.45,1.1,4),mat(0x8d6e63));
+  bow.rotation.z=-Math.PI/2; bow.rotation.y=Math.PI/4; bow.position.set(1.45,.02,0); bow.scale.set(1,.55,1); g.add(bow);
+  box(1.7,.14,.7,0x5d4037,0,.3,0,g);                                  // 甲板
+  box(1.7,.3,.08,0xa1887f,0,.2,.44,g); box(1.7,.3,.08,0xa1887f,0,.2,-.44,g); // 船舷
+  box(.5,.1,.5,0x795548,-.2,.42,0,g);                                  // 座位
+  const mot=box(.22,.4,.3,0x455a64,-1.05,.35,0,g);                     // 舷外机
+  const prop=cyl(.14,.06,0x37474f,-1.16,.15,0,g); prop.rotation.z=Math.PI/2;
+  cyl(.04,.5,0xb0bec5,.6,.5,0,g); cyl(.04,.5,0xb0bec5,.6,.5,.3,g);     // 钓竿架
+  return g;
+}
+boat.mesh=makeBoatMesh(); scene.add(boat.mesh);
+const spotGroup=new THREE.Group(); scene.add(spotGroup);
+function buildSpots(){
+  while(spotGroup.children.length)spotGroup.remove(spotGroup.children[0]);
+  spots=SPOT_POS[G.island].map(([x,z])=>{
+    const ring=new THREE.Mesh(new THREE.TorusGeometry(3.6,.14,6,36),
+      new THREE.MeshBasicMaterial({color:0xfff3b0,transparent:true,opacity:.35}));
+    ring.rotation.x=-Math.PI/2; ring.position.set(x,.25,z); spotGroup.add(ring);
+    const gullM=makeGullMesh(); gullM.scale.setScalar(.7); spotGroup.add(gullM);
+    return {x,z,ring,gullM,ph:rnd(6.28)};
+  });
+}
+function inSpot(x,z){ return spots.some(s=>Math.hypot(s.x-x,s.z-z)<4.2); }
+
+/* ---------- 鱼竿 ---------- */
+function retractBobber(){ if(rodS.bob){scene.remove(rodS.bob);rodS.bob=null;} rodS.state='idle'; splashAt(rodS.bobX||1,0,3); }
+function doCast(){
+  const rod=RODS[G.rod];
+  const dir=fwdDir(); dir.y+=.25; dir.normalize();
+  const v=dir.multiplyScalar((8+8*rodS.power)*rod.cast);
+  const m=new THREE.Mesh(new THREE.SphereGeometry(.09,8,6),mat(0xe57373));
+  scene.add(m);
+  rodS.bob={pos:player.pos.clone().add(fwdDir().multiplyScalar(.8)),v:v.clone(),mesh:m};
+  rodS.state='fly'; rodS.floatT=0; SFX.cast();
+}
+function updateRod(dt){
+  const rod=RODS[G.rod];
+  if(rodS.state==='charge'){ rodS.power=Math.min(1,rodS.power+dt*1.15); }
+  else if(rodS.state==='fly'&&rodS.bob){
+    const b=rodS.bob;
+    b.v.y-=9*dt; b.pos.addScaledVector(b.v,dt);
+    b.mesh.position.copy(b.pos);
+    if(b.pos.y<=waveH(b.pos.x,b.pos.z,G.t)+.05){
+      if(b.pos.x>.5){ rodS.state='float'; SFX.splash(); splashAt(b.pos.x,b.pos.z,8); }
+      else{ scene.remove(b.mesh); rodS.bob=null; rodS.state='idle'; addFloat('钓到甲板上了…',player.pos.clone(),'#9fb3c8'); }
+    }
+  }
+  else if(rodS.state==='float'&&rodS.bob){
+    rodS.floatT+=dt;
+    const b=rodS.bob;
+    b.pos.y=waveH(b.pos.x,b.pos.z,G.t)+.08; b.mesh.position.copy(b.pos);
+    if(boss&&boss.phase==='lurk'&&boss.kind!=='spider'){
+      if(Math.hypot(boss.x-b.pos.x,boss.z-b.pos.z)<1.6){ hookBoss(); return; }
+    }
+    if(rodS.floatT>.6){
+      const spotBonus=inSpot(b.pos.x,b.pos.z)?1.6:1;
+      for(const f of fishes){
+        if(f.scared>0)continue;
+        const d=Math.hypot(f.x-b.pos.x,f.z-b.pos.z);
+        if(d<rod.hookR*PX2M*4){
+          f.x+=(b.pos.x-f.x)*dt*.9; f.z+=(b.pos.z-f.z)*dt*.9; f.y+=(-0.9-f.y)*dt*.9;
+        }
+        if(d<f.sp.size*PX2M+.5&&f.biteCd<=0){
+          f.biteCd=.5;
+          if(Math.random()<.7*spotBonus*BAITS[G.bait].bite){ hookFish(f); return; }
+          else f.scared=1.6;
+        }
+      }
+    }
+  }
+  else if(rodS.state==='hooked'){
+    const R=rodS.reel;
+    const pull=R.boss? R.pull*(R.stam<25?.55:1) : R.fish.sp.pull*(R.stam<25?.5:1);
+    if(mouse.down){
+      R.prog+=rod.reel*(R.stam<25?1.8:1)*dt;
+      R.tension+=(pull*1.15-rod.line*.55)*dt;
+    }else{ R.tension-=55*dt; R.prog-=pull*.12*dt; }
+    R.tension=Math.max(0,R.tension); R.prog=Math.max(0,R.prog);
+    R.stam-=(R.tension>65?30:9)*dt;
+    if(R.fish){ R.fish.x=lerpN(R.fish.x,1.2,R.prog/900); R.fish.y=lerpN(R.fish.y,-.6,R.prog/900); }
+    if(boss&&R.boss){ boss.x=lerpN(boss.x,2,R.prog/1200); }
+    if(R.tension>=100){
+      SFX.snap(); splashAt(1.5,0,10); addFloat('啪！线断了！',player.pos.clone().add(fwdDir().multiplyScalar(3)),'#ff7a7a');
+      if(R.boss&&boss){ boss.stamPersist=Math.min(BOSS_DEF[boss.kind].stam,R.stam+40); boss.phase='lurk'; boss.x=clamp(boss.x,8,20); }
+      if(R.fish)R.fish.scared=2.5;
+      rodS.state='idle'; if(rodS.bob){scene.remove(rodS.bob);rodS.bob=null;} rodS.hook=null; rodS.reel=null;
+    }else if(R.prog>=100)landCatch();
+  }
+}
+const lerpN=(a,b,t)=>a+(b-a)*Math.min(1,t);
+function hookFish(f){
+  fishes.splice(fishes.indexOf(f),1);
+  rodS.state='hooked'; rodS.hook=f;
+  rodS.reel={fish:f,boss:false,tension:20,prog:0,stam:100};
+  SFX.bite(); splashAt(f.x,f.z,6);
+  addFloat('咬钩了！按住左键收线',new THREE.Vector3(f.x,1.5,f.z),'#ffd700');
+  G.shake=Math.max(G.shake,.15);
+}
+function hookBoss(){
+  rodS.state='hooked';
+  const full=BOSS_DEF[boss.kind].stam;
+  rodS.reel={fish:null,boss:true,tension:25,prog:0,stam:boss.stamPersist!==undefined?boss.stamPersist:full,pull:BOSS_DEF[boss.kind].pull};
+  boss.phase='reel'; SFX.bite(); SFX.boss(); G.shake=.4;
+  addFloat('挂住了 '+ISLANDS[G.island-1].bossName+'！',player.pos.clone().add(fwdDir().multiplyScalar(4)),'#ff9f43');
+}
+function landCatch(){
+  const R=rodS.reel;
+  if(rodS.bob){scene.remove(rodS.bob);rodS.bob=null;}
+  if(R.boss){
+    if(boss.kind==='puffer'){
+      boss.phase='dock'; boss.hp=BOSS_DEF.puffer.hp; boss.maxHp=boss.hp;
+      boss.x=-3;boss.z=0;boss.vx=0;boss.vy=0;boss.onGround=true;boss.hopT=3;boss.tele=0;
+      splashAt(0,0,16); SFX.boss(); G.shake=.5;
+      showBanner('大河豚上岸了！\n趁它跳回海里之前打晕它——它跳起来时你也跳！',4);
+    }else{
+      boss.phase='beach'; boss.hp=BOSS_DEF.whale.hp; boss.maxHp=boss.hp;
+      boss.x=1.6;boss.z=0;boss.spitT=2.5;
+      splashAt(1.5,0,20); SFX.boss(); G.shake=.6;
+      showBanner('巨鲸搁浅了！\n小心它喷水球——看它张嘴就侧跳！',4);
+    }
+  }else{
+    const f=R.fish;
+    let tx,tz,base;
+    if(player.mode==='boat'){ // 拉到船甲板上
+      base='boat';
+      tx=boat.pos.x+Math.cos(boat.heading)*rnd(-.2,.5);
+      tz=boat.pos.z-Math.sin(boat.heading)*rnd(-.2,.5);
+    }else if(player.mode==='swim'){ // 游泳时拖上来直接落海
+      base='water';
+      const fw=fwdDir(); tx=clamp(player.pos.x+fw.x*1.5,.5,37); tz=clamp(player.pos.z+fw.z*1.5,-12,12);
+      addFloat('你人在海里——鱼直接落回海里了！上船再钓！',new THREE.Vector3(tx,1.2,tz),'#ff9f9f');
+    }else{ base='dock'; tx=rnd(-8,-1); tz=rnd(-2.4,2.4); }
+    const T=.9;
+    const m=f.mesh;
+    fly.push({sp:f.sp,rare:f.rare,hp:f.sp.hp,x:f.x,y:.8,z:f.z,vx:(tx-f.x)/T,vz:(tz-f.z)/T,vy:4.6,hitP:false,base,mesh:m});
+    splashAt(f.x,f.z,10);
+    if(base!=='water')addFloat('拖上'+(base==='boat'?'船了！别让它蹦下海！':'岸了！快去打晕它！'),new THREE.Vector3(f.x,1.4,f.z),'#ffd700');
+  }
+  rodS.state='idle'; rodS.hook=null; rodS.reel=null;
+}
+
+/* ---------- 各实体更新 ---------- */
+function updateFishes(dt){
+  if(fishes.length<9&&Math.random()<dt*.6)spawnFish(pickDiverse(islandPool()));
+  for(const f of fishes){
+    f.biteCd=Math.max(0,f.biteCd-dt); f.wob+=dt*2;
+    if(f.scared>0){ f.scared-=dt; f.x+=1.5*dt; f.z+=Math.sin(G.t*8)*dt; }
+    else{
+      const sp=f.sp.speed*(f.sp.drunk?1.2:1);
+      f.x+=f.dir*sp*dt; f.z+=Math.sin(f.wob*.7)*(f.sp.drunk?1.2:.3)*dt;
+      f.y+=Math.sin(f.wob)*.15*dt;
+      if(Math.random()<dt*.3)f.dir*=-1;
+    }
+    f.x=clamp(f.x,1.5,34); f.z=clamp(f.z,-10,10); f.y=clamp(f.y,f.sp.depth[0],f.sp.depth[1]);
+    if(f.x<=1.6)f.dir=1; if(f.x>=33)f.dir=-1;
+    f.mesh.position.set(f.x,f.y,f.z);
+    f.mesh.rotation.y=f.dir>0?-Math.PI/2:Math.PI/2;
+    f.mesh.rotation.z=Math.sin(f.wob*2)*.15;
+    const tl=f.mesh.userData.tail; if(tl)tl.rotation.y=Math.sin(G.t*8+f.wob)*.45;
+  }
+}
+function updateFly(dt){
+  for(let i=fly.length-1;i>=0;i--){
+    const f=fly[i];
+    const gy=f.base==='boat'?boat.pos.y+.42:.12;
+    f.vy-=10*dt; f.x+=f.vx*dt; f.y+=f.vy*dt; f.z+=f.vz*dt;
+    f.mesh.position.set(f.x,f.y,f.z);
+    f.mesh.rotation.z+=dt*8;
+    if(!f.hitP&&f.sp.landDmg&&f.base==='dock'&&f.x<0&&Math.hypot(f.x-player.pos.x,f.z-player.pos.z)<.9&&f.y<1.8){ f.hitP=true; hurtPlayer(12); }
+      if(f.vy<0&&f.y<=gy+(f.base==='boat'?0:.04)){
+      if(f.base==='water'){ splashAt(f.x,f.z,8); scene.remove(f.mesh); fly.splice(i,1); continue; }
+      f.vy=0; f.mesh.rotation.set(0,0,0);
+      gfish.push({sp:f.sp,rare:f.rare,base:f.base,x:f.x,z:clamp(f.z,-2.8,2.8),y:gy+.02,vx:0,vz:0,vy:0,hp:f.sp.hp,onGround:true,
+        flopT:f.base==='boat'?rnd(1.0,1.8):rnd(.4,.9),spikeCd:0,mesh:f.mesh});
+      fly.splice(i,1); SFX.whack();
+    }
+  }
+}
+function updateGfish(dt){
+  for(let i=gfish.length-1;i>=0;i--){
+    const g=gfish[i];
+    const gy=g.base==='boat'?boat.pos.y+.44:.16;
+    if(!g.onGround){ g.vy-=11*dt; g.x+=g.vx*dt; g.z+=g.vz*dt; g.y+=g.vy*dt; }
+    else{ g.vx*=Math.pow(.02,dt); g.vz*=Math.pow(.02,dt); g.flopT-=dt;
+      if(g.flopT<=0){
+        g.onGround=false;
+        let dir;
+        if(g.sp.chase){ const dx=player.pos.x-g.x,dz=player.pos.z-g.z,l=Math.hypot(dx,dz)||1; g.vx=dx/l*2.2; g.vz=dz/l*2.2; }
+        else{ dir=Math.random()<(g.base==='boat'?.55:.78)?1:-1; g.vx=dir*(2+g.sp.size*.05); g.vz=rnd(-1,1); }
+        let vigor=g.sp.weak?.45:1;
+        if(g.base==='boat')vigor*=.7;   // 船上蹦得收敛些，给玩家机会
+        g.vy=(3+rnd(1.5))*vigor; g.vx*=vigor; g.vz*=vigor;
+        g.flopT=(g.sp.weak?1.2:.6)+rnd(g.sp.weak?1.2:.9);
+        tone(200+rnd(100),.06,'sine',.03);
+      }
+    }
+    if(g.y<=gy){ g.y=gy; if(!g.onGround){g.onGround=true;g.vy=0;} }
+    // 逃逸判定：船上的掉海里，岸上的蹦回海里
+    let escaped=false;
+    if(g.base==='boat'){
+      g.x=clamp(g.x,boat.pos.x-1.4,boat.pos.x+1.4); g.z=clamp(g.z,boat.pos.z-1.4,boat.pos.z+1.4);
+      if(Math.hypot(g.x-boat.pos.x,g.z-boat.pos.z)>=1.35)escaped=true;
+    }else{
+      g.x=clamp(g.x,-9.6,1.2); g.z=clamp(g.z,-2.7,2.7);
+      if(g.x>=0)escaped=true;
+    }
+    if(escaped){
+      scene.remove(g.mesh); gfish.splice(i,1); splashAt(g.x,g.z,8);
+      addFloat('一条'+(g.rare?'珍品':'')+g.sp.name+(g.base==='boat'?'从船上蹦进海里了！':'蹦回海里了！'),new THREE.Vector3(g.x,1.5,g.z),'#ff9f9f');
+      continue;
+    }
+    g.mesh.position.set(g.x,g.y+(g.onGround?g.sp.size*PX2M*.55:0),g.z);
+    if(g.onGround){ g.mesh.rotation.y+=dt*3; const tl=g.mesh.userData.tail; if(tl)tl.rotation.y=Math.sin(G.t*7)*.5; }
+    if(g.sp.spike){ g.spikeCd=Math.max(0,g.spikeCd-dt);
+      if(g.spikeCd<=0&&Math.hypot(g.x-player.pos.x,g.z-player.pos.z)<.8&&player.pos.y<1.8){ g.spikeCd=1; hurtPlayer(5); } }
+    if(g.sp.chase){ g.spikeCd=Math.max(0,g.spikeCd-dt);
+      if(g.spikeCd<=0&&Math.hypot(g.x-player.pos.x,g.z-player.pos.z)<.7&&player.pos.y<1.8){ g.spikeCd=1; hurtPlayer(4); } }
+  }
+}
+function updatePlayer(dt){
+  player.iv=Math.max(0,player.iv-dt); player.healCd=Math.max(0,player.healCd-dt);
+  player.cd=Math.max(0,player.cd-dt); player.swing=Math.max(0,player.swing-dt);
+  if(player.knocked>0){
+    player.knocked-=dt;
+    if(player.knocked<=0){
+      if(G.items.crown){ player.hp=player.maxHp; addFloat('👑 咸鱼翻身！满血复活！',player.pos.clone(),'#ffd700'); }
+      else player.hp=Math.max(60,player.maxHp*.6);
+      player.mode='dock'; player.pos.set(-8,1.6,0); addFloat('醒了，接着干！',player.pos.clone(),'#8fd694');
+    }
+  }else if(player.mode==='boat'){
+    player.pos.set(boat.pos.x+Math.cos(boat.heading)*.2, boat.pos.y+1.15, boat.pos.z-Math.sin(boat.heading)*.2);
+  }else if(player.mode==='swim'){
+    const spd=2.3;
+    let mx=0,mz=0;
+    if(keys['w']||keys['arrowup'])mz-=1; if(keys['s']||keys['arrowdown'])mz+=1;
+    if(keys['a']||keys['arrowleft'])mx-=1; if(keys['d']||keys['arrowright'])mx+=1;
+    const len=Math.hypot(mx,mz)||1;
+    const sin=Math.sin(player.yaw),cos=Math.cos(player.yaw);
+    player.pos.x+=((mx*cos+mz*sin)/len)*spd*dt;
+    player.pos.z+=((-mx*sin+mz*cos)/len)*spd*dt;
+    player.pos.x=clamp(player.pos.x,.5,38); player.pos.z=clamp(player.pos.z,-13,13);
+    player.pos.y=.45+waveH(player.pos.x,player.pos.z,G.t)*.6;
+  }else{ // dock
+    const spd=4.2;
+    let mx=0,mz=0;
+    if(keys['w']||keys['arrowup'])mz-=1; if(keys['s']||keys['arrowdown'])mz+=1;
+    if(keys['a']||keys['arrowleft'])mx-=1; if(keys['d']||keys['arrowright'])mx+=1;
+    const len=Math.hypot(mx,mz)||1;
+    const sin=Math.sin(player.yaw),cos=Math.cos(player.yaw);
+    player.pos.x+=((mx*cos+mz*sin)/len)*spd*dt;
+    player.pos.z+=((-mx*sin+mz*cos)/len)*spd*dt;
+    if(keys[' ']&&player.onGround){ player.vy=4.6; player.onGround=false; SFX.jump(); }
+    player.vy-=12*dt; player.pos.y+=player.vy*dt;
+    if(player.pos.y<=1.6){ player.pos.y=1.6; player.vy=0; player.onGround=true; }
+    player.pos.x=Math.max(player.pos.x,-9.6);
+    // 走出码头边缘 → 落水游泳
+    if((player.pos.x>-.15||Math.abs(player.pos.z)>3.05)&&player.pos.y<=1.62){
+      player.mode='swim'; player.pos.x=Math.max(player.pos.x,.4);
+      SFX.splash(); splashAt(player.pos.x,clamp(player.pos.z,-3,3),10);
+      addFloat('扑通！下水了（游回码头按 E 爬上）',player.pos.clone(),'#9fe8ff');
+    }else player.pos.z=clamp(player.pos.z,-3.05,3.05);
+  }
+  // 拾取（任何模式）
+  for(let i=corpses.length-1;i>=0;i--){
+    const c=corpses[i];
+    if(Math.hypot(c.pos.x-player.pos.x,c.pos.z-player.pos.z)<.9){
+      if(player.carrying.length<4){ corpses.splice(i,1); scene.remove(c.mesh); player.carrying.push(c); tone(520+player.carrying.length*60,.07,'square',.05); }
+      else if(G.t-player._fullMsg>1.2){ player._fullMsg=G.t; addFloat('背包满了（4/4），先去码头卖！',player.pos.clone(),'#ffb74d'); }
+    }
+  }
+  camera.position.copy(player.pos);
+  if(player.mode==='swim')camera.position.y+=Math.sin(G.t*2.2)*.05;
+  if(G.shake>0){ camera.position.x+=rnd(-G.shake,G.shake)*.06; camera.position.y+=rnd(-G.shake,G.shake)*.06; }
+  camera.rotation.set(player.pitch,player.yaw,player.mode==='swim'?Math.sin(G.t*1.8)*.03:0);
+  // 手部动画（游泳时收起）
+  hand.visible=player.mode!=='swim';
+  const sw=player.swing>0?(player.swing/.22):0;
+  hand.rotation.x=sw?-(1-sw)*1.4+(sw*1.4):Math.sin(G.t*2)*.02;
+  hand.position.y=-.3+(rodS.state==='charge'?-.06*rodS.power:0)+sw*.05;
+  flash.intensity=Math.max(0,flash.intensity-dt*22);
+}
+function updateBoat(dt){
+  if(player.mode==='boat'&&player.knocked<=0){
+    // A/D = 转视角（与鼠标一致）；按油门时船头平滑追向视线方向
+    const th=((keys['a']||keys['arrowleft'])?1:0)-((keys['d']||keys['arrowright'])?1:0);
+    player.yaw+=th*1.5*dt;
+    const driving=(keys['w']||keys['arrowup']||keys['s']||keys['arrowdown']);
+    if(driving){
+      const targetH=Math.atan2(Math.cos(player.yaw),-Math.sin(player.yaw)); // 视线方向 → 船头方向
+      let dh=((targetH-boat.heading+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;
+      boat.heading+=clamp(dh,-2.8*dt,2.8*dt);
+    }
+    const acc=((keys['w']||keys['arrowup'])?1:0)-((keys['s']||keys['arrowdown'])?.7:0);
+    boat.speed+=acc*4.5*dt;
+    boat.speed*=Math.pow(.5,dt);
+    boat.speed=clamp(boat.speed,-2.2,7.5);
+    boat.pos.x+=Math.cos(boat.heading)*boat.speed*dt;
+    boat.pos.z-=Math.sin(boat.heading)*boat.speed*dt;
+    if(boat.pos.x<0.7){ boat.pos.x=0.7; boat.speed=Math.max(0,boat.speed); }
+    boat.pos.x=Math.min(boat.pos.x,38); boat.pos.z=clamp(boat.pos.z,-13,13);
+    if(Math.abs(boat.speed)>.5&&Math.random()<dt*7)
+      splashAt(boat.pos.x-Math.cos(boat.heading)*1.2,boat.pos.z+Math.sin(boat.heading)*1.2,2);
+  }else boat.speed*=Math.pow(.3,dt);
+  boat.pos.y=waveH(boat.pos.x,boat.pos.z,G.t)*.7+.18;
+  boat.mesh.position.copy(boat.pos);
+  boat.mesh.rotation.y=-boat.heading;
+  boat.mesh.rotation.z=Math.sin(G.t*1.7)*.04;
+  boat.mesh.rotation.x=Math.sin(G.t*1.3+1)*.05;
+  // 船上的甲板鱼跟着船走
+  const dx=boat.pos.x-boat.last.x, dz=boat.pos.z-boat.last.z;
+  if(dx||dz)gfish.forEach(g=>{ if(g.base==='boat'){ g.x+=dx; g.z+=dz; } });
+  boat.last.copy(boat.pos);
+  // 渔场动效
+  spots.forEach(s=>{
+    s.ring.material.opacity=.2+Math.sin(G.t*2+s.ph)*.12;
+    s.ring.scale.setScalar(1+Math.sin(G.t*1.5+s.ph)*.08);
+    s.gullM.position.set(s.x+Math.cos(G.t*.7+s.ph)*3.2,4.5+Math.sin(G.t*1.1+s.ph)*.5,s.z+Math.sin(G.t*.7+s.ph)*3.2);
+    s.gullM.rotation.y=G.t*.7+s.ph;
+    const w=s.gullM.userData.wings;
+    if(w){const f2=Math.sin(G.t*12)*.5; w[0].rotation.x=f2; w[1].rotation.x=-f2;}
+  });
+}
+function updateBombs(dt){
+  for(let i=bombs.length-1;i>=0;i--){
+    const b=bombs[i];
+    b.v.y-=10*dt; b.pos.addScaledVector(b.v,dt);
+    b.mesh.position.copy(b.pos); b.mesh.rotation.x+=dt*6;
+    if(b.pos.y<=.14||b.pos.x>0.3){
+      scene.remove(b.mesh); bombs.splice(i,1);
+      G.shake=Math.max(G.shake,.5); SFX.boss();
+      const ex=Math.max(b.pos.x,.3);
+      for(let k=0;k<14;k++)addFloat('💥',new THREE.Vector3(ex+rnd(-1,1),rnd(.2,1.6),b.pos.z+rnd(-1,1)),'#ffab40');
+      if(b.pos.x>0.3){ splashAt(b.pos.x,b.pos.z,14); addFloat('炸药喂鱼了…',new THREE.Vector3(1,1.5,b.pos.z),'#9fb3c8'); continue; }
+      for(const t of hittables()){ if(t.pos.distanceTo(new THREE.Vector3(ex,.3,b.pos.z))<3)damage(t,10,t.pos.x>ex?1:-1,WEAPONS.tnt); }
+      if(player.pos.distanceTo(new THREE.Vector3(ex,.3,b.pos.z))<2.6&&player.knocked<=0){ hurtPlayer(10); addFloat('💥 炸到自己了！离远点扔！',player.pos.clone(),'#ff7043'); }
+    }
+  }
+}
+function updateBalls(dt){
+  for(let i=balls.length-1;i>=0;i--){
+    const b=balls[i];
+    b.v.y-=7*dt; b.pos.addScaledVector(b.v,dt);
+    b.mesh.position.copy(b.pos);
+    if(b.pos.distanceTo(player.pos)<.8){ hurtPlayer(15); splashAt(b.pos.x,b.pos.z,6); scene.remove(b.mesh); balls.splice(i,1); continue; }
+    if(b.pos.y<=.1){ splashAt(b.pos.x,b.pos.z,6); scene.remove(b.mesh); balls.splice(i,1); }
+  }
+}
+function updateGull(dt){
+  if(!gull){
+    if(corpses.length>0){ G.gullT-=dt;
+      if(G.gullT<=0){ const m=makeGullMesh(); scene.add(m);
+        gull={mesh:m,pos:new THREE.Vector3(14,6,rnd(-2,2)),state:'in',t:0,target:null,carry:null,hp:3}; SFX.gull(); } }
+    return;
+  }
+  const g=gull; g.t+=dt;
+  const hover=new THREE.Vector3(-4,5.5,0);
+  if(g.state==='in'){ g.pos.lerp(hover,dt*1.5); if(g.pos.distanceTo(hover)<1)g.state='hover'; }
+  else if(g.state==='hover'){
+    g.pos.x=hover.x+Math.sin(G.t*1.3)*3; g.pos.z=hover.z+Math.sin(G.t*.9)*2; g.pos.y=hover.y+Math.sin(G.t*2.4)*.5;
+    if(g.t>2.5&&corpses.length>0){
+      let best=null,bd=1e9;
+      for(const c of corpses){const d=g.pos.distanceTo(c.pos.clone().add(new THREE.Vector3(0,.3,0)));if(d<bd){bd=d;best=c;}}
+      if(best){g.target=best;g.state='dive';SFX.gull();}
+    }
+  }else if(g.state==='dive'){
+    const tp=g.target?(g.target.pos.clone().add(new THREE.Vector3(0,.3,0))):null;
+    if(!tp||!corpses.includes(g.target)){g.state='hover';g.t=0;return;}
+    const dir=tp.clone().sub(g.pos); const d=dir.length(); dir.normalize();
+    g.pos.addScaledVector(dir,6*dt); g.mesh.lookAt(tp);
+    if(d<.4){ corpses.splice(corpses.indexOf(g.target),1); g.carry=g.target; g.state='rise'; }
+  }else if(g.state==='rise'){ g.pos.y+=3.5*dt; if(g.pos.y>5.5)g.state='flee'; }
+  else if(g.state==='flee'){ g.pos.x+=8*dt; if(g.pos.x>16){ addFloat('海鸥叼走了你的渔获！下次动作快点！',new THREE.Vector3(-2,3,0),'#ff9f9f'); scene.remove(g.mesh); gull=null; G.gullT=30+rnd(20); return; } }
+  g.mesh.position.copy(g.pos);
+  if(g.state!=='dive')g.mesh.rotation.y=Math.atan2(g.pos.x- -4,g.pos.z-0)+Math.PI; 
+  const w=g.mesh.userData.wings;
+  if(w){ const f=Math.sin(G.t*14)*.5; w[0].rotation.x=f; w[1].rotation.x=-f; }
+  if(g.carry)g.carry.mesh.position.copy(g.pos).add(new THREE.Vector3(0,-.4,0));
+}
+function updateCrabs(dt){
+  if(G.island>=2&&crabs.length<2&&!boss){
+    G.crabT-=dt;
+    if(G.crabT<=0){ G.crabT=16+rnd(10);
+      const m=makeCrabMesh(); scene.add(m);
+      crabs.push({x:-.5,z:rnd(-2,2),hp:6,pinchCd:0,mesh:m});
+      addFloat('🦀 有螃蟹上岸了！',new THREE.Vector3(-1,1.5,0),'#ffb0b0'); }
+  }
+  for(const c of crabs){
+    c.pinchCd=Math.max(0,c.pinchCd-dt);
+    const dx=player.pos.x-c.x,dz=player.pos.z-c.z,l=Math.hypot(dx,dz)||1;
+    c.x+=dx/l*1.1*dt; c.z+=dz/l*1.1*dt;
+    c.x=clamp(c.x,-9.5,-.3); c.z=clamp(c.z,-2.7,2.7);
+    c.mesh.position.set(c.x,.02,c.z);
+    c.mesh.rotation.y=Math.atan2(dx,dz);
+    if(l<.8&&c.pinchCd<=0&&player.knocked<=0&&player.pos.y<1.8){ c.pinchCd=1.4; hurtPlayer(10); }
+  }
+}
+
+/* ---------- Boss ---------- */
+function updateGoals(dt){
+  if(G.freeMode||G.bossOut||boss)return;
+  const goal=ISLANDS[G.island-1].goal;
+  if(G.earnedI>=goal.money&&G.soldI>=goal.fish){
+    G.bossOut=true;
+    const kind=ISLANDS[G.island-1].boss,name=ISLANDS[G.island-1].bossName;
+    SFX.boss(); G.shake=.4;
+    const m=makeBossMesh(kind,BOSS_DEF[kind].size); scene.add(m);
+    if(kind==='spider'){ boss={kind,phase:'lurk',x:5,z:0,hp:BOSS_DEF.spider.hp,maxHp:BOSS_DEF.spider.hp,size:BOSS_DEF.spider.size,t:0,tele:0,dash:0,mesh:m};
+      showBanner('⚔️ 岛屿目标完成！\n'+name+' 从海里爬过来了！',4); }
+    else{ boss={kind,phase:'lurk',x:12,z:0,hp:BOSS_DEF[kind].hp||1,maxHp:BOSS_DEF[kind].hp||1,size:BOSS_DEF[kind].size,t:0,tele:0,mesh:m};
+      showBanner('⚔️ 岛屿目标完成！\n'+name+'出现了——抛竿挂住它！',4); }
+  }
+}
+function damageBoss(dmg){
+  if(!boss||boss.hp<=0)return;
+  boss.hp-=dmg; addFloat('-'+dmg,boss.pos?boss.pos.clone().add(new THREE.Vector3(0,1.4,0)):player.pos.clone(),'#ffcc80');
+  if(boss.hp<=0)killBoss();
+}
+function killBoss(){
+  const isl=ISLANDS[G.island-1];
+  G.money+=isl.reward; G.stats.earned+=isl.reward; G.stats.boss++;
+  splashAt(boss.x,boss.z,20);
+  for(let i=0;i<16;i++)addFloat('✨',new THREE.Vector3(boss.x+rnd(-2,2),rnd(.5,3),boss.z+rnd(-2,2)),'#ffd700');
+  scene.remove(boss.mesh); boss=null; G.bossOut=false; G.gullT=Math.max(G.gullT,15);
+  SFX.win(); G.shake=.5; save();
+  addFloat('+'+fmt(isl.reward)+' 元战利品！',player.pos.clone().add(fwdDir().multiplyScalar(4)),'#ffd700');
+  if(G.island>=3){
+    G.won=true; save();
+    setTimeout(()=>{ if(G.state==='play'){ G.state='ending'; syncScreens(); } },1400);
+  }else{
+    const next=ISLANDS[G.island];
+    showBanner('🏆 击败了'+isl.bossName+'！\n前往第 '+(G.island+1)+' 岛 · '+next.name+'：'+next.intro,5);
+    G.island++; G.earnedI=0; G.soldI=0;
+    crabs.forEach(c=>scene.remove(c.mesh)); crabs=[]; balls.forEach(b=>scene.remove(b.mesh)); balls=[];
+    buildEnv(); spawnPool(); save();
+  }
+}
+function updateBoss(dt){
+  if(!boss)return;
+  const b=boss; b.t+=dt;
+  b.pos=new THREE.Vector3(b.x,b.y||0,b.z);
+  if(b.phase==='lurk'){
+    if(b.kind==='spider'){
+      b.x=lerpN(b.x,1.5,dt*.6);
+      if(b.t>5){ b.phase='dock'; b.x=-1; b.z=0; splashAt(.5,0,12); SFX.boss(); G.shake=.4;
+        showBanner('蜘蛛蟹上岸了！\n钳子抬起来它就要冲——跳开！',4); }
+    }else{
+      if(rodS.state==='float'&&rodS.bob){
+        const dx=rodS.bob.pos.x-b.x,dz=rodS.bob.pos.z-b.z,l=Math.hypot(dx,dz)||1;
+        b.x+=dx/l*2.4*dt; b.z+=dz/l*2.4*dt;
+      }else{ b.x=12+Math.sin(G.t*.5)*4; b.z=Math.sin(G.t*.9)*3; }
+      b.y=b.kind==='whale'?-1.6:-1.2;
+    }
+  }else if(b.phase==='dock'){
+    if(b.kind==='puffer'){
+      b.y=0;
+      if(b.onGround!==false){
+        b.hopT=(b.hopT===undefined?3:b.hopT)-dt;
+        b.x+=.03*dt;
+        if(b.hopT<=0&&!(b.tele>0))b.tele=.8;
+        if(b.tele>0){
+          b.tele-=dt;
+          b.mesh.scale.setScalar(1.4);
+          if(b.tele<=0){ b.onGround=false; b.vy=6.2;
+            const dx=player.pos.x-b.x,dz=player.pos.z-b.z,l=Math.hypot(dx,dz)||1;
+            b.vx=dx/l*5; b.vz=dz/l*5; b.hopT=6; SFX.boss();
+            addFloat('它要跳了！快躲！',new THREE.Vector3(b.x,2,b.z),'#ff5252');
+          }
+        }else b.mesh.scale.setScalar(1+Math.sin(G.t*3)*.03);
+        if(b.x>-.2){ b.phase='lurk'; b.x=8; b.y=-1.2; splashAt(.5,0,10);
+          showBanner('大河豚蹦回海里了！再抛竿挂它！（它的伤还在）',3); }
+      }else{
+        b.mesh.scale.setScalar(1.15);
+        b.vy-=12*dt; b.x+=b.vx*dt; b.z+=b.vz*dt; b.y+=b.vy*dt;
+        b.x=clamp(b.x,-9.5,0); b.z=clamp(b.z,-2.8,2.8);
+        if(b.y<=0){ b.y=0;b.onGround=true;b.mesh.scale.setScalar(1);
+          G.shake=.5; SFX.splash();
+          if(player.onGround&&Math.hypot(b.x-player.pos.x,b.z-player.pos.z)<3.2)hurtPlayer(25);
+        }
+      }
+    }else if(b.kind==='spider'){
+      const wasTele=b.tele>0;
+      b.tele-=dt;
+      if(b.dash>0){
+        b.dash-=dt; b.x+=b.dashDir*8*dt; b.z+=b.dashDirZ*8*dt;
+        if(player.knocked<=0&&Math.hypot(b.x-player.pos.x,b.z-player.pos.z)<1&&player.onGround)hurtPlayer(20);
+      }else{
+        const dx=player.pos.x-b.x,dz=player.pos.z-b.z,l=Math.hypot(dx,dz)||1;
+        b.x+=dx/l*1.9*dt; b.z+=dz/l*1.9*dt;
+        b.dashT=(b.dashT===undefined?3:b.dashT)-dt;
+        if(b.dashT<=0&&b.tele<=0){ b.tele=.6; b.dashT=3.2;
+          const dx2=player.pos.x-b.x,dz2=player.pos.z-b.z,l2=Math.hypot(dx2,dz2)||1;
+          b.dashDir=dx2/l2; b.dashDirZ=dz2/l2; SFX.boss();
+          addFloat('钳子抬起来了！跳起来躲！',new THREE.Vector3(b.x,2.4,b.z),'#ff5252'); }
+      }
+      if(wasTele&&b.tele<=0&&b.dash<=0)b.dash=.45;
+      b.x=clamp(b.x,-9.5,.8); b.z=clamp(b.z,-2.8,2.8);
+      b.mesh.rotation.y=Math.atan2(player.pos.x-b.x,player.pos.z-b.z);
+    }
+  }else if(b.phase==='beach'){
+    b.y=-.6; b.z=0;
+    b.spitT=(b.spitT===undefined?2.5:b.spitT)-dt;
+    if(b.spitT<=0){
+      b.spitT=3.2;
+      const from=new THREE.Vector3(b.x+2.2,1.5,0),T=1.1;
+      const m=new THREE.Mesh(new THREE.SphereGeometry(.3,10,8),new THREE.MeshBasicMaterial({color:0x7fd4ff}));
+      scene.add(m);
+      balls.push({pos:from.clone(),v:new THREE.Vector3((player.pos.x-from.x)/T,(player.pos.y-from.y-.5*7*T*T)/T,(player.pos.z-from.z)/T),mesh:m});
+      tone(180,.3,'sawtooth',.08,60);
+    }
+  }
+  b.pos.set(b.x,b.phase==='lurk'?(b.y||-1.2):(b.y||0),b.z);
+  b.mesh.position.copy(b.pos);
+  if(b.kind==='whale'&&b.phase==='beach')b.mesh.rotation.z=.25;
+  else if(b.phase!=='dock'||b.kind==='puffer')b.mesh.rotation.y=Math.sin(G.t*.5)*.2;
+}
+
+/* ---------- HUD / 界面 ---------- */
+function syncScreens(){
+  $('title').style.display=G.state==='title'?'flex':'none';
+  $('ending').style.display=G.state==='ending'?'flex':'none';
+  $('pause').style.display=(G.state==='play'&&G.ui==='pause')?'flex':'none';
+  $('shop').style.display=(G.state==='play'&&G.ui==='shop')?'flex':'none';
+  $('hud').style.display=G.state==='play'?'block':'none';
+  if(G.state==='title'){
+    const sv=loadSave();
+    $('btn_cont').style.display=sv?'inline-block':'none';
+    if(sv)$('btn_cont').textContent='▶ 继续游戏（第 '+sv.island+' 岛 · ¥'+fmt(sv.money)+'）';
+  }
+  if(G.state==='ending'){
+    const s=G.stats,mins=Math.floor(G.timePlayed/60);
+    $('end_stats').innerHTML='💰 累计赚钱 ¥'+fmt(s.earned)+'<br>🐟 卖出 '+s.sold+' 件 · 击杀 '+s.killed+' 只<br>✨ 空中击杀 '+s.air+' 次 ⚔️ Boss '+s.boss+' 只<br>⏱ 用时约 '+mins+' 分钟';
+  }
+}
+function renderHUD(){
+  $('h_money').textContent=fmt(G.money);
+  $('h_bag').textContent=player.carrying.length;
+  $('h_hp').style.width=clamp(player.hp/player.maxHp*100,0,100)+'%';
+  $('h_hp').style.background=player.hp>player.maxHp*.4?'#8fd694':'#ff5252';
+  $('h_hpn').textContent=Math.ceil(player.hp)+'/'+player.maxHp;
+  const isl=ISLANDS[G.island-1];
+  $('h_isl').textContent='🏝 第 '+G.island+' 岛 · '+isl.name;
+  if(G.freeMode||G.won)$('h_goal').textContent='🏁 已通关 · 自由钓鱼';
+  else $('h_goal').textContent='💰 '+fmt(G.earnedI)+'/'+fmt(isl.goal.money)+(isl.goal.fish?'　🐟 '+G.soldI+'/'+isl.goal.fish:'');
+  // 武器栏
+  const wd=$('weapons');
+  if(wd.childElementCount!==WORDER.length){
+    wd.innerHTML='';
+    WORDER.forEach((id,i)=>{ const d=document.createElement('div');d.className='wslot';d.id='ws_'+id;wd.appendChild(d); });
+  }
+  WORDER.forEach((id,i)=>{
+    const el=$('ws_'+id),own=G.weapons.includes(id);
+    el.className='wslot'+(own?' own':'')+(G.cur===id?' cur':'');
+    el.innerHTML='<span class="ic">'+WEAPONS[id].icon+'</span>'+(i+1)+' '+WEAPONS[id].name;
+  });
+  // 收线
+  $('reel').style.display=rodS.state==='hooked'?'block':'none';
+  if(rodS.state==='hooked'&&rodS.reel){
+    const R=rodS.reel;
+    $('r_who').textContent='搏斗中：'+(R.boss?ISLANDS[G.island-1].bossName:R.fish.sp.name+(R.fish.rare?'(✨珍品)':''));
+    $('r_prog').style.width=clamp(R.prog,0,100)+'%';
+    $('r_ten').style.width=clamp(R.tension,0,100)+'%';
+    $('r_ten').style.background=R.tension>70?'#ff5252':'#ffe08a';
+    $('r_stam').style.width=clamp(R.stam,0,100)+'%';
+  }
+  $('charge').style.display=rodS.state==='charge'?'block':'none';
+  if(rodS.state==='charge')$('ch_f').style.width=(rodS.power*100)+'%';
+  $('bossbar').style.display=(boss&&boss.phase!=='lurk')?'block':'none';
+  if(boss&&boss.phase!=='lurk'){
+    $('h_bossn').textContent='⚔️ '+ISLANDS[G.island-1].bossName+'  '+Math.max(0,Math.ceil(boss.hp))+' / '+boss.maxHp;
+    $('h_bossf').style.width=clamp(boss.hp/boss.maxHp*100,0,100)+'%';
+  }
+  // 外观
+  const brim=$('brim');
+  brim.className='ol'+(G.items.crown?' crown':(G.items.hat?' hat':''));
+  $('vestband').style.display=G.items.vest?'block':'none';
+}
+function renderShop(){
+  $('shop_money').textContent='💰 你的钱：'+fmt(G.money)+' 元';
+  const wcol=$('col_weapons'),gcol=$('col_gear');
+  let h='<div class="stitle">武器 · 数字键 1-7 切换</div>';
+  for(const id of WORDER){
+    const wp=WEAPONS[id],own=G.weapons.includes(id);
+    const desc=wp.type==='melee'?'伤害 '+wp.dmg+(wp.crit?' · 18%暴击×10':'')+(wp.chain?' · 电链传导':''):wp.type==='bomb'?'扔出去爆炸 · 小心自己':(wp.pellets?wp.pellets+' 弹丸 · 每发 '+wp.dmg:'子弹 · 伤害 '+wp.dmg);
+    h+=rowHTML(wp.icon+' '+wp.name,desc,wp.price,own,own&&G.cur===id,'w_'+id);
+  }
+  wcol.innerHTML=h;
+  h='<div class="stitle">鱼竿 · 更远 / 更结实 / 收线更快</div>';
+  for(let i=0;i<RODS.length;i++){
+    const r=RODS[i],own=G.rod>=i,next=G.rod+1===i;
+    h+=rowHTML('🎣 '+r.name,'线'+r.line+' · 吸引'+r.hookR+' · 收线'+r.reel,r.price,own,G.rod===i,'r_'+i,next);
+  }
+  h+='<div class="stitle">饵料 · 鱼咬钩更快</div>';
+  for(let i=0;i<BAITS.length;i++){
+    const b=BAITS[i],own=G.bait>=i,next=G.bait+1===i;
+    h+=rowHTML('🧀 '+b.name,'咬钩速度 ×'+b.bite.toFixed(1),b.price,own,G.bait===i,'b_'+i,next);
+  }
+  gcol.innerHTML=h;
+  h='';
+  for(const [id,it] of Object.entries(ITEMS)){
+    const own=!!G.items[id];
+    h+='<div class="card'+(own?' own':'')+'"><div class="ic">'+it.icon+'</div><div class="nm">'+it.name+'</div><div class="ds">'+it.desc+'</div><div class="pr">'+(own?'✔ 已装备':fmt(it.price)+' 元')+'</div>'+
+       (own?'':'<div style="margin-top:4px"><span class="buy'+(G.money>=it.price?'':' no')+'" data-id="i_'+id+'">购买</span></div>')+'</div>';
+  }
+  $('cards_items').innerHTML=h;
+  function rowHTML(name,desc,price,own,using,id,locked){
+    return '<div class="srow'+(own?' own':'')+'"><div class="nm">'+name+'</div><div class="ds">'+desc+'</div>'+
+      (own?'<div class="pr">'+(using?'✔ 使用中':'已拥有')+'</div>':
+        locked?'<div class="pr" style="color:#78909c">先买上一级</div>':
+        '<span class="buy'+(G.money>=price?'':' no')+'" data-id="'+id+'">购买</span><div class="pr">'+fmt(price)+'</div>')+'</div>';
+  }
+}
+$('shopbox').addEventListener('click',e=>{
+  const t=e.target.closest('.buy'); if(!t)return;
+  const id=t.dataset.id;
+  if(!t.classList.contains('no')){
+    if(id[0]==='w'){ const wid=id.slice(2); G.money-=WEAPONS[wid].price; G.weapons.push(wid); G.cur=wid; buildHand(wid); }
+    else if(id[0]==='r'){ G.money-=RODS[+id.slice(2)].price; G.rod=+id.slice(2); }
+    else if(id[0]==='b'){ G.money-=BAITS[+id.slice(2)].price; G.bait=+id.slice(2); }
+    else if(id[0]==='i'){ const iid=id.slice(2); G.money-=ITEMS[iid].price; G.items[iid]=true;
+      if(iid==='hat'){player.maxHp=120;player.hp=Math.min(120,player.hp+20);} }
+    SFX.coin(); save();
+  }else tone(160,.1,'square',.06);
+  renderShop();
+});
+$('btn_new').onclick=()=>startGame(true);
+$('btn_cont').onclick=()=>{ const s=loadSave(); if(s)applySave(s); startGame(false); };
+$('btn_resume').onclick=()=>{ G.ui=null; syncScreens(); };
+$('btn_free').onclick=()=>{ G.freeMode=true; save(); G.state='play'; syncScreens(); };
+$('btn_title').onclick=()=>{ G.state='title'; syncScreens(); };
+
+/* ---------- 飘字更新 ---------- */
+function updateFloats(dt){
+  const v=new THREE.Vector3();
+  for(let i=floatEls.length-1;i>=0;i--){
+    const f=floatEls[i]; f.t-=dt; f.pos.y+=dt*1.2;
+    if(f.t<=0){ f.el.remove(); floatEls.splice(i,1); continue; }
+    v.copy(f.pos).project(camera);
+    if(v.z>1||v.x<-1.1||v.x>1.1||v.y<-1.1||v.y>1.1){ f.el.style.display='none'; continue; }
+    f.el.style.display='block';
+    f.el.style.left=((v.x*.5+.5)*innerWidth)+'px';
+    f.el.style.top=((-v.y*.5+.5)*innerHeight)+'px';
+    f.el.style.opacity=clamp(f.t,0,1);
+  }
+}
+/* 曳光弹 */
+function updateTracers(dt){
+  for(let i=tracers.length-1;i>=0;i--){
+    const t=tracers[i]; t.t-=dt;
+    if(!t.mesh){
+      const g=new THREE.BufferGeometry().setFromPoints([t.a,t.b]);
+      t.mesh=new THREE.Line(g,new THREE.LineBasicMaterial({color:0xffe08a,transparent:true}));
+      scene.add(t.mesh);
+    }
+    t.mesh.material.opacity=clamp(t.t/.06,0,1);
+    if(t.t<=0){ scene.remove(t.mesh); tracers.splice(i,1); }
+  }
+}
+
+/* ---------- 主循环 ---------- */
+function update(dt){
+  G.t+=dt; G.shake=Math.max(0,G.shake-dt*1.8);
+  updateFloats(dt); updateTracers(dt);
+  if(G.state!=='play'||G.ui)return;
+  G.timePlayed+=dt;
+  updatePlayer(dt); updateBoat(dt); updateRod(dt); updateFishes(dt); updateFly(dt); updateGfish(dt);
+  updateBombs(dt); updateBalls(dt); updateGull(dt); updateCrabs(dt); updateGoals(dt); updateBoss(dt);
+  // 尸体轻微起伏
+  corpses.forEach(c=>{ c.mesh.position.y=.12+Math.sin(G.t*3+c.pos.x)*.02; });
+  // 烤架火苗 + 火光闪烁
+  if(grillFire)grillFire.scale.setScalar(1+Math.sin(G.t*9)*.2);
+  fireLight.intensity=.6+Math.sin(G.t*9)*.2+Math.sin(G.t*23)*.08;
+  // 云朵漂移
+  clouds.children.forEach(cl=>{ cl.position.x+=cl.userData.v*dt; if(cl.position.x>60)cl.position.x=-50; });
+  // 海浪
+  const pos=seaGeo.attributes.position;
+  for(let i=0;i<pos.count;i++){
+    const x=seaBase[i*3]+sea.position.x, z=seaBase[i*3+2];
+    pos.setY(i,waveH(x,z,G.t));
+  }
+  pos.needsUpdate=true; seaGeo.computeVertexNormals();
+  renderHUD();
+}
+let last=performance.now();
+function loop(now){
+  const dt=Math.min(.033,(now-last)/1000); last=now;
+  update(dt);
+  if(renderer)renderer.render(scene,camera);
+  requestAnimationFrame(loop);
+}
+buildEnv(); buildHand('fist'); syncScreens();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
