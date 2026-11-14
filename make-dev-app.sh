@@ -1,6 +1,5 @@
 #!/bin/bash
 # 生成 游戏中心-Dev.app（双击直跑源码的 DEV 版入口，无终端窗口）
-# 用法: ./make-dev-app.sh   （产物装进 /Applications，并在项目文件夹放一个别名）
 set -e
 cd "$(dirname "$0")"
 APP="/Applications/游戏中心-Dev.app"
@@ -35,6 +34,4 @@ exit 0
 LAUNCH
 chmod +x "$APP/Contents/MacOS/dev-launch"
 touch "$APP"
-# 项目文件夹放一个别名（还原老 DEV 版所在的位置）
-osascript -e 'tell application "Finder" to make alias file to POSIX file "/Applications/游戏中心-Dev.app" at POSIX file "/Users/wulart/tianye/"' >/dev/null 2>&1 || true
 echo "已生成 $APP"
