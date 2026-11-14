@@ -25,11 +25,13 @@ cat > "$APP/Contents/MacOS/dev-launch" << 'LAUNCH'
 #!/bin/bash
 # DEV版启动器（LSUIElement隐形，不占Dock不跳动）：
 # 退出正式版 → 退旧DEV实例 → 后台拉起源码Electron → 立即退出本启动器
+# 注意：GUI启动无终端PATH，node/npx用绝对路径（生成时烧入）
 pkill -9 -f "游戏中心.app/Contents/MacOS" 2>/dev/null
 pkill -9 -f "tianye/app/main.js" 2>/dev/null
 sleep 1
+export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
 cd /Users/wulart/tianye/app
-GC_DEV=1 nohup npx electron . >/tmp/gc-dev.log 2>&1 &
+GC_DEV=1 nohup /usr/local/bin/npx electron . >/tmp/gc-dev.log 2>&1 &
 exit 0
 LAUNCH
 chmod +x "$APP/Contents/MacOS/dev-launch"
